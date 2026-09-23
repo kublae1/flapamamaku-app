@@ -22,8 +22,14 @@ jobs:
             flutter create --platforms=android --project-name flapamamaku_app .
           fi
 
+      - name: Restore FLAPAMAMAKU app icon
+        run: base64 --decode assets/app_icon.jpg.b64 > assets/app_icon.jpg
+
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Generate Android launcher icons
+        run: dart run flutter_launcher_icons
 
       - name: Analyze
         run: flutter analyze
