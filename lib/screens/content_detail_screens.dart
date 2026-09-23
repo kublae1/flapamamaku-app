@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/app_data.dart';
 
 class NewsDetailScreen extends StatelessWidget {
@@ -25,10 +26,7 @@ class NewsDetailScreen extends StatelessWidget {
             style: TextStyle(color: Theme.of(context).colorScheme.primary),
           ),
           const SizedBox(height: 20),
-          Text(
-            item.text,
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
+          Text(item.text, style: Theme.of(context).textTheme.bodyLarge),
         ],
       ),
     );
@@ -159,8 +157,56 @@ class MemberDetailScreen extends StatelessWidget {
 
   const MemberDetailScreen({required this.member, super.key});
 
+  Future<void> _launch(BuildContext context, Uri uri) async {
+    final ok = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aktion konnte nicht geöffnet werden.')),
+      );
+    }
+  }
+
+  Future<void> _call(BuildContext context) async {
+    if (member.phone.isEmpty) return;
+    await _launch(context, Uri(scheme: 'tel', path: member.phone));
+  }
+
+  Future<void> _mail(BuildContext context) async {
+    if (member.email.isEmpty) return;
+    await _launch(context, Uri(scheme: 'mailto', path: member.email));
+  }
+
+  Future<void> _maps(BuildContext context) async {
+    if (member.address.isEmpty) return;
+    final uri = Uri.https(
+      'www.google.com',
+      '/maps/search/',
+      {
+        'api': '1',
+        'query': member.address,
+      },
+    );
+    await _launch(context, uri);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final partner = member.partnerName.isEmpty
+        ? 'Nicht hinterlegt'
+        : member.partnerName;
+    final phone = member.phone.isEmpty
+        ? 'Nicht hinterlegt'
+        : member.phone;
+    final email = member.email.isEmpty
+        ? 'Nicht hinterlegt'
+        : member.email;
+    final address = member.address.isEmpty
+        ? 'Nicht hinterlegt'
+        : member.address;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Mitglied')),
       body: ListView(
@@ -193,18 +239,56 @@ class MemberDetailScreen extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 4),
-          Text(
-            member.since,
-            textAlign: TextAlign.center,
-          ),
+          Text(member.since, textAlign: TextAlign.center),
           const SizedBox(height: 24),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.badge_outlined),
-              title: Text('Mitgliederprofil'),
-              subtitle: Text(
-                'Kontaktdaten, Foto und weitere Angaben werden später administrierbar.',
-              ),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.favorite_outline),
+                  title: const Text('Partnerin / Partner'),
+                  subtitle: Text(partner),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.phone_outlined),
+                  title: const Text('Telefon'),
+                  subtitle: Text(phone),
+                  trailing: IconButton(
+                    tooltip: 'Anrufen',
+                    onPressed: member.phone.isEmpty
+                        ? null
+                        : () => _call(context),
+                    icon: const Icon(Icons.call),
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.mail_outline),
+                  title: const Text('E-Mail'),
+                  subtitle: Text(email),
+                  trailing: IconButton(
+                    tooltip: 'E-Mail schreiben',
+                    onPressed: member.email.isEmpty
+                        ? null
+                        : () => _mail(context),
+                    icon: const Icon(Icons.send_outlined),
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.home_outlined),
+                  title: const Text('Wohnort'),
+                  subtitle: Text(address),
+                  trailing: IconButton(
+                    tooltip: 'In Google Maps öffnen',
+                    onPressed: member.address.isEmpty
+                        ? null
+                        : () => _maps(context),
+                    icon: const Icon(Icons.map_outlined),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -232,11 +316,7 @@ class SimpleSectionScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Icon(
-            icon,
-            size: 64,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+          Icon(icon, size: 64, color: Theme.of(context).colorScheme.primary),
           const SizedBox(height: 20),
           Text(
             title,
