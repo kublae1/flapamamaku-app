@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FLAPAMAMAKU Administration</title>
+  <style>
+    :root {
+      font-family: Inter, Arial, sans-serif;
+      color: #25191a;
+      background: #f6f3ef;
+      --red: #8a101b;
+      --gold: #c98a2b;
+      --card: #fff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header {
+      background: var(--red);
+      color: white;
+      padding: 20px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    header h1 { margin: 0; font-size: 26px; }
+    header small { opacity: .85; }
+    main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+    nav { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
+    nav button, .primary {
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 16px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    nav button { background: #e8e1da; }
+    nav button.active, .primary { background: var(--red); color: white; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 20px; }
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: 0 5px 22px rgba(0,0,0,.08);
+      padding: 18px;
+    }
+    h2 { margin-top: 0; }
+    label { display: block; font-weight: 700; margin: 12px 0 5px; }
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #cfc6bd;
+      border-radius: 9px;
+      font: inherit;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    .entry {
+      border-bottom: 1px solid #eee6de;
+      padding: 14px 0;
+    }
+    .entry:last-child { border-bottom: 0; }
+    .entry h3 { margin: 0 0 5px; }
+    .meta { color: #735f62; font-size: 14px; }
+    .actions { margin-top: 9px; display: flex; gap: 8px; }
+    .actions button {
+      border: 1px solid #d2c8c0;
+      background: white;
+      border-radius: 8px;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    .actions button.delete { color: #9b111e; }
+    .status { margin-left: auto; font-size: 14px; }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>FLAPAMAMAKU Administration</h1>
+    <small>PC-Verwaltung für App-Inhalte</small>
+  </div>
+  <div class="status" id="status">API wird geprüft …</div>
+</header>
+
+<main>
+  <nav>
+    <button class="active" data-panel="news">News</button>
+    <button data-panel="events">Termine</button>
+    <button data-panel="members">Mitglieder</button>
+  </nav>
+
+  <section id="news" class="panel active">
+    <div class="grid">
+      <form class="card" id="news-form">
+        <h2>Neue News</h2>
+        <input type="hidden" name="id">
+        <label>Titel</label>
+        <input name="title" required>
+        <label>Text</label>
+        <textarea name="text" required></textarea>
+        <label>Datum</label>
+        <input name="date" required>
+        <label>Bild-URL (optional)</label>
+        <input name="image_url">
+        <p><button class="primary" type="submit">Speichern</button></p>
+      </form>
+      <div class="card">
+        <h2>News-Feed</h2>
+        <p>Neueste Beiträge stehen automatisch oben.</p>
+        <div id="news-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="events" class="panel">
+    <div class="grid">
+      <form class="card" id="events-form">
+        <h2>Termin</h2>
+        <input type="hidden" name="id">
+        <label>Tag</label><input name="day" required>
+        <label>Monat</label><input name="month" required>
+        <label>Titel</label><input name="title" required>
+        <label>Ort</label><input name="location">
+        <label>Zeit</label><input name="time">
+        <p><button class="primary" type="submit">Speichern</button></p>
+      </form>
+      <div class="card">
+        <h2>Termine</h2>
+        <div id="events-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="members" class="panel">
+    <div class="grid">
+      <form class="card" id="members-form">
+        <h2>Mitglied</h2>
+        <input type="hidden" name="id">
+        <label>Name</label><input name="name" required>
+        <label>Funktion</label><input name="role" value="Präsident">
+        <label>Mitglied seit</label><input name="since">
+        <label>Partnerin / Partner</label><input name="partner_name">
+        <label>Telefon</label><input name="phone">
+        <label>E-Mail</label><input name="email" type="email">
+        <label>Wohnort / Adresse</label><input name="address">
+        <p><button class="primary" type="submit">Speichern</button></p>
+      </form>
+      <div class="card">
+        <h2>Mitglieder</h2>
+        <div id="members-list"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const resources = {
+  news: ["title", "text", "date", "image_url"],
+  events: ["day", "month", "title", "location", "time"],
+  members: ["name", "role", "since", "partner_name", "phone", "email", "address"],
+};
+
+document.querySelectorAll("nav button").forEach(button => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    button.classList.add("active");
+    document.getElementById(button.dataset.panel).classList.add("active");
+  });
+});
+
+function formData(form, resource) {
+  const data = {};
+  resources[resource].forEach(key => data[key] = form.elements[key].value.trim());
+  return data;
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: {"Content-Type": "application/json"},
+    ...options,
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+function label(resource, item) {
+  if (resource === "news") return `${item.date} · ${item.title}`;
+  if (resource === "events") return `${item.day}. ${item.month} · ${item.title}`;
+  return `${item.name} · ${item.role}`;
+}
+
+async function load(resource) {
+  const items = await api(`/api/${resource}`);
+  const list = document.getElementById(`${resource}-list`);
+  list.innerHTML = "";
+  items.forEach(item => {
+    const div = document.createElement("div");
+    div.className = "entry";
+    div.innerHTML = `
+      <h3>${label(resource, item)}</h3>
+      <div class="meta">${item.location || item.email || item.text || ""}</div>
+      <div class="actions">
+        <button type="button" class="edit">Bearbeiten</button>
+        <button type="button" class="delete">Löschen</button>
+      </div>
+    `;
+    div.querySelector(".edit").onclick = () => edit(resource, item);
+    div.querySelector(".delete").onclick = () => remove(resource, item.id);
+    list.appendChild(div);
+  });
+}
+
+function edit(resource, item) {
+  const form = document.getElementById(`${resource}-form`);
+  form.elements.id.value = item.id;
+  resources[resource].forEach(key => form.elements[key].value = item[key] || "");
+  form.scrollIntoView({behavior: "smooth"});
+}
+
+async function remove(resource, id) {
+  if (!confirm("Eintrag wirklich löschen?")) return;
+  await api(`/api/${resource}/${id}`, {method: "DELETE"});
+  await load(resource);
+}
+
+Object.keys(resources).forEach(resource => {
+  const form = document.getElementById(`${resource}-form`);
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const id = form.elements.id.value;
+    const body = JSON.stringify(formData(form, resource));
+    await api(
+      id ? `/api/${resource}/${id}` : `/api/${resource}`,
+      {method: id ? "PUT" : "POST", body}
+    );
+    form.reset();
+    form.elements.id.value = "";
+    if (resource === "members") form.elements.role.value = "Präsident";
+    if (resource === "news") form.elements.date.value = new Date().toLocaleDateString("de-CH");
+    await load(resource);
+  });
+});
+
+(async () => {
+  try {
+    const health = await api("/api/health");
+    document.getElementById("status").textContent = `API online · v${health.version}`;
+    document.querySelector("#news-form [name=date]").value =
+      new Date().toLocaleDateString("de-CH");
+    await Promise.all(Object.keys(resources).map(load));
+  } catch (error) {
+    document.getElementById("status").textContent = "API nicht erreichbar";
+    console.error(error);
+  }
+})();
+</script>
+</body>
+</html>
