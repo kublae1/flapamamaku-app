@@ -14,16 +14,24 @@ class NewsDetailScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          if (item.imageAsset.isNotEmpty) ...[
+          if (item.imageUrl.isNotEmpty || item.imageAsset.isNotEmpty) ...[
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: AspectRatio(
                 aspectRatio: 16 / 9,
-                child: Image.asset(
-                  item.imageAsset,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
+                child: item.imageUrl.isNotEmpty
+                    ? Image.network(
+                        item.imageUrl,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            const SizedBox.shrink(),
+                      )
+                    : Image.asset(
+                        item.imageAsset,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
               ),
             ),
             const SizedBox(height: 20),
