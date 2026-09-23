@@ -14,6 +14,20 @@ class NewsDetailScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          if (item.imageAsset.isNotEmpty) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Image.asset(
+                  item.imageAsset,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
           Text(
             item.title,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -32,7 +46,6 @@ class NewsDetailScreen extends StatelessWidget {
     );
   }
 }
-
 class EventDetailScreen extends StatefulWidget {
   final EventItem event;
 
