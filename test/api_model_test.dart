@@ -24,13 +24,21 @@ void main() {
       'role': 'Präsident',
       'since': 'seit 2020',
       'partner_name': 'Anna Muster',
-      'phone': '+41 79 000 00 00',
+      'phone_mobile': '+41 79 000 00 00',
+      'phone_private': '041 000 00 00',
+      'phone_work': '041 111 11 11',
+      'occupation': 'Metzger',
+      'employer': 'Beispiel AG',
       'email': 'max@example.test',
       'address': 'Luzern',
     });
 
     expect(member.partnerName, 'Anna Muster');
-    expect(member.phone, '+41 79 000 00 00');
+    expect(member.phoneMobile, '+41 79 000 00 00');
+    expect(member.phonePrivate, '041 000 00 00');
+    expect(member.phoneWork, '041 111 11 11');
+    expect(member.occupation, 'Metzger');
+    expect(member.employer, 'Beispiel AG');
     expect(member.address, 'Luzern');
   });
 }
