@@ -22,10 +22,7 @@ class StartScreen extends StatelessWidget {
             background: Stack(
               fit: StackFit.expand,
               children: [
-                Image.asset(
-                  'assets/images/hero_fireworks.jpg',
-                  fit: BoxFit.cover,
-                ),
+                Image.asset('assets/images/hero_fireworks.jpg', fit: BoxFit.cover),
                 const DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -86,13 +83,7 @@ class StartScreen extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(
-                            e.day,
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          Text(e.day, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                           Text(e.month),
                         ],
                       ),
@@ -107,10 +98,7 @@ class StartScreen extends StatelessWidget {
               Card(
                 child: ListTile(
                   leading: const CircleAvatar(child: Icon(Icons.photo_library_outlined)),
-                  title: const Text(
-                    'Archiv',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  title: const Text('Archiv', style: TextStyle(fontWeight: FontWeight.w800)),
                   subtitle: const Text('Frühere Sujets, Mottos und Erinnerungen'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(
@@ -136,7 +124,7 @@ class SujetSlider extends StatefulWidget {
 class _SujetSliderState extends State<SujetSlider> {
   static const _images = [
     'assets/images/year_motto_pig_rockers.jpg',
-    'assets/images/hero_fireworks.jpg',
+    'assets/images/archive_top_hats_night.jpg',
   ];
 
   final _controller = PageController();
@@ -149,11 +137,7 @@ class _SujetSliderState extends State<SujetSlider> {
     _timer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted || !_controller.hasClients) return;
       final next = (_page + 1) % _images.length;
-      _controller.animateToPage(
-        next,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
-      );
+      _controller.animateToPage(next, duration: const Duration(milliseconds: 500), curve: Curves.easeInOut);
     });
   }
 
@@ -178,11 +162,7 @@ class _SujetSliderState extends State<SujetSlider> {
               controller: _controller,
               itemCount: _images.length,
               onPageChanged: (value) => setState(() => _page = value),
-              itemBuilder: (_, index) => Image.asset(
-                _images[index],
-                fit: BoxFit.cover,
-                width: double.infinity,
-              ),
+              itemBuilder: (_, index) => Image.asset(_images[index], fit: BoxFit.cover, width: double.infinity),
             ),
           ),
           Positioned(
