@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/app_data.dart';
+import 'content_detail_screens.dart';
 
 class EventsScreen extends StatelessWidget {
   const EventsScreen({super.key});
@@ -19,13 +20,38 @@ class EventsScreen extends StatelessWidget {
               leading: Container(
                 width: 54,
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                decoration: BoxDecoration(border: Border.all(color: Theme.of(context).colorScheme.primary), borderRadius: BorderRadius.circular(10)),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [Text(e.day, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), Text(e.month)]),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      e.day,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(e.month),
+                  ],
+                ),
               ),
-              title: Text(e.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              title: Text(
+                e.title,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
               subtitle: Text('${e.location}\n${e.time}'),
               isThreeLine: true,
               trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => EventDetailScreen(event: e),
+                ),
+              ),
             ),
           );
         },
