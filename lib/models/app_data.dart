@@ -31,6 +31,7 @@ class NewsItem {
 
 class EventItem {
   final int? id;
+  final String eventDate;
   final String day;
   final String month;
   final String title;
@@ -44,6 +45,7 @@ class EventItem {
     this.location,
     this.time, {
     this.id,
+    this.eventDate = '',
   });
 
   factory EventItem.fromJson(Map<String, dynamic> json) {
@@ -54,6 +56,7 @@ class EventItem {
       json['location']?.toString() ?? '',
       json['time']?.toString() ?? '',
       id: json['id'] as int?,
+      eventDate: json['event_date']?.toString() ?? '',
     );
   }
 }
@@ -64,9 +67,13 @@ class MemberItem {
   final String role;
   final String since;
   final String partnerName;
-  final String phone;
+  final String phoneMobile;
+  final String phonePrivate;
+  final String phoneWork;
   final String email;
   final String address;
+  final String occupation;
+  final String employer;
 
   const MemberItem(
     this.name,
@@ -74,21 +81,33 @@ class MemberItem {
     this.since, {
     this.id,
     this.partnerName = '',
-    this.phone = '',
+    this.phoneMobile = '',
+    this.phonePrivate = '',
+    this.phoneWork = '',
     this.email = '',
     this.address = '',
+    this.occupation = '',
+    this.employer = '',
   });
 
   factory MemberItem.fromJson(Map<String, dynamic> json) {
+    final legacyPhone = json['phone']?.toString() ?? '';
     return MemberItem(
       json['name']?.toString() ?? '',
       json['role']?.toString() ?? 'Präsident',
       json['since']?.toString() ?? '',
       id: json['id'] as int?,
       partnerName: json['partner_name']?.toString() ?? '',
-      phone: json['phone']?.toString() ?? '',
+      phoneMobile:
+          json['phone_mobile']?.toString().isNotEmpty == true
+              ? json['phone_mobile'].toString()
+              : legacyPhone,
+      phonePrivate: json['phone_private']?.toString() ?? '',
+      phoneWork: json['phone_work']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
       address: json['address']?.toString() ?? '',
+      occupation: json['occupation']?.toString() ?? '',
+      employer: json['employer']?.toString() ?? '',
     );
   }
 }
@@ -117,14 +136,29 @@ const newsItems = [
 ];
 
 const eventItems = [
-  EventItem('27', 'JAN', 'Rüüdige Samschtig', 'Altstadt Luzern', '14:00 Uhr'),
-  EventItem('29', 'JAN', 'SchmuDo', 'Luzern', '05:00 Uhr'),
+  EventItem(
+    '27',
+    'JAN',
+    'Rüüdige Samschtig',
+    'Altstadt Luzern',
+    '14:00 Uhr',
+    eventDate: '2027-01-27',
+  ),
+  EventItem(
+    '29',
+    'JAN',
+    'SchmuDo',
+    'Luzern',
+    '05:00 Uhr',
+    eventDate: '2027-01-29',
+  ),
   EventItem(
     '31',
     'JAN',
     'GüdisMäntig Vorbereitung',
     'Luzern',
     '14:00 Uhr',
+    eventDate: '2027-01-31',
   ),
   EventItem(
     '17',
@@ -132,6 +166,7 @@ const eventItems = [
     'Fasnachtsverbrennung',
     'Luzern',
     '19:00 Uhr',
+    eventDate: '2027-02-17',
   ),
 ];
 
