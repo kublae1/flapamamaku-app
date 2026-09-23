@@ -3,7 +3,6 @@ import '../models/app_data.dart';
 
 enum UserRole {
   admin,
-  vorstand,
   mitglied,
 }
 
