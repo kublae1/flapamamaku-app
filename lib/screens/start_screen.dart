@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
-import '../models/app_data.dart';
+import '../data/app_store.dart';
 import '../widgets/section_title.dart';
 import 'year_motto_screen.dart';
 import 'archive_screen.dart';
@@ -12,6 +12,8 @@ class StartScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppStoreScope.of(context);
+
     return CustomScrollView(
       slivers: [
         SliverAppBar(
@@ -23,7 +25,10 @@ class StartScreen extends StatelessWidget {
             background: Stack(
               fit: StackFit.expand,
               children: [
-                Image.asset('assets/images/hero_fireworks.jpg', fit: BoxFit.cover),
+                Image.asset(
+                  'assets/images/hero_fireworks.jpg',
+                  fit: BoxFit.cover,
+                ),
                 const DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -64,24 +69,37 @@ class StartScreen extends StatelessWidget {
               const SizedBox(height: 22),
               const SectionTitle('Aktuelle News', action: 'Alle'),
               const SizedBox(height: 8),
-              Card(
-                child: ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.campaign)),
-                  title: Text(newsItems.first.title),
-                  subtitle: Text('${newsItems.first.date}\n${newsItems.first.text}'),
-                  isThreeLine: true,
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => NewsDetailScreen(item: newsItems.first),
+              if (store.news.isNotEmpty)
+                Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.campaign),
+                    ),
+                    title: Text(store.news.first.title),
+                    subtitle: Text(
+                      '${store.news.first.date}\n${store.news.first.text}',
+                    ),
+                    isThreeLine: true,
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => NewsDetailScreen(
+                          item: store.news.first,
+                        ),
+                      ),
                     ),
                   ),
+                )
+              else
+                const Card(
+                  child: ListTile(
+                    title: Text('Keine News vorhanden'),
+                  ),
                 ),
-              ),
               const SizedBox(height: 20),
               const SectionTitle('Nächste Termine', action: 'Alle'),
               const SizedBox(height: 8),
-              ...eventItems.take(2).map(
+              ...store.events.take(2).map(
                 (e) => Card(
                   child: ListTile(
                     leading: SizedBox(
