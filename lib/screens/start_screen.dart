@@ -41,6 +41,8 @@ class StartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
+    final latestNewsImage =
+        store.news.isEmpty ? null : _newsImage(store.news.first);
 
     return CustomScrollView(
       slivers: [
@@ -111,8 +113,7 @@ class StartScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (_newsImage(store.news.first) case final image?)
-                          image,
+                        if (latestNewsImage != null) latestNewsImage,
                         Padding(
                           padding: const EdgeInsets.all(14),
                           child: Column(
