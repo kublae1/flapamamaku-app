@@ -17,6 +17,12 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
   final AppStore store = AppStore();
 
   @override
+  void dispose() {
+    store.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     const burgundy = Color(0xFF8A101B);
 
