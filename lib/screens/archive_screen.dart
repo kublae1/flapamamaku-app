@@ -16,6 +16,16 @@ class ArchiveScreen extends StatelessWidget {
         subtitle: 'Früheres Fasnachts-Sujet',
         image: 'assets/images/archive_top_hats_night.jpg',
       ),
+      ArchiveEntry(
+        title: 'Zylinder Gruppe',
+        subtitle: 'Fasnachts-Erinnerung',
+        image: 'assets/images/archive_top_hats_barrel.jpg',
+      ),
+      ArchiveEntry(
+        title: 'Wikinger',
+        subtitle: 'Früheres Fasnachts-Sujet',
+        image: 'assets/images/archive_vikings_bar.jpg',
+      ),
     ];
 
     return Scaffold(
