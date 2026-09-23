@@ -2,7 +2,16 @@ class NewsItem {
   final String date;
   final String title;
   final String text;
-  const NewsItem(this.date, this.title, this.text);
+  final String createdAt;
+  final String imageAsset;
+
+  const NewsItem(
+    this.date,
+    this.title,
+    this.text, {
+    required this.createdAt,
+    this.imageAsset = '',
+  });
 }
 
 class EventItem {
@@ -39,16 +48,21 @@ const newsItems = [
     '12.09.2026',
     'Start in die neue Fasnachtssaison',
     'Mir freued üs uf e schöni Fasnacht mit FLAPAMAMAKU.',
+    createdAt: '2026-09-12T12:00:00',
+    imageAsset: 'assets/images/year_motto_pig_rockers.jpg',
   ),
   NewsItem(
     '28.08.2026',
     'Rückblick Sommerhöck',
     'Ein gelungener Abend mit vielen schönen Momenten.',
+    createdAt: '2026-08-28T12:00:00',
   ),
   NewsItem(
     '15.05.2026',
     'Fasnachtsumzug',
     'Bilder und Informationen rund um unseren Umzug.',
+    createdAt: '2026-05-15T12:00:00',
+    imageAsset: 'assets/images/archive_top_hats_night.jpg',
   ),
 ];
 
