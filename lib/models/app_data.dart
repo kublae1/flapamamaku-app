@@ -71,7 +71,7 @@ const eventItems = [
   ),
 ];
 
-const members = [
+const initialMembers = [
   MemberItem('Bruno Meier', 'Präsident', 'seit 2010'),
   MemberItem('Claudia Schmid', 'Präsidentin', 'seit 2012'),
   MemberItem('Markus Huber', 'Präsident', 'seit 2015'),
