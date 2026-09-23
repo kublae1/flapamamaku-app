@@ -10,7 +10,7 @@ class AppStore extends ChangeNotifier {
   AppStore()
       : news = List<NewsItem>.from(newsItems),
         events = List<EventItem>.from(eventItems),
-        members = List<MemberItem>.from(members);
+        members = List<MemberItem>.from(initialMembers);
 
   final List<NewsItem> news;
   final List<EventItem> events;
