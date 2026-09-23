@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../models/app_data.dart';
+import '../data/app_store.dart';
 import 'content_detail_screens.dart';
 
 class EventsScreen extends StatefulWidget {
@@ -42,7 +42,7 @@ class _EventsScreenState extends State<EventsScreen> {
     int index,
     DismissDirection direction,
   ) async {
-    final event = eventItems[index];
+    final event = AppStoreScope.of(context).events[index];
 
     if (direction == DismissDirection.endToStart) {
       final result = await _ask(
@@ -77,13 +77,15 @@ class _EventsScreenState extends State<EventsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final events = AppStoreScope.of(context).events;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Termine')),
       body: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: eventItems.length,
+        itemCount: events.length,
         itemBuilder: (_, i) {
-          final e = eventItems[i];
+          final e = events[i];
           final isRegistered = registeredEvents.contains(i);
           final isInCalendar = calendarEvents.contains(i);
 
