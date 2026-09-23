@@ -125,6 +125,8 @@ class _SujetSliderState extends State<SujetSlider> {
   static const _images = [
     'assets/images/year_motto_pig_rockers.jpg',
     'assets/images/archive_top_hats_night.jpg',
+    'assets/images/archive_top_hats_barrel.jpg',
+    'assets/images/archive_vikings_bar.jpg',
   ];
 
   final _controller = PageController();
@@ -137,7 +139,11 @@ class _SujetSliderState extends State<SujetSlider> {
     _timer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted || !_controller.hasClients) return;
       final next = (_page + 1) % _images.length;
-      _controller.animateToPage(next, duration: const Duration(milliseconds: 500), curve: Curves.easeInOut);
+      _controller.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
     });
   }
 
@@ -162,7 +168,11 @@ class _SujetSliderState extends State<SujetSlider> {
               controller: _controller,
               itemCount: _images.length,
               onPageChanged: (value) => setState(() => _page = value),
-              itemBuilder: (_, index) => Image.asset(_images[index], fit: BoxFit.cover, width: double.infinity),
+              itemBuilder: (_, index) => Image.asset(
+                _images[index],
+                fit: BoxFit.cover,
+                width: double.infinity,
+              ),
             ),
           ),
           Positioned(
