@@ -49,3 +49,24 @@ Siehe `backend/README.md`.
 - Backup-/Restore-Konzept für Synology
 
 Der aktuelle PC-Admin ist eine Entwicklungsgrundlage und noch nicht für eine öffentliche Internetfreigabe abgesichert.
+
+
+## Mobile App mit Backend verbinden
+
+Die App liest die Server-Adresse über den Build-Wert `API_BASE_URL`.
+
+In GitHub kann dafür später die Repository-Variable
+`FLAPAMAMAKU_API_BASE_URL` gesetzt werden, z. B.:
+
+```
+http://192.168.1.50:8087
+```
+
+Der Android-Build übernimmt diesen Wert automatisch.
+
+Verhalten:
+- ohne Server-Adresse: App benutzt weiterhin die lokalen Testdaten
+- mit Server-Adresse: App synchronisiert News, Termine und Mitglieder beim Start
+- danach automatische Synchronisation alle 30 Sekunden
+- News können zusätzlich per Ziehen nach unten manuell aktualisiert werden
+- wenn der Server vorübergehend nicht erreichbar ist, bleibt die App mit den zuletzt vorhandenen Daten bedienbar
