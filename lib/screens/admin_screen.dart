@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../data/app_store.dart';
 import '../models/app_data.dart';
 
@@ -11,19 +12,34 @@ class AdminScreen extends StatelessWidget {
     return '$day.$month.${value.year}';
   }
 
-  Future<void> _addNews(BuildContext context) async {
+  String _monthLabel(DateTime value) {
+    const months = [
+      'JAN', 'FEB', 'MÄR', 'APR', 'MAI', 'JUN',
+      'JUL', 'AUG', 'SEP', 'OKT', 'NOV', 'DEZ',
+    ];
+    return months[value.month - 1];
+  }
+
+  Future<void> _editNews(
+    BuildContext context, {
+    int? index,
+  }) async {
     final store = AppStoreScope.of(context);
     final now = DateTime.now();
-    final title = TextEditingController();
-    final text = TextEditingController();
-    final date = TextEditingController(text: _dateLabel(now));
-    String imageAsset = '';
+    final existing = index == null ? null : store.news[index];
+
+    final title = TextEditingController(text: existing?.title ?? '');
+    final text = TextEditingController(text: existing?.text ?? '');
+    final date = TextEditingController(
+      text: existing?.date ?? _dateLabel(now),
+    );
+    String imageAsset = existing?.imageAsset ?? '';
 
     final save = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Neue News'),
+          title: Text(index == null ? 'Neue News' : 'News bearbeiten'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -88,44 +104,56 @@ class AdminScreen extends StatelessWidget {
       ),
     );
 
-    if (save == true &&
-        title.text.trim().isNotEmpty &&
-        text.text.trim().isNotEmpty) {
-      store.addNews(
-        NewsItem(
-          date.text.trim(),
-          title.text.trim(),
-          text.text.trim(),
-          createdAt: now.toIso8601String(),
-          imageAsset: imageAsset,
-        ),
-      );
+    if (save != true ||
+        title.text.trim().isEmpty ||
+        text.text.trim().isEmpty) {
+      return;
+    }
+
+    final item = NewsItem(
+      date.text.trim(),
+      title.text.trim(),
+      text.text.trim(),
+      id: existing?.id,
+      createdAt: existing?.createdAt ?? now.toIso8601String(),
+      imageAsset: imageAsset,
+      imageUrl: existing?.imageUrl ?? '',
+    );
+
+    if (index == null) {
+      store.addNews(item);
+    } else {
+      store.updateNews(index, item);
     }
   }
-  Future<void> _addEvent(BuildContext context) async {
+
+  Future<void> _editEvent(
+    BuildContext context, {
+    int? index,
+  }) async {
     final store = AppStoreScope.of(context);
-    final day = TextEditingController();
-    final month = TextEditingController();
-    final title = TextEditingController();
-    final location = TextEditingController();
-    final time = TextEditingController();
+    final existing = index == null ? null : store.events[index];
+
+    final eventDate = TextEditingController(text: existing?.eventDate ?? '');
+    final title = TextEditingController(text: existing?.title ?? '');
+    final location = TextEditingController(text: existing?.location ?? '');
+    final time = TextEditingController(text: existing?.time ?? '');
 
     final save = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Termin erfassen'),
+        title: Text(index == null ? 'Termin erfassen' : 'Termin bearbeiten'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: day,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Tag'),
-              ),
-              TextField(
-                controller: month,
-                decoration: const InputDecoration(labelText: 'Monat'),
+                controller: eventDate,
+                keyboardType: TextInputType.datetime,
+                decoration: const InputDecoration(
+                  labelText: 'Datum',
+                  hintText: 'YYYY-MM-DD',
+                ),
               ),
               TextField(
                 controller: title,
@@ -155,19 +183,25 @@ class AdminScreen extends StatelessWidget {
       ),
     );
 
-    if (save == true &&
-        day.text.trim().isNotEmpty &&
-        month.text.trim().isNotEmpty &&
-        title.text.trim().isNotEmpty) {
-      store.addEvent(
-        EventItem(
-          day.text.trim(),
-          month.text.trim().toUpperCase(),
-          title.text.trim(),
-          location.text.trim(),
-          time.text.trim(),
-        ),
-      );
+    final parsedDate = DateTime.tryParse(eventDate.text.trim());
+    if (save != true || parsedDate == null || title.text.trim().isEmpty) {
+      return;
+    }
+
+    final item = EventItem(
+      parsedDate.day.toString().padLeft(2, '0'),
+      _monthLabel(parsedDate),
+      title.text.trim(),
+      location.text.trim(),
+      time.text.trim(),
+      id: existing?.id,
+      eventDate: eventDate.text.trim(),
+    );
+
+    if (index == null) {
+      store.addEvent(item);
+    } else {
+      store.updateEvent(index, item);
     }
   }
 
@@ -182,9 +216,13 @@ class AdminScreen extends StatelessWidget {
     final role = TextEditingController(text: existing?.role ?? 'Präsident');
     final since = TextEditingController(text: existing?.since ?? '');
     final partner = TextEditingController(text: existing?.partnerName ?? '');
-    final phone = TextEditingController(text: existing?.phone ?? '');
+    final mobile = TextEditingController(text: existing?.phoneMobile ?? '');
+    final privatePhone = TextEditingController(text: existing?.phonePrivate ?? '');
+    final workPhone = TextEditingController(text: existing?.phoneWork ?? '');
     final email = TextEditingController(text: existing?.email ?? '');
     final address = TextEditingController(text: existing?.address ?? '');
+    final occupation = TextEditingController(text: existing?.occupation ?? '');
+    final employer = TextEditingController(text: existing?.employer ?? '');
 
     final save = await showDialog<bool>(
       context: context,
@@ -213,9 +251,19 @@ class AdminScreen extends StatelessWidget {
                 ),
               ),
               TextField(
-                controller: phone,
+                controller: mobile,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Telefon'),
+                decoration: const InputDecoration(labelText: 'Mobil'),
+              ),
+              TextField(
+                controller: privatePhone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Telefon privat'),
+              ),
+              TextField(
+                controller: workPhone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Telefon Arbeit'),
               ),
               TextField(
                 controller: email,
@@ -227,6 +275,14 @@ class AdminScreen extends StatelessWidget {
                 decoration: const InputDecoration(
                   labelText: 'Wohnort / Adresse',
                 ),
+              ),
+              TextField(
+                controller: occupation,
+                decoration: const InputDecoration(labelText: 'Beruf'),
+              ),
+              TextField(
+                controller: employer,
+                decoration: const InputDecoration(labelText: 'Arbeitgeber'),
               ),
             ],
           ),
@@ -250,10 +306,15 @@ class AdminScreen extends StatelessWidget {
       name.text.trim(),
       role.text.trim().isEmpty ? 'Präsident' : role.text.trim(),
       since.text.trim(),
+      id: existing?.id,
       partnerName: partner.text.trim(),
-      phone: phone.text.trim(),
+      phoneMobile: mobile.text.trim(),
+      phonePrivate: privatePhone.text.trim(),
+      phoneWork: workPhone.text.trim(),
       email: email.text.trim(),
       address: address.text.trim(),
+      occupation: occupation.text.trim(),
+      employer: employer.text.trim(),
     );
 
     if (index == null) {
@@ -290,8 +351,14 @@ class AdminScreen extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            _NewsAdminList(onAdd: () => _addNews(context)),
-            _EventAdminList(onAdd: () => _addEvent(context)),
+            _NewsAdminList(
+              onAdd: () => _editNews(context),
+              onEdit: (index) => _editNews(context, index: index),
+            ),
+            _EventAdminList(
+              onAdd: () => _editEvent(context),
+              onEdit: (index) => _editEvent(context, index: index),
+            ),
             _MemberAdminList(
               onAdd: () => _editMember(context),
               onEdit: (index) => _editMember(context, index: index),
@@ -305,8 +372,12 @@ class AdminScreen extends StatelessWidget {
 
 class _NewsAdminList extends StatelessWidget {
   final VoidCallback onAdd;
+  final ValueChanged<int> onEdit;
 
-  const _NewsAdminList({required this.onAdd});
+  const _NewsAdminList({
+    required this.onAdd,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -326,6 +397,7 @@ class _NewsAdminList extends StatelessWidget {
             child: ListTile(
               title: Text(store.news[i].title),
               subtitle: Text(store.news[i].date),
+              onTap: () => onEdit(i),
               trailing: IconButton(
                 tooltip: 'Löschen',
                 onPressed: () => store.deleteNews(i),
@@ -340,8 +412,12 @@ class _NewsAdminList extends StatelessWidget {
 
 class _EventAdminList extends StatelessWidget {
   final VoidCallback onAdd;
+  final ValueChanged<int> onEdit;
 
-  const _EventAdminList({required this.onAdd});
+  const _EventAdminList({
+    required this.onAdd,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -364,6 +440,7 @@ class _EventAdminList extends StatelessWidget {
                 '${store.events[i].day}. ${store.events[i].month} · '
                 '${store.events[i].time}',
               ),
+              onTap: () => onEdit(i),
               trailing: IconButton(
                 tooltip: 'Löschen',
                 onPressed: () => store.deleteEvent(i),
@@ -403,10 +480,9 @@ class _MemberAdminList extends StatelessWidget {
             child: ListTile(
               title: Text(store.members[i].name),
               subtitle: Text(
-                store.members[i].partnerName.isEmpty
+                store.members[i].occupation.isEmpty
                     ? store.members[i].role
-                    : '${store.members[i].role} · '
-                        'Partner: ${store.members[i].partnerName}',
+                    : '${store.members[i].role} · ${store.members[i].occupation}',
               ),
               onTap: () => onEdit(i),
               trailing: IconButton(
