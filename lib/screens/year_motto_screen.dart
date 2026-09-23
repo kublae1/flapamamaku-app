@@ -10,7 +10,7 @@ class YearMottoScreen extends StatefulWidget {
 class _YearMottoScreenState extends State<YearMottoScreen> {
   static const _images = [
     'assets/images/year_motto_pig_rockers.jpg',
-    'assets/images/hero_fireworks.jpg',
+    'assets/images/archive_top_hats_night.jpg',
   ];
 
   int _page = 0;
