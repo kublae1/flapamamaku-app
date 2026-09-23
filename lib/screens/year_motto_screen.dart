@@ -11,6 +11,8 @@ class _YearMottoScreenState extends State<YearMottoScreen> {
   static const _images = [
     'assets/images/year_motto_pig_rockers.jpg',
     'assets/images/archive_top_hats_night.jpg',
+    'assets/images/archive_top_hats_barrel.jpg',
+    'assets/images/archive_vikings_bar.jpg',
   ];
 
   int _page = 0;
