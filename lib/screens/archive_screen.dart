@@ -6,12 +6,26 @@ class ArchiveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const entries = [
-      ('2015', 'Jahreslogo', Icons.workspace_premium_outlined),
-      ('Zylinder', 'Frühere Fasnachtsbilder', Icons.photo_library_outlined),
-      ('Wikinger', 'Sujet und Gruppenbilder', Icons.shield_outlined),
-      ('Gruppenfotos', 'Erinnerungen aus vergangenen Jahren', Icons.groups_outlined),
-      ('Luzerner Fasnacht', 'Stimmungen und Impressionen', Icons.celebration_outlined),
-      ('Weitere Jahre', 'Das Archiv wird laufend ergänzt', Icons.history),
+      _ArchiveEntry(
+        title: 'Zylinder',
+        subtitle: 'Frühere Fasnachtsbilder',
+        image: 'assets/images/archive_top_hats_night.jpg',
+      ),
+      _ArchiveEntry(
+        title: 'Wikinger',
+        subtitle: 'Sujet und Gruppenbilder',
+        image: 'assets/images/archive_vikings_bar.jpg',
+      ),
+      _ArchiveEntry(
+        title: 'Schattenbild',
+        subtitle: 'FLAPAMAMAKU Erinnerungen',
+        image: 'assets/images/archive_shadow.jpg',
+      ),
+      _ArchiveEntry(
+        title: 'Luzerner Fasnacht',
+        subtitle: 'Stimmung und Impressionen',
+        image: 'assets/images/hero_fireworks.jpg',
+      ),
     ];
 
     return Scaffold(
@@ -23,31 +37,50 @@ class ArchiveScreen extends StatelessWidget {
           crossAxisCount: 2,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          childAspectRatio: 1.05,
+          childAspectRatio: .82,
         ),
         itemBuilder: (_, i) {
-          final e = entries[i];
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+          final entry = entries[i];
+          return InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ArchiveGalleryScreen(entry: entry),
+              ),
+            ),
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              margin: EdgeInsets.zero,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(e.$3, size: 34),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        e.$1,
-                        style: const TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Image.asset(
+                      entry.image,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.title,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(e.$2),
-                    ],
+                        const SizedBox(height: 3),
+                        Text(
+                          entry.subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -57,4 +90,41 @@ class ArchiveScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class ArchiveGalleryScreen extends StatelessWidget {
+  final _ArchiveEntry entry;
+
+  const ArchiveGalleryScreen({required this.entry, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(title: Text(entry.title)),
+      body: InteractiveViewer(
+        minScale: 1,
+        maxScale: 4,
+        child: Center(
+          child: Image.asset(
+            entry.image,
+            width: double.infinity,
+            fit: BoxFit.contain,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ArchiveEntry {
+  final String title;
+  final String subtitle;
+  final String image;
+
+  const _ArchiveEntry({
+    required this.title,
+    required this.subtitle,
+    required this.image,
+  });
 }
