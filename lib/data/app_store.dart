@@ -17,6 +17,7 @@ class AppStore extends ChangeNotifier {
         events = List<EventItem>.from(eventItems),
         members = List<MemberItem>.from(initialMembers) {
     _sortNews();
+    _sortEvents();
 
     if (this.api.isConfigured) {
       refreshFromServer();
@@ -47,6 +48,19 @@ class AppStore extends ChangeNotifier {
     news.sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
+  void _sortEvents() {
+    events.sort((a, b) {
+      final aDate = DateTime.tryParse(a.eventDate);
+      final bDate = DateTime.tryParse(b.eventDate);
+      if (aDate == null && bDate == null) return 0;
+      if (aDate == null) return 1;
+      if (bDate == null) return -1;
+      final dateCompare = aDate.compareTo(bDate);
+      if (dateCompare != 0) return dateCompare;
+      return a.time.compareTo(b.time);
+    });
+  }
+
   Future<void> refreshFromServer() async {
     if (!api.isConfigured || isSyncing) return;
 
@@ -69,6 +83,7 @@ class AppStore extends ChangeNotifier {
         ..addAll(remoteMembers);
 
       _sortNews();
+      _sortEvents();
       isUsingServer = true;
       syncError = null;
       lastSuccessfulSync = DateTime.now();
@@ -105,11 +120,13 @@ class AppStore extends ChangeNotifier {
 
   void addEvent(EventItem item) {
     events.add(item);
+    _sortEvents();
     notifyListeners();
   }
 
   void updateEvent(int index, EventItem item) {
     events[index] = item;
+    _sortEvents();
     notifyListeners();
   }
 
