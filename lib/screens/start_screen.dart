@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../models/app_data.dart';
 import '../widgets/section_title.dart';
 import 'year_motto_screen.dart';
 import 'archive_screen.dart';
@@ -9,6 +10,33 @@ import 'content_detail_screens.dart';
 
 class StartScreen extends StatelessWidget {
   const StartScreen({super.key});
+
+  Widget? _newsImage(NewsItem item) {
+    if (item.imageUrl.isNotEmpty) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Image.network(
+          item.imageUrl,
+          width: double.infinity,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        ),
+      );
+    }
+
+    if (item.imageAsset.isNotEmpty) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Image.asset(
+          item.imageAsset,
+          width: double.infinity,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,15 +111,8 @@ class StartScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (store.news.first.imageAsset.isNotEmpty)
-                          AspectRatio(
-                            aspectRatio: 16 / 9,
-                            child: Image.asset(
-                              store.news.first.imageAsset,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
+                        if (_newsImage(store.news.first) case final image?)
+                          image,
                         Padding(
                           padding: const EdgeInsets.all(14),
                           child: Column(
