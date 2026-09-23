@@ -35,13 +35,63 @@ class NewsDetailScreen extends StatelessWidget {
   }
 }
 
-class EventDetailScreen extends StatelessWidget {
+class EventDetailScreen extends StatefulWidget {
   final EventItem event;
 
   const EventDetailScreen({required this.event, super.key});
 
   @override
+  State<EventDetailScreen> createState() => _EventDetailScreenState();
+}
+
+class _EventDetailScreenState extends State<EventDetailScreen> {
+  bool registered = false;
+  bool inCalendar = false;
+
+  Future<bool?> _ask(String title, String question) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(question),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Nein'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Ja'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _register() async {
+    final result = await _ask(
+      'Anmelden',
+      'Für „${widget.event.title}“ anmelden?',
+    );
+    if (result != null && mounted) {
+      setState(() => registered = result);
+    }
+  }
+
+  Future<void> _addToCalendar() async {
+    final result = await _ask(
+      'Kalender',
+      '„${widget.event.title}“ in den Kalender eintragen?',
+    );
+    if (result != null && mounted) {
+      setState(() => inCalendar = result);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final event = widget.event;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Termin')),
       body: ListView(
@@ -54,15 +104,46 @@ class EventDetailScreen extends StatelessWidget {
                 ),
           ),
           const SizedBox(height: 20),
-          _InfoRow(icon: Icons.calendar_month_outlined, text: '${event.day}. ${event.month}'),
+          _InfoRow(
+            icon: Icons.calendar_month_outlined,
+            text: '${event.day}. ${event.month}',
+          ),
           _InfoRow(icon: Icons.schedule_outlined, text: event.time),
           _InfoRow(icon: Icons.location_on_outlined, text: event.location),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _register,
+                  icon: Icon(
+                    registered
+                        ? Icons.check_circle
+                        : Icons.how_to_reg_outlined,
+                  ),
+                  label: Text(registered ? 'Angemeldet' : 'Anmelden'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _addToCalendar,
+                  icon: Icon(
+                    inCalendar
+                        ? Icons.event_available
+                        : Icons.calendar_month_outlined,
+                  ),
+                  label: Text(inCalendar ? 'Im Kalender' : 'Kalender'),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 20),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Text(
-                'Weitere Angaben wie Treffpunkt, Beschreibung, Dokumente und Anmeldung können später vom Administrator gepflegt werden.',
+                'Weitere Angaben wie Treffpunkt, Beschreibung und Dokumente können später vom Administrator gepflegt werden.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),
@@ -90,7 +171,10 @@ class MemberDetailScreen extends StatelessWidget {
               radius: 44,
               child: Text(
                 member.name.characters.first,
-                style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),
@@ -114,11 +198,11 @@ class MemberDetailScreen extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
-          Card(
+          const Card(
             child: ListTile(
-              leading: const Icon(Icons.badge_outlined),
-              title: const Text('Mitgliederprofil'),
-              subtitle: const Text(
+              leading: Icon(Icons.badge_outlined),
+              title: Text('Mitgliederprofil'),
+              subtitle: Text(
                 'Kontaktdaten, Foto und weitere Angaben werden später administrierbar.',
               ),
             ),
@@ -148,7 +232,11 @@ class SimpleSectionScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Icon(icon, size: 64, color: Theme.of(context).colorScheme.primary),
+          Icon(
+            icon,
+            size: 64,
+            color: Theme.of(context).colorScheme.primary,
+          ),
           const SizedBox(height: 20),
           Text(
             title,
