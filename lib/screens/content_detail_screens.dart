@@ -190,9 +190,9 @@ class MemberDetailScreen extends StatelessWidget {
     }
   }
 
-  Future<void> _call(BuildContext context) async {
-    if (member.phone.isEmpty) return;
-    await _launch(context, Uri(scheme: 'tel', path: member.phone));
+  Future<void> _call(BuildContext context, String number) async {
+    if (number.isEmpty) return;
+    await _launch(context, Uri(scheme: 'tel', path: number));
   }
 
   Future<void> _mail(BuildContext context) async {
@@ -218,15 +218,31 @@ class MemberDetailScreen extends StatelessWidget {
     final partner = member.partnerName.isEmpty
         ? 'Nicht hinterlegt'
         : member.partnerName;
-    final phone = member.phone.isEmpty
-        ? 'Nicht hinterlegt'
-        : member.phone;
     final email = member.email.isEmpty
         ? 'Nicht hinterlegt'
         : member.email;
     final address = member.address.isEmpty
         ? 'Nicht hinterlegt'
         : member.address;
+    final occupation = member.occupation.isEmpty
+        ? 'Nicht hinterlegt'
+        : member.occupation;
+    final employer = member.employer.isEmpty
+        ? 'Nicht hinterlegt'
+        : member.employer;
+
+    Widget phoneTile(String label, String number, IconData icon) {
+      return ListTile(
+        leading: Icon(icon),
+        title: Text(label),
+        subtitle: Text(number.isEmpty ? 'Nicht hinterlegt' : number),
+        trailing: IconButton(
+          tooltip: 'Anrufen',
+          onPressed: number.isEmpty ? null : () => _call(context, number),
+          icon: const Icon(Icons.call),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Mitglied')),
@@ -271,17 +287,18 @@ class MemberDetailScreen extends StatelessWidget {
                   subtitle: Text(partner),
                 ),
                 const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.phone_outlined),
-                  title: const Text('Telefon'),
-                  subtitle: Text(phone),
-                  trailing: IconButton(
-                    tooltip: 'Anrufen',
-                    onPressed: member.phone.isEmpty
-                        ? null
-                        : () => _call(context),
-                    icon: const Icon(Icons.call),
-                  ),
+                phoneTile('Mobil', member.phoneMobile, Icons.smartphone),
+                const Divider(height: 1),
+                phoneTile(
+                  'Telefon privat',
+                  member.phonePrivate,
+                  Icons.phone_outlined,
+                ),
+                const Divider(height: 1),
+                phoneTile(
+                  'Telefon Arbeit',
+                  member.phoneWork,
+                  Icons.business_center_outlined,
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -308,6 +325,24 @@ class MemberDetailScreen extends StatelessWidget {
                         : () => _maps(context),
                     icon: const Icon(Icons.map_outlined),
                   ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.badge_outlined),
+                  title: const Text('Beruf'),
+                  subtitle: Text(occupation),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.business_outlined),
+                  title: const Text('Arbeitgeber'),
+                  subtitle: Text(employer),
                 ),
               ],
             ),
