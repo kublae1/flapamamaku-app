@@ -131,6 +131,98 @@ class AdminScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _editMember(
+    BuildContext context, {
+    int? index,
+  }) async {
+    final store = AppStoreScope.of(context);
+    final existing = index == null ? null : store.members[index];
+
+    final name = TextEditingController(text: existing?.name ?? '');
+    final role = TextEditingController(text: existing?.role ?? 'Präsident');
+    final since = TextEditingController(text: existing?.since ?? '');
+    final partner = TextEditingController(text: existing?.partnerName ?? '');
+    final phone = TextEditingController(text: existing?.phone ?? '');
+    final email = TextEditingController(text: existing?.email ?? '');
+    final address = TextEditingController(text: existing?.address ?? '');
+
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(index == null ? 'Mitglied erfassen' : 'Mitglied bearbeiten'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              TextField(
+                controller: role,
+                decoration: const InputDecoration(labelText: 'Funktion'),
+              ),
+              TextField(
+                controller: since,
+                decoration: const InputDecoration(labelText: 'Mitglied seit'),
+              ),
+              TextField(
+                controller: partner,
+                decoration: const InputDecoration(
+                  labelText: 'Partnerin / Partner',
+                ),
+              ),
+              TextField(
+                controller: phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Telefon'),
+              ),
+              TextField(
+                controller: email,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'E-Mail'),
+              ),
+              TextField(
+                controller: address,
+                decoration: const InputDecoration(
+                  labelText: 'Wohnort / Adresse',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Speichern'),
+          ),
+        ],
+      ),
+    );
+
+    if (save != true || name.text.trim().isEmpty) return;
+
+    final item = MemberItem(
+      name.text.trim(),
+      role.text.trim().isEmpty ? 'Präsident' : role.text.trim(),
+      since.text.trim(),
+      partnerName: partner.text.trim(),
+      phone: phone.text.trim(),
+      email: email.text.trim(),
+      address: address.text.trim(),
+    );
+
+    if (index == null) {
+      store.addMember(item);
+    } else {
+      store.updateMember(index, item);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
@@ -160,7 +252,10 @@ class AdminScreen extends StatelessWidget {
           children: [
             _NewsAdminList(onAdd: () => _addNews(context)),
             _EventAdminList(onAdd: () => _addEvent(context)),
-            const _MemberAdminList(),
+            _MemberAdminList(
+              onAdd: () => _editMember(context),
+              onEdit: (index) => _editMember(context, index: index),
+            ),
           ],
         ),
       ),
@@ -242,7 +337,13 @@ class _EventAdminList extends StatelessWidget {
 }
 
 class _MemberAdminList extends StatelessWidget {
-  const _MemberAdminList();
+  final VoidCallback onAdd;
+  final ValueChanged<int> onEdit;
+
+  const _MemberAdminList({
+    required this.onAdd,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -251,22 +352,28 @@ class _MemberAdminList extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Card(
-          child: ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text('Mitgliederverwaltung'),
-            subtitle: Text(
-              'Erfassen und Bearbeiten folgt im nächsten Schritt. '
-              'Die Datenquelle ist bereits zentral vorbereitet.',
-            ),
-          ),
+        FilledButton.icon(
+          onPressed: onAdd,
+          icon: const Icon(Icons.person_add_alt_1),
+          label: const Text('Mitglied erfassen'),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         for (var i = 0; i < store.members.length; i++)
           Card(
             child: ListTile(
               title: Text(store.members[i].name),
-              subtitle: Text(store.members[i].role),
+              subtitle: Text(
+                store.members[i].partnerName.isEmpty
+                    ? store.members[i].role
+                    : '${store.members[i].role} · '
+                        'Partner: ${store.members[i].partnerName}',
+              ),
+              onTap: () => onEdit(i),
+              trailing: IconButton(
+                tooltip: 'Löschen',
+                onPressed: () => store.deleteMember(i),
+                icon: const Icon(Icons.delete_outline),
+              ),
             ),
           ),
       ],
