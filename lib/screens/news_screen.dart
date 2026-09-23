@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/app_data.dart';
+import 'content_detail_screens.dart';
 
 class NewsScreen extends StatelessWidget {
   const NewsScreen({super.key});
@@ -14,13 +15,23 @@ class NewsScreen extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (_, i) {
           final item = newsItems[i];
-          return Card(child: ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.photo_library_outlined)),
-            title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: Text('${item.date}\n${item.text}'),
-            isThreeLine: true,
-            trailing: const Icon(Icons.chevron_right),
-          ));
+          return Card(
+            child: ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.article_outlined)),
+              title: Text(
+                item.title,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: Text('${item.date}\n${item.text}'),
+              isThreeLine: true,
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NewsDetailScreen(item: item),
+                ),
+              ),
+            ),
+          );
         },
       ),
     );
