@@ -10,7 +10,9 @@ class AppStore extends ChangeNotifier {
   AppStore()
       : news = List<NewsItem>.from(newsItems),
         events = List<EventItem>.from(eventItems),
-        members = List<MemberItem>.from(initialMembers);
+        members = List<MemberItem>.from(initialMembers) {
+    _sortNews();
+  }
 
   final List<NewsItem> news;
   final List<EventItem> events;
@@ -20,6 +22,10 @@ class AppStore extends ChangeNotifier {
 
   bool get canAdminister => currentRole == UserRole.admin;
 
+  void _sortNews() {
+    news.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
   void setRole(UserRole role) {
     if (role == currentRole) return;
     currentRole = role;
@@ -27,12 +33,14 @@ class AppStore extends ChangeNotifier {
   }
 
   void addNews(NewsItem item) {
-    news.insert(0, item);
+    news.add(item);
+    _sortNews();
     notifyListeners();
   }
 
   void updateNews(int index, NewsItem item) {
     news[index] = item;
+    _sortNews();
     notifyListeners();
   }
 
