@@ -1,29 +1,65 @@
 class NewsItem {
+  final int? id;
   final String date;
   final String title;
   final String text;
   final String createdAt;
   final String imageAsset;
+  final String imageUrl;
 
   const NewsItem(
     this.date,
     this.title,
     this.text, {
+    this.id,
     required this.createdAt,
     this.imageAsset = '',
+    this.imageUrl = '',
   });
+
+  factory NewsItem.fromJson(Map<String, dynamic> json) {
+    return NewsItem(
+      json['date']?.toString() ?? '',
+      json['title']?.toString() ?? '',
+      json['text']?.toString() ?? '',
+      id: json['id'] as int?,
+      createdAt: json['created_at']?.toString() ?? '',
+      imageUrl: json['image_url']?.toString() ?? '',
+    );
+  }
 }
 
 class EventItem {
+  final int? id;
   final String day;
   final String month;
   final String title;
   final String location;
   final String time;
-  const EventItem(this.day, this.month, this.title, this.location, this.time);
+
+  const EventItem(
+    this.day,
+    this.month,
+    this.title,
+    this.location,
+    this.time, {
+    this.id,
+  });
+
+  factory EventItem.fromJson(Map<String, dynamic> json) {
+    return EventItem(
+      json['day']?.toString() ?? '',
+      json['month']?.toString() ?? '',
+      json['title']?.toString() ?? '',
+      json['location']?.toString() ?? '',
+      json['time']?.toString() ?? '',
+      id: json['id'] as int?,
+    );
+  }
 }
 
 class MemberItem {
+  final int? id;
   final String name;
   final String role;
   final String since;
@@ -36,11 +72,25 @@ class MemberItem {
     this.name,
     this.role,
     this.since, {
+    this.id,
     this.partnerName = '',
     this.phone = '',
     this.email = '',
     this.address = '',
   });
+
+  factory MemberItem.fromJson(Map<String, dynamic> json) {
+    return MemberItem(
+      json['name']?.toString() ?? '',
+      json['role']?.toString() ?? 'Präsident',
+      json['since']?.toString() ?? '',
+      id: json['id'] as int?,
+      partnerName: json['partner_name']?.toString() ?? '',
+      phone: json['phone']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      address: json['address']?.toString() ?? '',
+    );
+  }
 }
 
 const newsItems = [
