@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../models/app_data.dart';
+import '../data/app_store.dart';
 import 'content_detail_screens.dart';
 
 class MembersScreen extends StatefulWidget {
@@ -15,7 +15,8 @@ class _MembersScreenState extends State<MembersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filtered = members.where((member) {
+    final store = AppStoreScope.of(context);
+    final filtered = store.members.where((member) {
       final value = query.trim().toLowerCase();
       if (value.isEmpty) return true;
       return member.name.toLowerCase().contains(value) ||
