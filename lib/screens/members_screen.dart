@@ -20,7 +20,9 @@ class _MembersScreenState extends State<MembersScreen> {
       final value = query.trim().toLowerCase();
       if (value.isEmpty) return true;
       return member.name.toLowerCase().contains(value) ||
-          member.role.toLowerCase().contains(value);
+          member.role.toLowerCase().contains(value) ||
+          member.occupation.toLowerCase().contains(value) ||
+          member.employer.toLowerCase().contains(value);
     }).toList();
 
     return Scaffold(
@@ -61,7 +63,11 @@ class _MembersScreenState extends State<MembersScreen> {
                     member.name,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: Text('${member.role}\n${member.since}'),
+                  subtitle: Text(
+                    member.occupation.isEmpty
+                        ? '${member.role}\n${member.since}'
+                        : '${member.role} · ${member.occupation}\n${member.since}',
+                  ),
                   isThreeLine: true,
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(
