@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flapamamaku_app/main.dart';
 
 void main() {
-  testWidgets('FLAPAMAMAKU app starts with version 0.5 navigation', (tester) async {
+  testWidgets('FLAPAMAMAKU app starts with version 0.6 navigation', (tester) async {
     await tester.pumpWidget(const FlapamamakuApp());
 
     expect(find.text('FLAPAMAMAKU'), findsOneWidget);
