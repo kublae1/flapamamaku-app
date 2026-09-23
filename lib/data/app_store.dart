@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../models/app_data.dart';
+import 'api_service.dart';
 
 enum UserRole {
   admin,
@@ -7,23 +11,73 @@ enum UserRole {
 }
 
 class AppStore extends ChangeNotifier {
-  AppStore()
-      : news = List<NewsItem>.from(newsItems),
+  AppStore({ApiService? api})
+      : api = api ?? ApiService(),
+        news = List<NewsItem>.from(newsItems),
         events = List<EventItem>.from(eventItems),
         members = List<MemberItem>.from(initialMembers) {
     _sortNews();
+
+    if (this.api.isConfigured) {
+      refreshFromServer();
+      _syncTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) => refreshFromServer(),
+      );
+    }
   }
 
+  final ApiService api;
   final List<NewsItem> news;
   final List<EventItem> events;
   final List<MemberItem> members;
 
+  Timer? _syncTimer;
+  bool isSyncing = false;
+  bool isUsingServer = false;
+  String? syncError;
+  DateTime? lastSuccessfulSync;
+
   UserRole currentRole = UserRole.admin;
 
   bool get canAdminister => currentRole == UserRole.admin;
+  bool get serverConfigured => api.isConfigured;
 
   void _sortNews() {
     news.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<void> refreshFromServer() async {
+    if (!api.isConfigured || isSyncing) return;
+
+    isSyncing = true;
+    notifyListeners();
+
+    try {
+      final remoteNews = await api.fetchNews();
+      final remoteEvents = await api.fetchEvents();
+      final remoteMembers = await api.fetchMembers();
+
+      news
+        ..clear()
+        ..addAll(remoteNews);
+      events
+        ..clear()
+        ..addAll(remoteEvents);
+      members
+        ..clear()
+        ..addAll(remoteMembers);
+
+      _sortNews();
+      isUsingServer = true;
+      syncError = null;
+      lastSuccessfulSync = DateTime.now();
+    } catch (error) {
+      syncError = error.toString();
+    } finally {
+      isSyncing = false;
+      notifyListeners();
+    }
   }
 
   void setRole(UserRole role) {
@@ -77,6 +131,12 @@ class AppStore extends ChangeNotifier {
   void deleteMember(int index) {
     members.removeAt(index);
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    super.dispose();
   }
 }
 
