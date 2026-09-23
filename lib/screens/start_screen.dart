@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+
 import '../models/app_data.dart';
 import '../widgets/section_title.dart';
 import 'year_motto_screen.dart';
@@ -46,7 +48,7 @@ class StartScreen extends StatelessWidget {
                       ),
                       SizedBox(height: 5),
                       Text(
-                        'Zäme dur d\'Fasnacht!',
+                        'Zäme ade Fasnacht Luzern!',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 29,
@@ -64,54 +66,12 @@ class StartScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
           sliver: SliverList.list(
             children: [
-              const SectionTitle('Jahresmotto'),
-              const SizedBox(height: 10),
               InkWell(
                 borderRadius: BorderRadius.circular(18),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const YearMottoScreen()),
                 ),
-                child: Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AspectRatio(
-                        aspectRatio: 16 / 9,
-                        child: Image.asset(
-                          'assets/images/year_motto_pig_rockers.jpg',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Jahresmotto folgt',
-                                    style: TextStyle(
-                                      fontSize: 19,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  SizedBox(height: 4),
-                                  Text(
-                                    'Aktuelles Sujet und Informationen zur Fasnacht.',
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Icon(Icons.chevron_right),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                child: const SujetSlider(),
               ),
               const SizedBox(height: 22),
               const SectionTitle('Aktuelle News', action: 'Alle'),
@@ -156,12 +116,12 @@ class StartScreen extends StatelessWidget {
               const SizedBox(height: 20),
               Card(
                 child: ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.history)),
+                  leading: const CircleAvatar(child: Icon(Icons.photo_library_outlined)),
                   title: const Text(
                     'Archiv',
                     style: TextStyle(fontWeight: FontWeight.w800),
                   ),
-                  subtitle: const Text('Frühere Mottos, Sujets und Erinnerungen'),
+                  subtitle: const Text('Frühere Sujets, Mottos und Erinnerungen'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ArchiveScreen()),
@@ -172,6 +132,90 @@ class StartScreen extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class SujetSlider extends StatefulWidget {
+  const SujetSlider({super.key});
+
+  @override
+  State<SujetSlider> createState() => _SujetSliderState();
+}
+
+class _SujetSliderState extends State<SujetSlider> {
+  static const _images = [
+    'assets/images/year_motto_pig_rockers.jpg',
+    'assets/images/archive_top_hats_night.jpg',
+    'assets/images/archive_vikings_bar.jpg',
+  ];
+
+  final _controller = PageController();
+  Timer? _timer;
+  int _page = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted || !_controller.hasClients) return;
+      final next = (_page + 1) % _images.length;
+      _controller.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.zero,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 10,
+            child: PageView.builder(
+              controller: _controller,
+              itemCount: _images.length,
+              onPageChanged: (value) => setState(() => _page = value),
+              itemBuilder: (_, index) => Image.asset(
+                _images[index],
+                fit: BoxFit.cover,
+                width: double.infinity,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 10,
+            child: Row(
+              children: List.generate(
+                _images.length,
+                (index) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: index == _page ? 18 : 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: index == _page ? Colors.white : Colors.white60,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
