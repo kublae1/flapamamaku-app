@@ -1,0 +1,37 @@
+name: Test Backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - "backend/**"
+      - ".github/workflows/test-backend.yml"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile backend
+        run: python -m py_compile app/main.py
+
+      - name: Initialize database
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-test.db
+        run: python -c "from app.main import init_db; init_db(); print('database ok')"
+
+      - name: Build Docker image
+        run: docker build -t flapamamaku-backend:test .
