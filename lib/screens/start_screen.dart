@@ -55,9 +55,16 @@ class StartScreen extends StatelessWidget {
             background: Stack(
               fit: StackFit.expand,
               children: [
-                Image.asset(
-                  'assets/images/hero_fireworks.jpg',
-                  fit: BoxFit.cover,
+                ColoredBox(
+                  color: Color(0xFF8A101B),
+                  child: Center(
+                    child: Image.asset(
+                      'assets/FLAPAMAMAKU App-Icon.png',
+                      width: double.infinity,
+                      height: double.infinity,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
                 ),
                 const DecoratedBox(
                   decoration: BoxDecoration(
