@@ -1,38 +1,61 @@
 import 'package:flutter/material.dart';
 
-class YearMottoScreen extends StatelessWidget {
+class YearMottoScreen extends StatefulWidget {
   const YearMottoScreen({super.key});
+
+  @override
+  State<YearMottoScreen> createState() => _YearMottoScreenState();
+}
+
+class _YearMottoScreenState extends State<YearMottoScreen> {
+  static const _images = [
+    'assets/images/year_motto_pig_rockers.jpg',
+    'assets/images/archive_top_hats_night.jpg',
+    'assets/images/archive_vikings_bar.jpg',
+  ];
+
+  int _page = 0;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Jahresmotto')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
+      backgroundColor: Colors.black,
+      appBar: AppBar(title: const Text('Aktuelles Sujet')),
+      body: Stack(
         children: [
-          AspectRatio(
-            aspectRatio: 4 / 3,
-            child: Image.asset(
-              'assets/images/year_motto_pig_rockers.jpg',
-              fit: BoxFit.cover,
+          PageView.builder(
+            itemCount: _images.length,
+            onPageChanged: (value) => setState(() => _page = value),
+            itemBuilder: (_, index) => InteractiveViewer(
+              minScale: 1,
+              maxScale: 4,
+              child: Center(
+                child: Image.asset(
+                  _images[index],
+                  fit: BoxFit.contain,
+                  width: double.infinity,
+                ),
+              ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Jahresmotto folgt',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 28,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                _images.length,
+                (index) => Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: index == _page ? 20 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: index == _page ? Colors.white : Colors.white54,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
-                SizedBox(height: 10),
-                Text(
-                  'Hier erhält das aktuelle FLAPAMAMAKU-Jahresmotto seinen eigenen Platz. '
-                  'Logo, Motto-Text, Bilder und weitere Informationen können später zentral gepflegt werden.',
-                  style: TextStyle(fontSize: 17, height: 1.45),
-                ),
-              ],
+              ),
             ),
           ),
         ],
