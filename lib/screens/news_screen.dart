@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../models/app_data.dart';
+import '../data/app_store.dart';
 import 'content_detail_screens.dart';
 
 class NewsScreen extends StatelessWidget {
@@ -7,14 +7,17 @@ class NewsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppStoreScope.of(context);
+    final items = store.news;
+
     return Scaffold(
       appBar: AppBar(title: const Text('News')),
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
-        itemCount: newsItems.length,
+        itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (_, i) {
-          final item = newsItems[i];
+          final item = items[i];
           return Card(
             child: ListTile(
               leading: const CircleAvatar(child: Icon(Icons.article_outlined)),
