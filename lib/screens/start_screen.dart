@@ -39,23 +39,13 @@ class StartScreen extends StatelessWidget {
                   left: 22,
                   right: 22,
                   bottom: 22,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Fasnachtsgruppe Luzern',
-                        style: TextStyle(color: Colors.white70, fontSize: 16),
-                      ),
-                      SizedBox(height: 5),
-                      Text(
-                        'Zäme ade Fasnacht Luzern!',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 29,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    'Zäme ade Fasnacht Luzern!',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 29,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ],
@@ -146,8 +136,7 @@ class SujetSlider extends StatefulWidget {
 class _SujetSliderState extends State<SujetSlider> {
   static const _images = [
     'assets/images/year_motto_pig_rockers.jpg',
-    'assets/images/archive_top_hats_night.jpg',
-    'assets/images/archive_vikings_bar.jpg',
+    'assets/images/hero_fireworks.jpg',
   ];
 
   final _controller = PageController();
