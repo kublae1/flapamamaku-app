@@ -1,18 +1,32 @@
 import 'package:flutter/material.dart';
+import '../data/app_store.dart';
 import 'year_motto_screen.dart';
 import 'archive_screen.dart';
 import 'content_detail_screens.dart';
+import 'admin_screen.dart';
 
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final store = AppStoreScope.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Mehr')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (store.canAdminister)
+            _menuItem(
+              context,
+              Icons.admin_panel_settings_outlined,
+              'Administration',
+              'News, Termine und Mitglieder verwalten',
+              () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AdminScreen()),
+              ),
+            ),
           _menuItem(
             context,
             Icons.auto_awesome_outlined,
