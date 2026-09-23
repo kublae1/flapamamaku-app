@@ -7,23 +7,13 @@ class ArchiveScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     const entries = [
       _ArchiveEntry(
-        title: 'Zylinder',
-        subtitle: 'Frühere Fasnachtsbilder',
-        image: 'assets/images/archive_top_hats_night.jpg',
-      ),
-      _ArchiveEntry(
-        title: 'Wikinger',
-        subtitle: 'Sujet und Gruppenbilder',
-        image: 'assets/images/archive_vikings_bar.jpg',
-      ),
-      _ArchiveEntry(
-        title: 'Schattenbild',
-        subtitle: 'FLAPAMAMAKU Erinnerungen',
-        image: 'assets/images/archive_shadow.jpg',
+        title: 'Schweine Rocker',
+        subtitle: 'Sujet-Bild',
+        image: 'assets/images/year_motto_pig_rockers.jpg',
       ),
       _ArchiveEntry(
         title: 'Luzerner Fasnacht',
-        subtitle: 'Stimmung und Impressionen',
+        subtitle: 'Feuerwerk und Stimmung',
         image: 'assets/images/hero_fireworks.jpg',
       ),
     ];
