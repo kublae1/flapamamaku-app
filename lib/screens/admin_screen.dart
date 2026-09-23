@@ -5,47 +5,86 @@ import '../models/app_data.dart';
 class AdminScreen extends StatelessWidget {
   const AdminScreen({super.key});
 
+  String _dateLabel(DateTime value) {
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    return '$day.$month.${value.year}';
+  }
+
   Future<void> _addNews(BuildContext context) async {
     final store = AppStoreScope.of(context);
+    final now = DateTime.now();
     final title = TextEditingController();
     final text = TextEditingController();
-    final date = TextEditingController(text: '23.09.2026');
+    final date = TextEditingController(text: _dateLabel(now));
+    String imageAsset = '';
 
     final save = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('News erfassen'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: date,
-                decoration: const InputDecoration(labelText: 'Datum'),
-              ),
-              TextField(
-                controller: title,
-                decoration: const InputDecoration(labelText: 'Titel'),
-              ),
-              TextField(
-                controller: text,
-                minLines: 3,
-                maxLines: 6,
-                decoration: const InputDecoration(labelText: 'Text'),
-              ),
-            ],
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Neue News'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: title,
+                  decoration: const InputDecoration(labelText: 'Titel'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: text,
+                  minLines: 4,
+                  maxLines: 8,
+                  decoration: const InputDecoration(labelText: 'Text'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: date,
+                  decoration: const InputDecoration(labelText: 'Datum'),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: imageAsset,
+                  decoration: const InputDecoration(labelText: 'Foto optional'),
+                  items: const [
+                    DropdownMenuItem(value: '', child: Text('Kein Foto')),
+                    DropdownMenuItem(
+                      value: 'assets/images/year_motto_pig_rockers.jpg',
+                      child: Text('Schweine Rocker'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'assets/images/archive_top_hats_night.jpg',
+                      child: Text('Zylinder'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'assets/images/archive_vikings_bar.jpg',
+                      child: Text('Wikinger'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'assets/images/hero_fireworks.jpg',
+                      child: Text('Feuerwerk'),
+                    ),
+                  ],
+                  onChanged: (value) => setDialogState(
+                    () => imageAsset = value ?? '',
+                  ),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Speichern'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Speichern'),
-          ),
-        ],
       ),
     );
 
@@ -57,11 +96,12 @@ class AdminScreen extends StatelessWidget {
           date.text.trim(),
           title.text.trim(),
           text.text.trim(),
+          createdAt: now.toIso8601String(),
+          imageAsset: imageAsset,
         ),
       );
     }
   }
-
   Future<void> _addEvent(BuildContext context) async {
     final store = AppStoreScope.of(context);
     final day = TextEditingController();
@@ -278,7 +318,7 @@ class _NewsAdminList extends StatelessWidget {
         FilledButton.icon(
           onPressed: onAdd,
           icon: const Icon(Icons.add),
-          label: const Text('News erfassen'),
+          label: const Text('Neue News'),
         ),
         const SizedBox(height: 12),
         for (var i = 0; i < store.news.length; i++)
