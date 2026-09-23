@@ -71,22 +71,57 @@ class StartScreen extends StatelessWidget {
               const SizedBox(height: 8),
               if (store.news.isNotEmpty)
                 Card(
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.campaign),
-                    ),
-                    title: Text(store.news.first.title),
-                    subtitle: Text(
-                      '${store.news.first.date}\n${store.news.first.text}',
-                    ),
-                    isThreeLine: true,
-                    trailing: const Icon(Icons.chevron_right),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => NewsDetailScreen(
                           item: store.news.first,
                         ),
                       ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (store.news.first.imageAsset.isNotEmpty)
+                          AspectRatio(
+                            aspectRatio: 16 / 9,
+                            child: Image.asset(
+                              store.news.first.imageAsset,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                store.news.first.date,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                store.news.first.title,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                store.news.first.text,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 )
