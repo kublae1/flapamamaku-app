@@ -122,8 +122,9 @@
       <form class="card" id="events-form">
         <h2>Termin</h2>
         <input type="hidden" name="id">
-        <label>Tag</label><input name="day" required>
-        <label>Monat</label><input name="month" required>
+        <label>Datum</label><input name="event_date" type="date" required>
+        <input name="day" type="hidden">
+        <input name="month" type="hidden">
         <label>Titel</label><input name="title" required>
         <label>Ort</label><input name="location">
         <label>Zeit</label><input name="time">
@@ -145,9 +146,13 @@
         <label>Funktion</label><input name="role" value="Präsident">
         <label>Mitglied seit</label><input name="since">
         <label>Partnerin / Partner</label><input name="partner_name">
-        <label>Telefon</label><input name="phone">
+        <label>Mobil</label><input name="phone_mobile">
+        <label>Telefon privat</label><input name="phone_private">
+        <label>Telefon Arbeit</label><input name="phone_work">
         <label>E-Mail</label><input name="email" type="email">
         <label>Wohnort / Adresse</label><input name="address">
+        <label>Beruf</label><input name="occupation">
+        <label>Arbeitgeber</label><input name="employer">
         <p><button class="primary" type="submit">Speichern</button></p>
       </form>
       <div class="card">
@@ -161,8 +166,12 @@
 <script>
 const resources = {
   news: ["title", "text", "date", "image_url"],
-  events: ["day", "month", "title", "location", "time"],
-  members: ["name", "role", "since", "partner_name", "phone", "email", "address"],
+  events: ["event_date", "day", "month", "title", "location", "time"],
+  members: [
+    "name", "role", "since", "partner_name",
+    "phone_mobile", "phone_private", "phone_work",
+    "email", "address", "occupation", "employer"
+  ],
 };
 
 document.querySelectorAll("nav button").forEach(button => {
@@ -176,6 +185,15 @@ document.querySelectorAll("nav button").forEach(button => {
 
 function formData(form, resource) {
   const data = {};
+  if (resource === "events") {
+    const value = form.elements.event_date.value;
+    if (value) {
+      const date = new Date(value + "T12:00:00");
+      const months = ["JAN","FEB","MÄR","APR","MAI","JUN","JUL","AUG","SEP","OKT","NOV","DEZ"];
+      form.elements.day.value = String(date.getDate()).padStart(2, "0");
+      form.elements.month.value = months[date.getMonth()];
+    }
+  }
   resources[resource].forEach(key => data[key] = form.elements[key].value.trim());
   return data;
 }
@@ -194,7 +212,7 @@ async function api(path, options = {}) {
 
 function label(resource, item) {
   if (resource === "news") return `${item.date} · ${item.title}`;
-  if (resource === "events") return `${item.day}. ${item.month} · ${item.title}`;
+  if (resource === "events") return `${item.event_date || item.day + ". " + item.month} · ${item.title}`;
   return `${item.name} · ${item.role}`;
 }
 
