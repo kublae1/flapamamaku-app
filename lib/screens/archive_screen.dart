@@ -6,12 +6,12 @@ class ArchiveScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const entries = [
-      _ArchiveEntry(
+      ArchiveEntry(
         title: 'Schweine Rocker',
         subtitle: 'Sujet-Bild',
         image: 'assets/images/year_motto_pig_rockers.jpg',
       ),
-      _ArchiveEntry(
+      ArchiveEntry(
         title: 'Luzerner Fasnacht',
         subtitle: 'Feuerwerk und Stimmung',
         image: 'assets/images/hero_fireworks.jpg',
@@ -83,7 +83,7 @@ class ArchiveScreen extends StatelessWidget {
 }
 
 class ArchiveGalleryScreen extends StatelessWidget {
-  final _ArchiveEntry entry;
+  final ArchiveEntry entry;
 
   const ArchiveGalleryScreen({required this.entry, super.key});
 
@@ -107,12 +107,12 @@ class ArchiveGalleryScreen extends StatelessWidget {
   }
 }
 
-class _ArchiveEntry {
+class ArchiveEntry {
   final String title;
   final String subtitle;
   final String image;
 
-  const _ArchiveEntry({
+  const ArchiveEntry({
     required this.title,
     required this.subtitle,
     required this.image,
