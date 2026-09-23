@@ -5,6 +5,7 @@ import '../models/app_data.dart';
 import '../widgets/section_title.dart';
 import 'year_motto_screen.dart';
 import 'archive_screen.dart';
+import 'content_detail_screens.dart';
 
 class StartScreen extends StatelessWidget {
   const StartScreen({super.key});
@@ -70,6 +71,11 @@ class StartScreen extends StatelessWidget {
                   subtitle: Text('${newsItems.first.date}\n${newsItems.first.text}'),
                   isThreeLine: true,
                   trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => NewsDetailScreen(item: newsItems.first),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -83,7 +89,13 @@ class StartScreen extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(e.day, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                          Text(
+                            e.day,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           Text(e.month),
                         ],
                       ),
@@ -91,15 +103,27 @@ class StartScreen extends StatelessWidget {
                     title: Text(e.title),
                     subtitle: Text('${e.location} · ${e.time}'),
                     trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => EventDetailScreen(event: e),
+                      ),
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 20),
               Card(
                 child: ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.photo_library_outlined)),
-                  title: const Text('Archiv', style: TextStyle(fontWeight: FontWeight.w800)),
-                  subtitle: const Text('Frühere Sujets, Mottos und Erinnerungen'),
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.photo_library_outlined),
+                  ),
+                  title: const Text(
+                    'Archiv',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: const Text(
+                    'Frühere Sujets, Mottos und Erinnerungen',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ArchiveScreen()),
