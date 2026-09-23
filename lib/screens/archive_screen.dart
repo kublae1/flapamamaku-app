@@ -8,13 +8,13 @@ class ArchiveScreen extends StatelessWidget {
     const entries = [
       ArchiveEntry(
         title: 'Schweine Rocker',
-        subtitle: 'Sujet-Bild',
+        subtitle: 'Fasnachts-Sujet',
         image: 'assets/images/year_motto_pig_rockers.jpg',
       ),
       ArchiveEntry(
-        title: 'Luzerner Fasnacht',
-        subtitle: 'Feuerwerk und Stimmung',
-        image: 'assets/images/hero_fireworks.jpg',
+        title: 'Zylinder',
+        subtitle: 'Früheres Fasnachts-Sujet',
+        image: 'assets/images/archive_top_hats_night.jpg',
       ),
     ];
 
