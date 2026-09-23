@@ -18,27 +18,64 @@ class MemberItem {
   final String name;
   final String role;
   final String since;
-  const MemberItem(this.name, this.role, this.since);
+  final String partnerName;
+  final String phone;
+  final String email;
+  final String address;
+
+  const MemberItem(
+    this.name,
+    this.role,
+    this.since, {
+    this.partnerName = '',
+    this.phone = '',
+    this.email = '',
+    this.address = '',
+  });
 }
 
 const newsItems = [
-  NewsItem('12.09.2026', 'Start in die neue Fasnachtssaison', 'Mir freued üs uf e schöni Fasnacht mit FLAPAMAMAKU.'),
-  NewsItem('28.08.2026', 'Rückblick Sommerhöck', 'Ein gelungener Abend mit vielen schönen Momenten.'),
-  NewsItem('15.05.2026', 'Fasnachtsumzug', 'Bilder und Informationen rund um unseren Umzug.'),
+  NewsItem(
+    '12.09.2026',
+    'Start in die neue Fasnachtssaison',
+    'Mir freued üs uf e schöni Fasnacht mit FLAPAMAMAKU.',
+  ),
+  NewsItem(
+    '28.08.2026',
+    'Rückblick Sommerhöck',
+    'Ein gelungener Abend mit vielen schönen Momenten.',
+  ),
+  NewsItem(
+    '15.05.2026',
+    'Fasnachtsumzug',
+    'Bilder und Informationen rund um unseren Umzug.',
+  ),
 ];
 
 const eventItems = [
   EventItem('27', 'JAN', 'Rüüdige Samschtig', 'Altstadt Luzern', '14:00 Uhr'),
   EventItem('29', 'JAN', 'SchmuDo', 'Luzern', '05:00 Uhr'),
-  EventItem('31', 'JAN', 'GüdisMäntig Vorbereitung', 'Luzern', '14:00 Uhr'),
-  EventItem('17', 'FEB', 'Fasnachtsverbrennung', 'Luzern', '19:00 Uhr'),
+  EventItem(
+    '31',
+    'JAN',
+    'GüdisMäntig Vorbereitung',
+    'Luzern',
+    '14:00 Uhr',
+  ),
+  EventItem(
+    '17',
+    'FEB',
+    'Fasnachtsverbrennung',
+    'Luzern',
+    '19:00 Uhr',
+  ),
 ];
 
 const members = [
   MemberItem('Bruno Meier', 'Präsident', 'seit 2010'),
-  MemberItem('Claudia Schmid', 'Vizepräsidentin', 'seit 2012'),
-  MemberItem('Markus Huber', 'Kassier', 'seit 2015'),
-  MemberItem('Sandra Müller', 'Aktuarin', 'seit 2018'),
-  MemberItem('Thomas Steiner', 'Gruppe Laterne', 'seit 2019'),
-  MemberItem('Patrick Felder', 'Gruppe Wagen', 'seit 2020'),
+  MemberItem('Claudia Schmid', 'Präsidentin', 'seit 2012'),
+  MemberItem('Markus Huber', 'Präsident', 'seit 2015'),
+  MemberItem('Sandra Müller', 'Präsidentin', 'seit 2018'),
+  MemberItem('Thomas Steiner', 'Präsident', 'seit 2019'),
+  MemberItem('Patrick Felder', 'Präsident', 'seit 2020'),
 ];
