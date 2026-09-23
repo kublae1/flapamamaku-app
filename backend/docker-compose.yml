@@ -1,0 +1,14 @@
+services:
+  flapamamaku-backend:
+    build: .
+    container_name: flapamamaku-backend
+    restart: unless-stopped
+    ports:
+      - "8087:8000"
+    environment:
+      FLAPAMAMAKU_DB: /data/flapamamaku.db
+    volumes:
+      - flapamamaku-data:/data
+
+volumes:
+  flapamamaku-data:
