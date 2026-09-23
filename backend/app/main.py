@@ -15,7 +15,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.7.0",
+    version="0.7.2",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -37,6 +37,7 @@ class NewsPayload(BaseModel):
 
 
 class EventPayload(BaseModel):
+    event_date: str = ""
     day: str
     month: str
     title: str = Field(min_length=1, max_length=200)
@@ -49,9 +50,13 @@ class MemberPayload(BaseModel):
     role: str = "Präsident"
     since: str = ""
     partner_name: str = ""
-    phone: str = ""
+    phone_mobile: str = ""
+    phone_private: str = ""
+    phone_work: str = ""
     email: str = ""
     address: str = ""
+    occupation: str = ""
+    employer: str = ""
 
 
 TABLES: dict[str, tuple[str, type[BaseModel]]] = {
@@ -72,6 +77,7 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
         """
         CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_date TEXT NOT NULL DEFAULT '',
             day TEXT NOT NULL,
             month TEXT NOT NULL,
             title TEXT NOT NULL,
@@ -90,9 +96,13 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             role TEXT NOT NULL DEFAULT 'Präsident',
             since TEXT NOT NULL DEFAULT '',
             partner_name TEXT NOT NULL DEFAULT '',
-            phone TEXT NOT NULL DEFAULT '',
+            phone_mobile TEXT NOT NULL DEFAULT '',
+            phone_private TEXT NOT NULL DEFAULT '',
+            phone_work TEXT NOT NULL DEFAULT '',
             email TEXT NOT NULL DEFAULT '',
             address TEXT NOT NULL DEFAULT '',
+            occupation TEXT NOT NULL DEFAULT '',
+            employer TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )
         """,
@@ -108,10 +118,41 @@ def connect() -> sqlite3.Connection:
     return connection
 
 
+def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+
+
+def _ensure_column(
+    db: sqlite3.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    if column not in _columns(db, table):
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
+
+        _ensure_column(db, "events", "event_date", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "phone_mobile", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "phone_private", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "phone_work", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "occupation", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "employer", "TEXT NOT NULL DEFAULT ''")
+
+        member_columns = _columns(db, "members")
+        if "phone" in member_columns:
+            db.execute(
+                """
+                UPDATE members
+                SET phone_mobile = phone
+                WHERE phone_mobile = '' AND phone <> ''
+                """
+            )
         db.commit()
 
 
@@ -129,7 +170,16 @@ def table_or_404(name: str) -> tuple[str, type[BaseModel]]:
 
 def list_rows(resource: str) -> list[dict[str, Any]]:
     table_or_404(resource)
-    order = "created_at DESC, id DESC" if resource == "news" else "id DESC"
+    if resource == "news":
+        order = "created_at DESC, id DESC"
+    elif resource == "events":
+        order = (
+            "CASE WHEN event_date = '' THEN '9999-12-31' ELSE event_date END ASC, "
+            "time ASC, id ASC"
+        )
+    else:
+        order = "name COLLATE NOCASE ASC, id ASC"
+
     with connect() as db:
         rows = db.execute(
             f"SELECT * FROM {resource} ORDER BY {order}"
@@ -199,7 +249,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.7.0"}
+    return {"status": "ok", "version": "0.7.2"}
 
 
 @app.get("/admin")
