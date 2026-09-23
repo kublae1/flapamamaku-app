@@ -15,8 +15,8 @@ class MoreScreen extends StatelessWidget {
           _menuItem(
             context,
             Icons.auto_awesome_outlined,
-            'Jahresmotto',
-            'Aktuelles Sujet und Motto',
+            'Aktuelles Sujet',
+            'Fotos und aktuelles Fasnachtssujet',
             () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const YearMottoScreen()),
             ),
