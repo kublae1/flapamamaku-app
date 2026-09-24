@@ -273,6 +273,7 @@
           <input type="hidden" name="id">
           <label>Bereich</label>
           <select name="section" required>
+            <option value="hero">Startseite / Sau-Rocker-Hero</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
             <option value="documents">Dokumente</option>
@@ -294,6 +295,7 @@
           <label>Bereich anzeigen</label>
           <select id="content-filter">
             <option value="">Alle Bereiche</option>
+            <option value="hero">Startseite / Sau-Rocker-Hero</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
             <option value="documents">Dokumente</option>
@@ -329,6 +331,7 @@ const permissionFields = [
 ];
 
 const contentPermissions = {
+  hero: "can_photos",
   sujet: "can_photos",
   archive: "can_photos",
   documents: "can_documents",
@@ -338,6 +341,7 @@ const contentPermissions = {
 };
 
 const contentLabels = {
+  hero: "Startseite / Sau-Rocker-Hero",
   sujet: "Sujet nächstes Jahr",
   archive: "Vergangene Sujet",
   documents: "Dokumente",
