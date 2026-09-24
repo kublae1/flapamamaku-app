@@ -336,35 +336,53 @@ class AdminScreen extends StatelessWidget {
       );
     }
 
+    final tabs = <Tab>[];
+    final views = <Widget>[];
+
+    if (store.canNews) {
+      tabs.add(const Tab(text: 'News'));
+      views.add(
+        _NewsAdminList(
+          onAdd: () => _editNews(context),
+          onEdit: (index) => _editNews(context, index: index),
+        ),
+      );
+    }
+    if (store.canEvents) {
+      tabs.add(const Tab(text: 'Termine'));
+      views.add(
+        _EventAdminList(
+          onAdd: () => _editEvent(context),
+          onEdit: (index) => _editEvent(context, index: index),
+        ),
+      );
+    }
+    if (store.canMembers) {
+      tabs.add(const Tab(text: 'Mitglieder'));
+      views.add(
+        _MemberAdminList(
+          onAdd: () => _editMember(context),
+          onEdit: (index) => _editMember(context, index: index),
+        ),
+      );
+    }
+
+    if (tabs.isEmpty) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Keine Verwaltungsberechtigung vorhanden.'),
+        ),
+      );
+    }
+
     return DefaultTabController(
-      length: 3,
+      length: tabs.length,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Administration'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'News'),
-              Tab(text: 'Termine'),
-              Tab(text: 'Mitglieder'),
-            ],
-          ),
+          bottom: TabBar(tabs: tabs),
         ),
-        body: TabBarView(
-          children: [
-            _NewsAdminList(
-              onAdd: () => _editNews(context),
-              onEdit: (index) => _editNews(context, index: index),
-            ),
-            _EventAdminList(
-              onAdd: () => _editEvent(context),
-              onEdit: (index) => _editEvent(context, index: index),
-            ),
-            _MemberAdminList(
-              onAdd: () => _editMember(context),
-              onEdit: (index) => _editMember(context, index: index),
-            ),
-          ],
-        ),
+        body: TabBarView(children: views),
       ),
     );
   }
