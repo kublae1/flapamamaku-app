@@ -22,6 +22,7 @@ class AppStore extends ChangeNotifier {
         content = <ContentItem>[] {
     _sortNews();
     _sortEvents();
+    _loadAppearance();
 
     if (this.api.isConfigured) {
       restoreSession();
@@ -61,6 +62,23 @@ class AppStore extends ChangeNotifier {
   bool isBiometricAuthenticating = false;
   Map<String, dynamic>? currentUser;
   String? authError;
+  int themeColorValue = 0xFF8A101B;
+
+  Color get themeColor => Color(themeColorValue);
+
+  Future<void> _loadAppearance() async {
+    final prefs = await SharedPreferences.getInstance();
+    themeColorValue =
+        prefs.getInt('flapamamaku_theme_color') ?? 0xFF8A101B;
+    notifyListeners();
+  }
+
+  Future<void> setThemeColor(int value) async {
+    themeColorValue = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('flapamamaku_theme_color', value);
+    notifyListeners();
+  }
 
   bool get canNews => currentUser?['can_news'] == true;
   bool get canEvents => currentUser?['can_events'] == true;
