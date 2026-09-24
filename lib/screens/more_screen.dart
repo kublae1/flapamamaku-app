@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
 import 'admin_screen.dart';
+import 'members_screen.dart';
 import 'remote_content_screen.dart';
 import 'settings_screen.dart';
 
@@ -20,6 +21,15 @@ class MoreScreen extends StatelessWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
         children: [
+          _menuItem(
+            context,
+            Icons.groups_outlined,
+            'Mitglieder',
+            'Infos und Kontakte',
+            () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const MembersScreen()),
+            ),
+          ),
           if (store.canAdminister)
             _menuItem(
               context,
