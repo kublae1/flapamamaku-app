@@ -175,29 +175,6 @@ class MoreScreen extends StatelessWidget {
     );
   }
 
-  Widget _section(
-    BuildContext context,
-    IconData icon,
-    String title,
-    String description,
-  ) {
-    return _menuItem(
-      context,
-      icon,
-      title,
-      description,
-      () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => SimpleSectionScreen(
-            title: title,
-            description: description,
-            icon: icon,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _menuItem(
     BuildContext context,
     IconData icon,
