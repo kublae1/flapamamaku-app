@@ -4,6 +4,7 @@ import '../data/app_store.dart';
 import 'admin_screen.dart';
 import 'content_detail_screens.dart';
 import 'remote_content_screen.dart';
+import 'settings_screen.dart';
 
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
@@ -126,11 +127,14 @@ class MoreScreen extends StatelessWidget {
             subtitle: 'Kontaktinformationen und Ansprechpersonen.',
             emptyText: 'Noch keine Kontaktinformationen hinterlegt.',
           ),
-          _section(
+          _menuItem(
             context,
             Icons.settings_outlined,
             'Einstellungen',
-            'Benachrichtigungen, Datenschutz und App-Einstellungen.',
+            'Farbwahl, Biometrie und App-Einstellungen',
+            () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
           ),
           _remoteSection(
             context,
