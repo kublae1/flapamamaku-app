@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_data.dart';
@@ -35,6 +37,8 @@ class AppStore extends ChangeNotifier {
   }
 
   final ApiService api;
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  final LocalAuthentication _localAuth = LocalAuthentication();
   final List<NewsItem> news;
   final List<EventItem> events;
   final List<MemberItem> members;
@@ -49,6 +53,10 @@ class AppStore extends ChangeNotifier {
   bool authReady = false;
   bool isAuthenticated = false;
   bool isAuthenticating = false;
+  bool biometricEnabled = false;
+  bool biometricAvailable = false;
+  bool biometricUnlockPending = false;
+  bool isBiometricAuthenticating = false;
   Map<String, dynamic>? currentUser;
   String? authError;
 
@@ -78,29 +86,144 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
 
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('flapamamaku_token');
+    biometricEnabled =
+        prefs.getBool('flapamamaku_biometric_enabled') ?? false;
+
+    try {
+      biometricAvailable =
+          await _localAuth.canCheckBiometrics &&
+          await _localAuth.isDeviceSupported();
+    } catch (_) {
+      biometricAvailable = false;
+    }
+
+    final token = await _secureStorage.read(key: 'flapamamaku_token');
     if (token == null || token.isEmpty) {
       api.setToken(null);
+      authReady = true;
+      isAuthenticated = false;
+      biometricUnlockPending = false;
+      notifyListeners();
+      return;
+    }
+
+    if (biometricEnabled && biometricAvailable) {
+      api.setToken(null);
+      biometricUnlockPending = true;
       authReady = true;
       isAuthenticated = false;
       notifyListeners();
       return;
     }
 
+    await _restoreWithToken(token);
+  }
+
+  Future<void> _restoreWithToken(String token) async {
     api.setToken(token);
     try {
       currentUser = await api.fetchMe();
       isAuthenticated = true;
+      biometricUnlockPending = false;
       authError = null;
       await refreshFromServer();
     } catch (_) {
       api.setToken(null);
       currentUser = null;
       isAuthenticated = false;
-      await prefs.remove('flapamamaku_token');
+      biometricUnlockPending = false;
+      await _secureStorage.delete(key: 'flapamamaku_token');
     } finally {
       authReady = true;
       notifyListeners();
+    }
+  }
+
+  Future<bool> unlockWithBiometrics() async {
+    if (!biometricUnlockPending || isBiometricAuthenticating) return false;
+
+    isBiometricAuthenticating = true;
+    authError = null;
+    notifyListeners();
+
+    try {
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'FLAPAMAMAKU entsperren',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+          useErrorDialogs: true,
+        ),
+      );
+
+      if (!authenticated) return false;
+
+      final token = await _secureStorage.read(key: 'flapamamaku_token');
+      if (token == null || token.isEmpty) {
+        biometricUnlockPending = false;
+        return false;
+      }
+
+      await _restoreWithToken(token);
+      return isAuthenticated;
+    } catch (_) {
+      authError = 'Biometrische Anmeldung konnte nicht verwendet werden.';
+      return false;
+    } finally {
+      isBiometricAuthenticating = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> usePasswordInstead() async {
+    api.setToken(null);
+    currentUser = null;
+    isAuthenticated = false;
+    biometricUnlockPending = false;
+    authError = null;
+    authReady = true;
+    notifyListeners();
+  }
+
+  Future<bool> setBiometricEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!enabled) {
+      biometricEnabled = false;
+      await prefs.setBool('flapamamaku_biometric_enabled', false);
+      notifyListeners();
+      return true;
+    }
+
+    try {
+      biometricAvailable =
+          await _localAuth.canCheckBiometrics &&
+          await _localAuth.isDeviceSupported();
+      if (!biometricAvailable) {
+        authError = 'Auf diesem Gerät ist keine biometrische Anmeldung verfügbar.';
+        notifyListeners();
+        return false;
+      }
+
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Biometrische Anmeldung für FLAPAMAMAKU aktivieren',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+          useErrorDialogs: true,
+        ),
+      );
+      if (!authenticated) return false;
+
+      biometricEnabled = true;
+      authError = null;
+      await prefs.setBool('flapamamaku_biometric_enabled', true);
+      notifyListeners();
+      return true;
+    } catch (_) {
+      authError = 'Biometrische Anmeldung konnte nicht aktiviert werden.';
+      notifyListeners();
+      return false;
     }
   }
 
@@ -118,8 +241,10 @@ class AppStore extends ChangeNotifier {
         throw const ApiException('Kein Sitzungstoken erhalten.');
       }
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('flapamamaku_token', token);
+      await _secureStorage.write(
+        key: 'flapamamaku_token',
+        value: token,
+      );
       currentUser = Map<String, dynamic>.from(
         result['user'] as Map<String, dynamic>,
       );
@@ -144,10 +269,10 @@ class AppStore extends ChangeNotifier {
     } catch (_) {
       api.setToken(null);
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('flapamamaku_token');
+    await _secureStorage.delete(key: 'flapamamaku_token');
     currentUser = null;
     isAuthenticated = false;
+    biometricUnlockPending = false;
     authError = null;
     news
       ..clear()
