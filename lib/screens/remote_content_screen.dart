@@ -4,13 +4,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
 import '../models/app_data.dart';
+import '../theme/flap_brand.dart';
 
-enum _ContentSort {
-  newest,
-  oldest,
-  titleAsc,
-  titleDesc,
-}
+enum _ContentSort { newest, oldest, titleAsc, titleDesc }
 
 class RemoteContentScreen extends StatefulWidget {
   final String section;
@@ -33,6 +29,11 @@ class RemoteContentScreen extends StatefulWidget {
 class _RemoteContentScreenState extends State<RemoteContentScreen> {
   _ContentSort sort = _ContentSort.newest;
 
+  bool get _isVisualSection =>
+      widget.section == 'photos' ||
+      widget.section == 'archive' ||
+      widget.section == 'sujet';
+
   Future<void> _openLink(BuildContext context, String value) async {
     final uri = Uri.tryParse(value);
     if (uri == null) return;
@@ -54,38 +55,21 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Eintrag löschen?'),
-        content: Text(
-          '„${item.title}“ wird inklusive zugehöriger Bilder gelöscht.',
-        ),
+        content: Text('„${item.title}“ wird inklusive Bilder gelöscht.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Abbrechen'),
           ),
-          FilledButton.tonalIcon(
+          FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            icon: const Icon(Icons.delete_outline),
-            label: const Text('Löschen'),
+            child: const Text('Löschen'),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
-
-    try {
-      await store.deleteContentItem(item);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Eintrag gelöscht.')),
-        );
-      }
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Eintrag konnte nicht gelöscht werden.')),
-        );
-      }
-    }
+    await store.deleteContentItem(item);
   }
 
   List<ContentItem> _sortedItems(List<ContentItem> source) {
@@ -120,33 +104,51 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
     }
   }
 
+  List<String> _images(ContentItem item) {
+    if (item.imageUrls.isNotEmpty) {
+      return item.imageUrls.where((url) => url.trim().isNotEmpty).toList();
+    }
+    if (item.imageUrl.trim().isNotEmpty) return [item.imageUrl];
+    return const [];
+  }
+
+  void _openAlbum(BuildContext context, ContentItem item, int initialIndex) {
+    final urls = _images(item);
+    if (urls.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _ImageViewerScreen(
+          title: item.title,
+          urls: urls,
+          initialIndex: initialIndex,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
     final items = _sortedItems(store.contentFor(widget.section));
 
     return Scaffold(
+      backgroundColor: FlapBrand.charcoal,
       appBar: AppBar(
-        title: Text(widget.title),
+        title: Text(
+          widget.title,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
         actions: [
           PopupMenuButton<_ContentSort>(
             tooltip: 'Sortieren',
-            icon: const Icon(Icons.sort),
+            icon: const Icon(Icons.sort_rounded),
             initialValue: sort,
             onSelected: (value) => setState(() => sort = value),
             itemBuilder: (context) => _ContentSort.values
                 .map(
-                  (value) => PopupMenuItem<_ContentSort>(
+                  (value) => PopupMenuItem(
                     value: value,
-                    child: Row(
-                      children: [
-                        if (value == sort) ...[
-                          const Icon(Icons.check, size: 18),
-                          const SizedBox(width: 8),
-                        ],
-                        Text(_sortLabel(value)),
-                      ],
-                    ),
+                    child: Text(_sortLabel(value)),
                   ),
                 )
                 .toList(),
@@ -156,189 +158,311 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
       body: RefreshIndicator(
         onRefresh: store.refreshFromServer,
         child: items.isEmpty
-            ? ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(24),
-                children: [
-                  const SizedBox(height: 80),
-                  Icon(
-                    widget.icon,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    widget.emptyText,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                ],
-              )
-            : ListView.separated(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (_, index) {
-                  final item = items[index];
-                  return _ContentCard(
-                    item: item,
+            ? _EmptyState(icon: widget.icon, text: widget.emptyText)
+            : _isVisualSection
+                ? _VisualAlbumGrid(
+                    items: items,
                     headers: store.api.authHeaders,
-                    onOpenLink: item.linkUrl.isEmpty
-                        ? null
-                        : () => _openLink(context, item.linkUrl),
+                    onOpen: (item) => _openAlbum(context, item, 0),
                     onDelete: store.canEditContentSection(widget.section)
-                        ? () => _deleteItem(context, store, item)
+                        ? (item) => _deleteItem(context, store, item)
                         : null,
-                    onOpenImage: (imageIndex) {
-                      final urls = item.imageUrls.isNotEmpty
-                          ? item.imageUrls
-                          : [item.imageUrl];
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => _ImageViewerScreen(
-                            title: item.title,
-                            urls: urls,
-                            initialIndex: imageIndex,
-                          ),
-                        ),
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, index) {
+                      final item = items[index];
+                      return _MockupContentCard(
+                        item: item,
+                        icon: widget.icon,
+                        onOpenLink: item.linkUrl.isEmpty
+                            ? null
+                            : () => _openLink(context, item.linkUrl),
+                        onDelete: store.canEditContentSection(widget.section)
+                            ? () => _deleteItem(context, store, item)
+                            : null,
                       );
                     },
-                  );
-                },
-              ),
+                  ),
       ),
     );
   }
 }
 
-class _ContentCard extends StatelessWidget {
-  final ContentItem item;
+class _EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _EmptyState({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(30),
+      children: [
+        const SizedBox(height: 100),
+        Container(
+          width: 76,
+          height: 76,
+          margin: const EdgeInsets.symmetric(horizontal: 110),
+          decoration: BoxDecoration(
+            color: FlapBrand.burgundy,
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Icon(icon, size: 38, color: Colors.white),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 17,
+            height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VisualAlbumGrid extends StatelessWidget {
+  final List<ContentItem> items;
   final Map<String, String> headers;
+  final ValueChanged<ContentItem> onOpen;
+  final ValueChanged<ContentItem>? onDelete;
+
+  const _VisualAlbumGrid({
+    required this.items,
+    required this.headers,
+    required this.onOpen,
+    this.onDelete,
+  });
+
+  List<String> _images(ContentItem item) {
+    if (item.imageUrls.isNotEmpty) {
+      return item.imageUrls.where((url) => url.trim().isNotEmpty).toList();
+    }
+    if (item.imageUrl.trim().isNotEmpty) return [item.imageUrl];
+    return const [];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 0.78,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, index) {
+        final item = items[index];
+        final urls = _images(item);
+        return Material(
+          color: const Color(0xFF191B1E),
+          borderRadius: BorderRadius.circular(18),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: urls.isEmpty ? null : () => onOpen(item),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (urls.isNotEmpty)
+                        Image.network(
+                          urls.first,
+                          headers: headers,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: const Color(0xFF24272B),
+                            child: const Icon(
+                              Icons.broken_image_outlined,
+                              color: Colors.white54,
+                              size: 42,
+                            ),
+                          ),
+                        )
+                      else
+                        Container(
+                          color: const Color(0xFF24272B),
+                          child: const Icon(
+                            Icons.photo_library_outlined,
+                            color: Colors.white54,
+                            size: 42,
+                          ),
+                        ),
+                      Positioned(
+                        right: 9,
+                        bottom: 9,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xCC000000),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.photo_library_rounded,
+                                color: Colors.white,
+                                size: 15,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${urls.length}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.title.isEmpty ? 'Fotoalbum' : item.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            if (item.text.isNotEmpty) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                item.text,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (onDelete != null)
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          tooltip: 'Löschen',
+                          color: Colors.white54,
+                          onPressed: () => onDelete!(item),
+                          icon: const Icon(Icons.delete_outline_rounded),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MockupContentCard extends StatelessWidget {
+  final ContentItem item;
+  final IconData icon;
   final VoidCallback? onOpenLink;
   final VoidCallback? onDelete;
-  final ValueChanged<int> onOpenImage;
 
-  const _ContentCard({
+  const _MockupContentCard({
     required this.item,
-    required this.headers,
-    required this.onOpenImage,
+    required this.icon,
     this.onOpenLink,
     this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Material(
+      color: const Color(0xFF191B1E),
+      borderRadius: BorderRadius.circular(18),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (item.imageUrls.isNotEmpty)
-            SizedBox(
-              height: 220,
-              child: ListView.separated(
-                padding: const EdgeInsets.all(8),
-                scrollDirection: Axis.horizontal,
-                itemCount: item.imageUrls.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, index) => InkWell(
-                  onTap: () => onOpenImage(index),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Stack(
-                      alignment: Alignment.bottomRight,
-                      children: [
-                        Image.network(
-                          item.imageUrls[index],
-                          headers: headers,
-                          width: 280,
-                          height: 220,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              const SizedBox.shrink(),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.all(8),
-                          child: CircleAvatar(
-                            radius: 17,
-                            child: Icon(Icons.zoom_in, size: 20),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+        child: Row(
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: FlapBrand.burgundy,
+                borderRadius: BorderRadius.circular(14),
               ),
-            )
-          else if (item.imageUrl.isNotEmpty)
-            InkWell(
-              onTap: () => onOpenImage(0),
-              child: Stack(
-                alignment: Alignment.bottomRight,
+              child: Icon(icon, color: Colors.white),
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Image.network(
-                    item.imageUrl,
-                    headers: headers,
-                    width: double.infinity,
-                    height: 210,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: CircleAvatar(
-                      radius: 17,
-                      child: Icon(Icons.zoom_in, size: 20),
+                  Text(
+                    item.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16,
                     ),
                   ),
+                  if (item.text.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      item.text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white60),
+                    ),
+                  ],
                 ],
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                if (item.text.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    item.text,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                ],
-                if (onOpenLink != null || onDelete != null) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (onOpenLink != null)
-                        OutlinedButton.icon(
-                          onPressed: onOpenLink,
-                          icon: const Icon(Icons.open_in_new),
-                          label: const Text('Öffnen'),
-                        ),
-                      if (onOpenLink != null && onDelete != null)
-                        const SizedBox(width: 8),
-                      if (onDelete != null)
-                        OutlinedButton.icon(
-                          onPressed: onDelete,
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Löschen'),
-                        ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
+            if (onOpenLink != null)
+              IconButton(
+                tooltip: 'Öffnen',
+                color: FlapBrand.gold,
+                onPressed: onOpenLink,
+                icon: const Icon(Icons.open_in_new_rounded),
+              ),
+            if (onDelete != null)
+              IconButton(
+                tooltip: 'Löschen',
+                color: Colors.white54,
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline_rounded),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -404,8 +528,7 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
     try {
       final downloaded = await store.api.downloadImage(widget.urls[index]);
       final extension = _extension(downloaded.mimeType);
-      final filename =
-          '${_safeName(widget.title)}_${index + 1}.$extension';
+      final filename = '${_safeName(widget.title)}_${index + 1}.$extension';
       await SharePlus.instance.share(
         ShareParams(
           title: 'Bild speichern oder teilen',
@@ -418,14 +541,6 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
           fileNameOverrides: [filename],
         ),
       );
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Bild konnte nicht bereitgestellt werden.'),
-          ),
-        );
-      }
     } finally {
       if (mounted) setState(() => sharing = false);
     }
@@ -438,10 +553,23 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: Text(
-          widget.urls.length > 1
-              ? '${widget.title} · ${index + 1}/${widget.urls.length}'
-              : widget.title,
+        backgroundColor: Colors.black,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.title,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            Text(
+              '${index + 1} / ${widget.urls.length}',
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
@@ -453,32 +581,58 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.download_outlined),
+                : const Icon(Icons.ios_share_rounded),
           ),
         ],
       ),
-      body: PageView.builder(
-        controller: _controller,
-        itemCount: widget.urls.length,
-        onPageChanged: (value) => setState(() => index = value),
-        itemBuilder: (_, imageIndex) => InteractiveViewer(
-          minScale: 1,
-          maxScale: 5,
-          child: Center(
-            child: Image.network(
-              widget.urls[imageIndex],
-              headers: headers,
-              width: double.infinity,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Center(
-                child: Text(
-                  'Bild konnte nicht geladen werden.',
-                  style: TextStyle(color: Colors.white),
+      body: Stack(
+        children: [
+          PageView.builder(
+            controller: _controller,
+            itemCount: widget.urls.length,
+            onPageChanged: (value) => setState(() => index = value),
+            itemBuilder: (_, imageIndex) => InteractiveViewer(
+              minScale: 1,
+              maxScale: 5,
+              child: Center(
+                child: Image.network(
+                  widget.urls[imageIndex],
+                  headers: headers,
+                  width: double.infinity,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Center(
+                    child: Text(
+                      'Bild konnte nicht geladen werden.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+          if (widget.urls.length > 1)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 24,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  widget.urls.length,
+                  (i) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: i == index ? 22 : 7,
+                    height: 7,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      color: i == index ? FlapBrand.gold : Colors.white38,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
