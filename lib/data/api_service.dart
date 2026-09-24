@@ -109,9 +109,16 @@ class ApiService {
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final values = jsonDecode(response.body) as List<dynamic>;
-    return values
-        .map((value) => MemberItem.fromJson(value as Map<String, dynamic>))
-        .toList();
+    return values.map((value) {
+      final json = Map<String, dynamic>.from(
+        value as Map<String, dynamic>,
+      );
+      final photoUrl = json['photo_url']?.toString() ?? '';
+      if (photoUrl.startsWith('/')) {
+        json['photo_url'] = '$baseUrl$photoUrl';
+      }
+      return MemberItem.fromJson(json);
+    }).toList();
   }
 
   Future<List<ContentItem>> fetchContent({String? section}) async {
@@ -262,9 +269,12 @@ class ApiService {
             )
             .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
-    return MemberItem.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final photoUrl = json['photo_url']?.toString() ?? '';
+    if (photoUrl.startsWith('/')) {
+      json['photo_url'] = '$baseUrl$photoUrl';
+    }
+    return MemberItem.fromJson(json);
   }
 
   Future<void> deleteMember(int id) async {
