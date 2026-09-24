@@ -106,6 +106,7 @@ class MemberItem {
   final String address;
   final String occupation;
   final String employer;
+  final String photoUrl;
 
   const MemberItem(
     this.name,
@@ -120,6 +121,7 @@ class MemberItem {
     this.address = '',
     this.occupation = '',
     this.employer = '',
+    this.photoUrl = '',
   });
 
   factory MemberItem.fromJson(Map<String, dynamic> json) {
@@ -140,6 +142,7 @@ class MemberItem {
       address: json['address']?.toString() ?? '',
       occupation: json['occupation']?.toString() ?? '',
       employer: json['employer']?.toString() ?? '',
+      photoUrl: json['photo_url']?.toString() ?? '',
     );
   }
 }
