@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../data/app_store.dart';
+import '../theme/flap_brand.dart';
 import 'content_detail_screens.dart';
 
 class EventsScreen extends StatefulWidget {
@@ -121,6 +122,7 @@ class _EventsScreenState extends State<EventsScreen> {
     final events = store.events;
 
     return Scaffold(
+      backgroundColor: FlapBrand.charcoal,
       appBar: AppBar(title: const Text('Termine')),
       body: RefreshIndicator(
         onRefresh: store.refreshFromServer,
@@ -182,6 +184,7 @@ class _EventsScreenState extends State<EventsScreen> {
               ),
             ),
             child: Card(
+              color: const Color(0xFF191B1E),
               margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
                 leading: Container(
@@ -191,32 +194,31 @@ class _EventsScreenState extends State<EventsScreen> {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                    color: FlapBrand.burgundy,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     e.displayDate,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
+                      color: Colors.white,
                       fontSize: 13,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
                 ),
                 title: Text(
                   e.title,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
                 ),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${e.displayDate}\n${e.location}\n${e.time}'),
+                    Text('${e.displayDate}\n${e.location}\n${e.time}', style: const TextStyle(color: Colors.white70)),
                     const SizedBox(height: 4),
                     Text(
                       '${e.registrationCount} angemeldet',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: const TextStyle(color: FlapBrand.gold, fontWeight: FontWeight.w700),
                     ),
                     if (isRegistered || isInCalendar) ...[
                       const SizedBox(height: 6),
@@ -246,7 +248,7 @@ class _EventsScreenState extends State<EventsScreen> {
                         onPressed: () => _deleteEvent(context, i),
                         icon: const Icon(Icons.delete_outline),
                       )
-                    : const Icon(Icons.chevron_right),
+                    : const Icon(Icons.chevron_right, color: Colors.white70),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => EventDetailScreen(event: e),
