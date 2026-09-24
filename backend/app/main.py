@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.2",
+    version="0.8.3",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -158,6 +158,8 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             address TEXT NOT NULL DEFAULT '',
             occupation TEXT NOT NULL DEFAULT '',
             employer TEXT NOT NULL DEFAULT '',
+            photo_data BLOB,
+            photo_mime TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )
         """,
@@ -252,6 +254,8 @@ def init_db() -> None:
         _ensure_column(db, "members", "phone_work", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "occupation", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "photo_data", "BLOB")
+        _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
 
         member_columns = _columns(db, "members")
         if "phone" in member_columns:
@@ -366,6 +370,16 @@ def _serialize_news(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
+def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    has_photo = bool(item.pop("photo_data", None))
+    item.pop("photo_mime", None)
+    item["photo_url"] = (
+        f"/api/members/{item['id']}/photo" if has_photo else ""
+    )
+    return item
+
+
 def list_rows(resource: str) -> list[dict[str, Any]]:
     table_or_404(resource)
     if resource == "news":
@@ -385,6 +399,8 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
 
     if resource == "news":
         return [_serialize_news(row) for row in rows]
+    if resource == "members":
+        return [_serialize_member(row) for row in rows]
     return [dict(row) for row in rows]
 
 
@@ -405,7 +421,11 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
             f"SELECT * FROM {resource} WHERE id = ?",
             (cursor.lastrowid,),
         ).fetchone()
-    return _serialize_news(row) if resource == "news" else dict(row)
+    if resource == "news":
+        return _serialize_news(row)
+    if resource == "members":
+        return _serialize_member(row)
+    return dict(row)
 
 
 def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]:
@@ -424,7 +444,11 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
             f"SELECT * FROM {resource} WHERE id = ?",
             (row_id,),
         ).fetchone()
-    return _serialize_news(row) if resource == "news" else dict(row)
+    if resource == "news":
+        return _serialize_news(row)
+    if resource == "members":
+        return _serialize_member(row)
+    return dict(row)
 
 
 def delete_row(resource: str, row_id: int) -> None:
@@ -488,7 +512,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.2"}
+    return {"status": "ok", "version": "0.8.3"}
 
 
 @app.get("/admin")
@@ -1048,6 +1072,80 @@ def put_members(
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> dict[str, Any]:
     return update_row("members", row_id, payload)
+
+
+@app.post("/api/members/{row_id}/photo")
+async def upload_member_photo(
+    row_id: int,
+    photo: UploadFile = File(...),
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> dict[str, Any]:
+    allowed_types = {"image/jpeg", "image/png", "image/webp"}
+    if photo.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+
+    data = await photo.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE members
+            SET photo_data = ?, photo_mime = ?
+            WHERE id = ?
+            """,
+            (data, photo.content_type, row_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_member(row)
+
+
+@app.get("/api/members/{row_id}/photo")
+def get_member_photo(
+    row_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        row = db.execute(
+            "SELECT photo_data, photo_mime FROM members WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    if row is None or row["photo_data"] is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    return Response(
+        content=row["photo_data"],
+        media_type=row["photo_mime"] or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.delete("/api/members/{row_id}/photo", status_code=204)
+def delete_member_photo(
+    row_id: int,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> None:
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE members
+            SET photo_data = NULL, photo_mime = ''
+            WHERE id = ?
+            """,
+            (row_id,),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
+        db.commit()
 
 
 @app.delete("/api/members/{row_id}", status_code=204)
