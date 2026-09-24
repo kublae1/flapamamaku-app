@@ -6,11 +6,14 @@ void main() {
     await tester.pumpWidget(const FlapamamakuApp());
 
     expect(find.text('FLAPAMAMAKU'), findsOneWidget);
-    expect(find.text('Jahresmotto'), findsOneWidget);
     expect(find.text('Start'), findsOneWidget);
     expect(find.text('News'), findsOneWidget);
     expect(find.text('Termine'), findsOneWidget);
     expect(find.text('Galerie'), findsOneWidget);
     expect(find.text('Mehr'), findsOneWidget);
+
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(find.text('Jahresmotto'), findsOneWidget);
   });
 }
