@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'data/app_store.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
+import 'screens/biometric_lock_screen.dart';
 
 void main() {
   runApp(const FlapamamakuApp());
@@ -49,6 +50,9 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
+            }
+            if (store.serverConfigured && store.biometricUnlockPending) {
+              return const BiometricLockScreen();
             }
             if (store.serverConfigured && !store.isAuthenticated) {
               return const LoginScreen();
