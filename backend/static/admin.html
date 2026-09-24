@@ -552,7 +552,7 @@ async function startAdmin() {
         "Lege den ersten Hauptadministrator an. Dieses Konto erhält alle Berechtigungen.";
       document.getElementById("bootstrap-member-wrap").classList.remove("hidden");
       try {
-        const members = await fetch("/api/members").then(r => r.ok ? r.json() : []);
+        const members = await fetch("/api/auth/bootstrap-members").then(r => r.ok ? r.json() : []);
         const select = document.querySelector("#auth-form [name=member_id]");
         members.forEach(member => {
           const option = document.createElement("option");
