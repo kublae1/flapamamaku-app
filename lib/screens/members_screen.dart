@@ -50,7 +50,7 @@ class _MembersScreenState extends State<MembersScreen> {
       body: RefreshIndicator(
         onRefresh: store.refreshFromServer,
         child: filtered.isEmpty
-            ? const ListView(
+            ? ListView(
                 physics: AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.all(24),
                 children: [
