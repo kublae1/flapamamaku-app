@@ -709,9 +709,15 @@ async function loadContent() {
       return count ? `${contentLabels[section]}: ${count}` : "";
     })
     .filter(Boolean);
-  summary.textContent = visibleItems.length
-    ? `${visibleItems.length} Einträge insgesamt · ${counts.join(" · ")}`
-    : "Noch keine Datenbank-Einträge vorhanden.";
+  if (!visibleItems.length) {
+    summary.textContent = "Noch keine Datenbank-Einträge vorhanden.";
+  } else if (filter) {
+    summary.textContent =
+      `Gesamt: ${visibleItems.length} Einträge · Aktueller Bereich „${contentLabels[filter] || filter}“: ${filteredItems.length} · ${counts.join(" · ")}`;
+  } else {
+    summary.textContent =
+      `Gesamt: ${visibleItems.length} Einträge · ${counts.join(" · ")}`;
+  }
 
   if (!filteredItems.length) {
     list.innerHTML = '<p class="meta">Für diesen Bereich sind noch keine Einträge gespeichert.</p>';
