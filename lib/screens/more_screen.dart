@@ -30,20 +30,43 @@ class MoreScreen extends StatelessWidget {
           if (store.serverConfigured && store.isAuthenticated)
             Card(
               margin: const EdgeInsets.only(bottom: 10),
-              child: ListTile(
-                leading: const Icon(Icons.account_circle_outlined),
-                title: Text(
-                  store.signedInName.isEmpty
-                      ? 'Angemeldet'
-                      : store.signedInName,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                subtitle: const Text('Benutzerkonto'),
-                trailing: TextButton.icon(
-                  onPressed: store.logout,
-                  icon: const Icon(Icons.logout),
-                  label: const Text('Abmelden'),
-                ),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.account_circle_outlined),
+                    title: Text(
+                      store.signedInName.isEmpty
+                          ? 'Angemeldet'
+                          : store.signedInName,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: const Text('Benutzerkonto'),
+                    trailing: TextButton.icon(
+                      onPressed: store.logout,
+                      icon: const Icon(Icons.logout),
+                      label: const Text('Abmelden'),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.fingerprint),
+                    title: const Text('Biometrische Anmeldung'),
+                    subtitle: Text(
+                      store.biometricEnabled
+                          ? 'Beim App-Start mit Fingerabdruck, Gesicht oder Geräte-PIN entsperren'
+                          : 'Schnelles und sicheres Entsperren aktivieren',
+                    ),
+                    value: store.biometricEnabled,
+                    onChanged: (value) async {
+                      final ok = await store.setBiometricEnabled(value);
+                      if (!ok && context.mounted && store.authError != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(store.authError!)),
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
             ),
           _menuItem(
