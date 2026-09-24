@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
 import 'admin_screen.dart';
-import 'content_detail_screens.dart';
 import 'remote_content_screen.dart';
 import 'settings_screen.dart';
 
