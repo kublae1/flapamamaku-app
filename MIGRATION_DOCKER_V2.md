@@ -36,3 +36,26 @@ Die bestehende Flutter-App bleibt die technische und funktionale Basis. Funktion
 `feature/docker-integration-v2`
 
 `main` bleibt während dieser Arbeiten unangetastet.
+
+
+## Analyse 24.09.2026
+
+### Bereits kompatibel – keine Neuentwicklung nötig
+
+Die bestehende Flutter-App verwendet bereits dieselben REST-Endpunkte wie das vorhandene Docker-Backend:
+
+- `POST/PUT/DELETE /api/news`
+- `POST/PUT/DELETE /api/events`
+- `POST/PUT/DELETE /api/members`
+- `GET /api/content` für Sujet, Archiv und weitere Inhaltsbereiche
+- `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`
+- Bearer-Token und bestehende Berechtigungsfelder stimmen überein.
+
+Damit bleiben die vorhandenen App-Funktionen bestehen. Für die Docker-Umgebung muss primär der richtige Serverstand bereitgestellt und die App mit dessen `API_BASE_URL` verbunden werden.
+
+### Nächste Prüfung
+
+1. laufenden Docker-Backend-Stand mit Repository-Stand vergleichen
+2. Administratorrechte des verwendeten Kontos prüfen
+3. Serveradresse der installierten App prüfen
+4. erst danach gezielte Korrektur einzelner Fehler
