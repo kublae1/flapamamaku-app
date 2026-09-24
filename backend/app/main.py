@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.4",
+    version="0.8.5",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -76,6 +76,7 @@ class MemberPayload(BaseModel):
     address: str = ""
     occupation: str = ""
     employer: str = ""
+    employer_url: str = ""
 
 
 class ContentPayload(BaseModel):
@@ -158,6 +159,7 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             address TEXT NOT NULL DEFAULT '',
             occupation TEXT NOT NULL DEFAULT '',
             employer TEXT NOT NULL DEFAULT '',
+            employer_url TEXT NOT NULL DEFAULT '',
             photo_data BLOB,
             photo_mime TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
@@ -236,6 +238,18 @@ def init_db() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS event_registrations (
+                event_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (event_id, user_id),
+                FOREIGN KEY(event_id) REFERENCES events(id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS sessions (
                 token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -254,6 +268,7 @@ def init_db() -> None:
         _ensure_column(db, "members", "phone_work", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "occupation", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "photo_data", "BLOB")
         _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
 
@@ -512,7 +527,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.4"}
+    return {"status": "ok", "version": "0.8.5"}
 
 
 @app.get("/admin")
@@ -1020,9 +1035,31 @@ def delete_news_image(
 
 @app.get("/api/events")
 def get_events(
-    _: dict[str, Any] = Depends(current_user),
+    user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
-    return list_rows("events")
+    items = list_rows("events")
+    with connect() as db:
+        counts = {
+            row["event_id"]: row["count"]
+            for row in db.execute(
+                """
+                SELECT event_id, COUNT(*) AS count
+                FROM event_registrations
+                GROUP BY event_id
+                """
+            ).fetchall()
+        }
+        mine = {
+            row["event_id"]
+            for row in db.execute(
+                "SELECT event_id FROM event_registrations WHERE user_id = ?",
+                (user["id"],),
+            ).fetchall()
+        }
+    for item in items:
+        item["registration_count"] = counts.get(item["id"], 0)
+        item["registered_by_me"] = item["id"] in mine
+    return items
 
 
 @app.post("/api/events")
@@ -1042,11 +1079,69 @@ def put_events(
     return update_row("events", row_id, payload)
 
 
+@app.get("/api/events/{row_id}/registrations")
+def get_event_registrations(
+    row_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        event = db.execute("SELECT id FROM events WHERE id = ?", (row_id,)).fetchone()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        rows = db.execute(
+            """
+            SELECT COALESCE(NULLIF(m.name, ''), u.username) AS name
+            FROM event_registrations r
+            JOIN users u ON u.id = r.user_id
+            LEFT JOIN members m ON m.id = u.member_id
+            WHERE r.event_id = ? AND u.active = 1
+            ORDER BY name COLLATE NOCASE
+            """,
+            (row_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post("/api/events/{row_id}/registration", status_code=204)
+def register_for_event(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        event = db.execute("SELECT id FROM events WHERE id = ?", (row_id,)).fetchone()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        db.execute(
+            """
+            INSERT OR IGNORE INTO event_registrations (event_id, user_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (row_id, user["id"], datetime.now(timezone.utc).isoformat()),
+        )
+        db.commit()
+
+
+@app.delete("/api/events/{row_id}/registration", status_code=204)
+def unregister_from_event(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        db.execute(
+            "DELETE FROM event_registrations WHERE event_id = ? AND user_id = ?",
+            (row_id, user["id"]),
+        )
+        db.commit()
+
+
 @app.delete("/api/events/{row_id}", status_code=204)
 def delete_events(
     row_id: int,
     _: dict[str, Any] = Depends(require("can_events")),
 ) -> None:
+    with connect() as db:
+        db.execute("DELETE FROM event_registrations WHERE event_id = ?", (row_id,))
+        db.commit()
     delete_row("events", row_id)
 
 

@@ -210,6 +210,29 @@ class ApiService {
     _ensureSuccess(response);
   }
 
+  Future<List<String>> fetchEventRegistrations(int eventId) async {
+    final response = await http
+        .get(_uri('/api/events/$eventId/registrations'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final values = jsonDecode(response.body) as List<dynamic>;
+    return values
+        .map((value) => (value as Map<String, dynamic>)['name']?.toString() ?? '')
+        .where((name) => name.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> setEventRegistration(int eventId, bool registered) async {
+    final response = registered
+        ? await http
+            .post(_uri('/api/events/$eventId/registration'), headers: authHeaders)
+            .timeout(const Duration(seconds: 8))
+        : await http
+            .delete(_uri('/api/events/$eventId/registration'), headers: authHeaders)
+            .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
   Future<EventItem> saveEvent(EventItem item) async {
     final body = jsonEncode({
       'event_date': item.eventDate,
@@ -256,6 +279,7 @@ class ApiService {
       'address': item.address,
       'occupation': item.occupation,
       'employer': item.employer,
+      'employer_url': item.employerUrl,
     });
     final response = item.id == null
         ? await http

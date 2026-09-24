@@ -69,6 +69,8 @@ class EventItem {
   final String title;
   final String location;
   final String time;
+  final int registrationCount;
+  final bool registeredByMe;
 
   const EventItem(
     this.day,
@@ -78,6 +80,8 @@ class EventItem {
     this.time, {
     this.id,
     this.eventDate = '',
+    this.registrationCount = 0,
+    this.registeredByMe = false,
   });
 
   factory EventItem.fromJson(Map<String, dynamic> json) {
@@ -89,6 +93,8 @@ class EventItem {
       json['time']?.toString() ?? '',
       id: json['id'] as int?,
       eventDate: json['event_date']?.toString() ?? '',
+      registrationCount: json['registration_count'] as int? ?? 0,
+      registeredByMe: json['registered_by_me'] == true,
     );
   }
 }
@@ -106,6 +112,7 @@ class MemberItem {
   final String address;
   final String occupation;
   final String employer;
+  final String employerUrl;
   final String photoUrl;
 
   const MemberItem(
@@ -121,6 +128,7 @@ class MemberItem {
     this.address = '',
     this.occupation = '',
     this.employer = '',
+    this.employerUrl = '',
     this.photoUrl = '',
   });
 
@@ -142,6 +150,7 @@ class MemberItem {
       address: json['address']?.toString() ?? '',
       occupation: json['occupation']?.toString() ?? '',
       employer: json['employer']?.toString() ?? '',
+      employerUrl: json['employer_url']?.toString() ?? '',
       photoUrl: json['photo_url']?.toString() ?? '',
     );
   }

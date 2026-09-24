@@ -57,6 +57,7 @@ class _MembersScreenState extends State<MembersScreen> {
                 final member = filtered[i];
                 return ListTile(
                   leading: CircleAvatar(
+                    radius: 30,
                     backgroundImage: member.photoUrl.isNotEmpty
                         ? NetworkImage(
                             member.photoUrl,

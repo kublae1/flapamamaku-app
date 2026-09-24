@@ -68,6 +68,31 @@ class EventDetailScreen extends StatefulWidget {
 class _EventDetailScreenState extends State<EventDetailScreen> {
   bool registered = false;
   bool inCalendar = false;
+  bool _loadedRegistrations = false;
+  bool _loadingRegistrations = false;
+  List<String> registrations = [];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loadedRegistrations) return;
+    _loadedRegistrations = true;
+    registered = widget.event.registeredByMe;
+    _loadRegistrations();
+  }
+
+  Future<void> _loadRegistrations() async {
+    if (widget.event.id == null || _loadingRegistrations) return;
+    _loadingRegistrations = true;
+    try {
+      final names = await AppStoreScope.of(context)
+          .api
+          .fetchEventRegistrations(widget.event.id!);
+      if (mounted) setState(() => registrations = names);
+    } finally {
+      _loadingRegistrations = false;
+    }
+  }
 
   Future<bool?> _ask(String title, String question) {
     return showDialog<bool>(
@@ -94,8 +119,12 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       'Anmelden',
       'Für „${widget.event.title}“ anmelden?',
     );
-    if (result != null && mounted) {
-      setState(() => registered = result);
+    if (result != null && widget.event.id != null) {
+      await AppStoreScope.of(context).setEventRegistration(widget.event, result);
+      if (mounted) {
+        setState(() => registered = result);
+        await _loadRegistrations();
+      }
     }
   }
 
@@ -163,9 +192,32 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(
-                'Weitere Angaben wie Treffpunkt, Beschreibung und Dokumente können später vom Administrator gepflegt werden.',
-                style: Theme.of(context).textTheme.bodyMedium,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Angemeldete Mitglieder (${registrations.length})',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (registrations.isEmpty)
+                    const Text('Noch niemand angemeldet.')
+                  else
+                    ...registrations.map(
+                      (name) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.person_outline, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(name)),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -215,6 +267,17 @@ class MemberDetailScreen extends StatelessWidget {
     await _launch(context, uri);
   }
 
+  Future<void> _openEmployerWebsite(BuildContext context) async {
+    final value = member.employerUrl.trim();
+    if (value.isEmpty) return;
+    final normalized = value.startsWith('http://') || value.startsWith('https://')
+        ? value
+        : 'https://$value';
+    final uri = Uri.tryParse(normalized);
+    if (uri == null) return;
+    await _launch(context, uri);
+  }
+
   @override
   Widget build(BuildContext context) {
     final partner = member.partnerName.isEmpty
@@ -253,7 +316,7 @@ class MemberDetailScreen extends StatelessWidget {
         children: [
           Center(
             child: CircleAvatar(
-              radius: 52,
+              radius: 72,
               backgroundImage: member.photoUrl.isNotEmpty
                   ? NetworkImage(
                       member.photoUrl,
@@ -264,7 +327,7 @@ class MemberDetailScreen extends StatelessWidget {
                   ? Text(
                       member.name.characters.first,
                       style: const TextStyle(
-                        fontSize: 34,
+                        fontSize: 42,
                         fontWeight: FontWeight.w800,
                       ),
                     )
@@ -353,6 +416,12 @@ class MemberDetailScreen extends StatelessWidget {
                   leading: const Icon(Icons.business_outlined),
                   title: const Text('Arbeitgeber'),
                   subtitle: Text(employer),
+                  trailing: member.employerUrl.isEmpty
+                      ? null
+                      : const Icon(Icons.open_in_new),
+                  onTap: member.employerUrl.isEmpty
+                      ? null
+                      : () => _openEmployerWebsite(context),
                 ),
               ],
             ),

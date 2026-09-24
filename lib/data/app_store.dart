@@ -425,6 +425,21 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  Future<void> setEventRegistration(
+    EventItem event,
+    bool registered,
+  ) async {
+    if (!api.isConfigured || event.id == null) return;
+    try {
+      await api.setEventRegistration(event.id!, registered);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<void> addEvent(EventItem item) async {
     if (!api.isConfigured) {
       events.add(item);

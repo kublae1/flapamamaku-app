@@ -223,6 +223,7 @@ class AdminScreen extends StatelessWidget {
     final address = TextEditingController(text: existing?.address ?? '');
     final occupation = TextEditingController(text: existing?.occupation ?? '');
     final employer = TextEditingController(text: existing?.employer ?? '');
+    final employerUrl = TextEditingController(text: existing?.employerUrl ?? '');
 
     final save = await showDialog<bool>(
       context: context,
@@ -284,6 +285,14 @@ class AdminScreen extends StatelessWidget {
                 controller: employer,
                 decoration: const InputDecoration(labelText: 'Arbeitgeber'),
               ),
+              TextField(
+                controller: employerUrl,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'Webseite Arbeitgeber',
+                  hintText: 'https://...',
+                ),
+              ),
             ],
           ),
         ),
@@ -315,6 +324,8 @@ class AdminScreen extends StatelessWidget {
       address: address.text.trim(),
       occupation: occupation.text.trim(),
       employer: employer.text.trim(),
+      employerUrl: employerUrl.text.trim(),
+      photoUrl: existing?.photoUrl ?? '',
     );
 
     if (index == null) {
@@ -380,7 +391,12 @@ class AdminScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Administration'),
-          bottom: TabBar(tabs: tabs),
+          bottom: TabBar(
+            labelColor: Colors.black,
+            unselectedLabelColor: Colors.black,
+            indicatorColor: Colors.black,
+            tabs: tabs,
+          ),
         ),
         body: TabBarView(children: views),
       ),

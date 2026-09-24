@@ -10,7 +10,6 @@ class EventsScreen extends StatefulWidget {
 }
 
 class _EventsScreenState extends State<EventsScreen> {
-  final Set<int> registeredEvents = {};
   final Set<int> calendarEvents = {};
 
   Future<bool?> _ask(
@@ -50,10 +49,8 @@ class _EventsScreenState extends State<EventsScreen> {
         title: 'Anmelden',
         question: 'Für „${event.title}“ anmelden?',
       );
-      if (result == true && mounted) {
-        setState(() => registeredEvents.add(index));
-      } else if (result == false && mounted) {
-        setState(() => registeredEvents.remove(index));
+      if (result != null && event.id != null) {
+        await AppStoreScope.of(context).setEventRegistration(event, result);
       }
       return false;
     }
@@ -86,7 +83,7 @@ class _EventsScreenState extends State<EventsScreen> {
         itemCount: events.length,
         itemBuilder: (_, i) {
           final e = events[i];
-          final isRegistered = registeredEvents.contains(i);
+          final isRegistered = e.registeredByMe;
           final isInCalendar = calendarEvents.contains(i);
 
           return Dismissible(
@@ -171,6 +168,11 @@ class _EventsScreenState extends State<EventsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${e.location}\n${e.time}'),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${e.registrationCount} angemeldet',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     if (isRegistered || isInCalendar) ...[
                       const SizedBox(height: 6),
                       Wrap(
