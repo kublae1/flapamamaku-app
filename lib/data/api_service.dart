@@ -114,6 +114,61 @@ class ApiService {
         .toList();
   }
 
+  Future<List<ContentItem>> fetchContent({String? section}) async {
+    final suffix = section == null || section.isEmpty
+        ? ''
+        : '?section=${Uri.encodeQueryComponent(section)}';
+    final response = await http
+        .get(_uri('/api/content$suffix'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final values = jsonDecode(response.body) as List<dynamic>;
+    return values.map((value) {
+      final json = Map<String, dynamic>.from(
+        value as Map<String, dynamic>,
+      );
+      final imageUrl = json['image_url']?.toString() ?? '';
+      if (imageUrl.startsWith('/')) {
+        json['image_url'] = '$baseUrl$imageUrl';
+      }
+      return ContentItem.fromJson(json);
+    }).toList();
+  }
+
+  Future<ContentItem> saveContent(ContentItem item) async {
+    final body = jsonEncode({
+      'section': item.section,
+      'title': item.title,
+      'text': item.text,
+      'link_url': item.linkUrl,
+    });
+    final response = item.id == null
+        ? await http
+            .post(_uri('/api/content'), headers: _jsonHeaders, body: body)
+            .timeout(const Duration(seconds: 8))
+        : await http
+            .put(
+              _uri('/api/content/${item.id}'),
+              headers: _jsonHeaders,
+              body: body,
+            )
+            .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final imageUrl = json['image_url']?.toString() ?? '';
+    if (imageUrl.startsWith('/')) {
+      json['image_url'] = '$baseUrl$imageUrl';
+    }
+    return ContentItem.fromJson(json);
+  }
+
+  Future<void> deleteContent(int id) async {
+    final response = await http
+        .delete(_uri('/api/content/$id'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
   Future<NewsItem> saveNews(NewsItem item) async {
     final body = jsonEncode({
       'title': item.title,
