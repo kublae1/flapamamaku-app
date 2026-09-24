@@ -253,14 +253,22 @@ class MemberDetailScreen extends StatelessWidget {
         children: [
           Center(
             child: CircleAvatar(
-              radius: 44,
-              child: Text(
-                member.name.characters.first,
-                style: const TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+              radius: 52,
+              backgroundImage: member.photoUrl.isNotEmpty
+                  ? NetworkImage(
+                      member.photoUrl,
+                      headers: AppStoreScope.of(context).api.authHeaders,
+                    )
+                  : null,
+              child: member.photoUrl.isEmpty
+                  ? Text(
+                      member.name.characters.first,
+                      style: const TextStyle(
+                        fontSize: 34,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    )
+                  : null,
             ),
           ),
           const SizedBox(height: 18),
