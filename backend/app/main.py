@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 
@@ -15,7 +15,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.7.2",
+    version="0.7.3",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -68,6 +68,8 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             text TEXT NOT NULL,
             date TEXT NOT NULL,
             image_url TEXT NOT NULL DEFAULT '',
+            image_data BLOB,
+            image_mime TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )
         """,
@@ -137,6 +139,8 @@ def init_db() -> None:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
 
+        _ensure_column(db, "news", "image_data", "BLOB")
+        _ensure_column(db, "news", "image_mime", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "events", "event_date", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_mobile", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_private", "TEXT NOT NULL DEFAULT ''")
@@ -168,6 +172,15 @@ def table_or_404(name: str) -> tuple[str, type[BaseModel]]:
     return table
 
 
+def _serialize_news(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    has_image = bool(item.pop("image_data", None))
+    item.pop("image_mime", None)
+    if has_image:
+        item["image_url"] = f"/api/news/{item['id']}/image"
+    return item
+
+
 def list_rows(resource: str) -> list[dict[str, Any]]:
     table_or_404(resource)
     if resource == "news":
@@ -184,6 +197,9 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
         rows = db.execute(
             f"SELECT * FROM {resource} ORDER BY {order}"
         ).fetchall()
+
+    if resource == "news":
+        return [_serialize_news(row) for row in rows]
     return [dict(row) for row in rows]
 
 
@@ -204,7 +220,7 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
             f"SELECT * FROM {resource} WHERE id = ?",
             (cursor.lastrowid,),
         ).fetchone()
-    return dict(row)
+    return _serialize_news(row) if resource == "news" else dict(row)
 
 
 def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]:
@@ -223,7 +239,7 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
             f"SELECT * FROM {resource} WHERE id = ?",
             (row_id,),
         ).fetchone()
-    return dict(row)
+    return _serialize_news(row) if resource == "news" else dict(row)
 
 
 def delete_row(resource: str, row_id: int) -> None:
@@ -249,7 +265,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.7.2"}
+    return {"status": "ok", "version": "0.7.3"}
 
 
 @app.get("/admin")
@@ -275,6 +291,73 @@ def put_news(row_id: int, payload: NewsPayload) -> dict[str, Any]:
 @app.delete("/api/news/{row_id}", status_code=204)
 def delete_news(row_id: int) -> None:
     delete_row("news", row_id)
+
+
+
+
+@app.post("/api/news/{row_id}/image")
+async def upload_news_image(
+    row_id: int,
+    image: UploadFile = File(...),
+) -> dict[str, Any]:
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if image.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+
+    data = await image.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE news
+            SET image_data = ?, image_mime = ?, image_url = ''
+            WHERE id = ?
+            """,
+            (data, image.content_type, row_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        db.commit()
+        row = db.execute("SELECT * FROM news WHERE id = ?", (row_id,)).fetchone()
+    return _serialize_news(row)
+
+
+@app.get("/api/news/{row_id}/image")
+def get_news_image(row_id: int) -> Response:
+    with connect() as db:
+        row = db.execute(
+            "SELECT image_data, image_mime FROM news WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+
+    if row is None or row["image_data"] is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return Response(
+        content=row["image_data"],
+        media_type=row["image_mime"] or "application/octet-stream",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.delete("/api/news/{row_id}/image", status_code=204)
+def delete_news_image(row_id: int) -> None:
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE news
+            SET image_data = NULL, image_mime = '', image_url = ''
+            WHERE id = ?
+            """,
+            (row_id,),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        db.commit()
 
 
 @app.get("/api/events")
