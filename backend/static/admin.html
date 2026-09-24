@@ -182,6 +182,9 @@
           <label>Wohnort / Adresse</label><input name="address">
           <label>Beruf</label><input name="occupation">
           <label>Arbeitgeber</label><input name="employer">
+          <label>Mitgliederfoto</label>
+          <input name="photo_file" type="file" accept="image/jpeg,image/png,image/webp">
+          <p class="meta">JPG, PNG oder WebP · max. 12 MB</p>
 
           <div id="member-account-block" class="hidden">
             <hr style="margin:20px 0;border:0;border-top:1px solid #eee6de">
@@ -436,6 +439,7 @@ async function load(resource) {
       <h3>${label(resource, item)}</h3>
       <div class="meta">${item.location || item.email || item.text || ""}</div>
       ${resource === "news" && item.image_url ? `<div class="meta">Foto gespeichert</div>` : ""}
+      ${resource === "members" && item.photo_url ? '<div class="meta">Mitgliederfoto gespeichert</div>' : ""}
       ${resource === "members" && currentUser?.can_manage_users
         ? `<div class="meta">${userAccounts.some(user => Number(user.member_id) === Number(item.id)) ? "Benutzerkonto vorhanden" : "Kein Benutzerkonto"}</div>`
         : ""}
@@ -588,6 +592,18 @@ Object.keys(resources).forEach(resource => {
           console.error(error);
           return;
         }
+      }
+    }
+
+    if (resource === "members") {
+      const file = form.elements.photo_file.files[0];
+      if (file) {
+        const upload = new FormData();
+        upload.append("photo", file);
+        await api(`/api/members/${saved.id}/photo`, {
+          method:"POST",
+          body:upload,
+        });
       }
     }
 
@@ -786,7 +802,7 @@ async function startAdmin() {
   showAdmin();
   applyPermissions();
   document.getElementById("status").textContent =
-    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.2`;
+    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.3`;
 
   if (currentUser.can_news) {
     document.querySelector("#news-form [name=date]").value =
