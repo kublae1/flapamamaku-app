@@ -105,8 +105,10 @@
         <textarea name="text" required></textarea>
         <label>Datum</label>
         <input name="date" required>
-        <label>Bild-URL (optional)</label>
-        <input name="image_url">
+        <input type="hidden" name="image_url">
+        <label>Foto (optional)</label>
+        <input name="image_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+        <p class="meta">JPG, PNG, WebP oder GIF · max. 12 MB</p>
         <p><button class="primary" type="submit">Speichern</button></p>
       </form>
       <div class="card">
@@ -199,8 +201,11 @@ function formData(form, resource) {
 }
 
 async function api(path, options = {}) {
+  const headers = options.body instanceof FormData
+    ? {}
+    : {"Content-Type": "application/json"};
   const response = await fetch(path, {
-    headers: {"Content-Type": "application/json"},
+    headers,
     ...options,
   });
   if (!response.ok) {
@@ -226,6 +231,7 @@ async function load(resource) {
     div.innerHTML = `
       <h3>${label(resource, item)}</h3>
       <div class="meta">${item.location || item.email || item.text || ""}</div>
+      ${resource === "news" && item.image_url ? `<div class="meta">Foto gespeichert</div>` : ""}
       <div class="actions">
         <button type="button" class="edit">Bearbeiten</button>
         <button type="button" class="delete">Löschen</button>
@@ -256,10 +262,23 @@ Object.keys(resources).forEach(resource => {
     event.preventDefault();
     const id = form.elements.id.value;
     const body = JSON.stringify(formData(form, resource));
-    await api(
+    const saved = await api(
       id ? `/api/${resource}/${id}` : `/api/${resource}`,
       {method: id ? "PUT" : "POST", body}
     );
+
+    if (resource === "news") {
+      const file = form.elements.image_file.files[0];
+      if (file) {
+        const upload = new FormData();
+        upload.append("image", file);
+        await api(`/api/news/${saved.id}/image`, {
+          method: "POST",
+          body: upload,
+        });
+      }
+    }
+
     form.reset();
     form.elements.id.value = "";
     if (resource === "members") form.elements.role.value = "Präsident";
