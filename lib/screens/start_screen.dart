@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../data/app_store.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
-import '../widgets/section_title.dart';
 import 'year_motto_screen.dart';
 import 'remote_content_screen.dart';
 import 'content_detail_screens.dart';
@@ -54,60 +53,109 @@ class StartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final latestNewsImage = store.news.isEmpty
-        ? null
-        : _newsImage(store.news.first, store.api.authHeaders);
     final sujetImages = _sujetImages(store);
+    final latest = store.news.isEmpty ? null : store.news.first;
+    final latestImage =
+        latest == null ? null : _newsImage(latest, store.api.authHeaders);
 
-    return RefreshIndicator(
-      onRefresh: store.refreshFromServer,
-      child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 285,
-            pinned: true,
-            backgroundColor: FlapBrand.charcoal,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
+    return Scaffold(
+      backgroundColor: FlapBrand.charcoal,
+      body: RefreshIndicator(
+        onRefresh: store.refreshFromServer,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Stack(
                 children: [
-                  Image.asset(
-                    'assets/images/hero_fireworks.jpg',
+                  SizedBox(
+                    height: 330,
                     width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.cover,
+                    child: Image.asset(
+                      'assets/images/hero_fireworks.jpg',
+                      fit: BoxFit.cover,
+                    ),
                   ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
+                  Container(
+                    height: 330,
+                    decoration: const BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0x22000000), Color(0xDD000000)],
+                        colors: [
+                          Color(0x22000000),
+                          Color(0x77000000),
+                          FlapBrand.charcoal,
+                        ],
                       ),
                     ),
                   ),
+                  Positioned(
+                    left: 18,
+                    right: 18,
+                    top: 52,
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Image.asset('assets/FLAPAMAMAKU App-Icon.png'),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'FLAPAMAMAKU',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.3,
+                                ),
+                              ),
+                              Text(
+                                'Fasnachtsgruppe Luzern',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const Positioned(
-                    left: 20,
-                    right: 20,
-                    bottom: 24,
+                    left: 18,
+                    right: 18,
+                    bottom: 34,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'DIE SCHWEINE ROCKER',
                           style: TextStyle(
-                            color: Colors.white70,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.4,
+                            color: FlapBrand.gold,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.8,
                           ),
                         ),
-                        SizedBox(height: 6),
+                        SizedBox(height: 5),
                         Text(
-                          'der Stadt Luzern',
+                          'in der Bar',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 30,
+                            fontSize: 34,
+                            height: 1,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
@@ -117,101 +165,75 @@ class StartScreen extends StatelessWidget {
                 ],
               ),
             ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-            sliver: SliverList.list(
-              children: [
-                InkWell(
-                  borderRadius: BorderRadius.circular(22),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const YearMottoScreen()),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+              sliver: SliverList.list(
+                children: [
+                  _BrandSectionTitle(
+                    overline: 'JAHRESMOTTO',
+                    title: 'Unser Sujet',
+                    trailing: 'Ansehen',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const YearMottoScreen()),
+                    ),
                   ),
-                  child: sujetImages.isEmpty
-                      ? Card(
-                          margin: EdgeInsets.zero,
-                          child: Padding(
-                            padding: const EdgeInsets.all(18),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.auto_awesome_outlined,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Sujet nächstes Jahr',
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Noch keine Sujet-Bilder hinterlegt.',
-                                      ),
-                                    ],
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const YearMottoScreen()),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(26),
+                      child: Stack(
+                        children: [
+                          SizedBox(
+                            height: 255,
+                            width: double.infinity,
+                            child: sujetImages.isNotEmpty
+                                ? Image.network(
+                                    sujetImages.first,
+                                    headers: store.api.authHeaders,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Image.asset(
+                                      'assets/images/year_motto_pig_rockers.jpg',
+                                      fit: BoxFit.cover,
+                                    ),
+                                  )
+                                : Image.asset(
+                                    'assets/images/year_motto_pig_rockers.jpg',
+                                    fit: BoxFit.cover,
                                   ),
-                                ),
-                                const Icon(Icons.chevron_right),
-                              ],
+                          ),
+                          Container(
+                            height: 255,
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Colors.transparent, Color(0xDD000000)],
+                              ),
                             ),
                           ),
-                        )
-                      : SujetSlider(
-                          images: sujetImages,
-                          headers: store.api.authHeaders,
-                        ),
-                ),
-                const SizedBox(height: 26),
-                const SectionTitle('Aktuelle News', action: 'Alle'),
-                const SizedBox(height: 8),
-                if (store.news.isNotEmpty)
-                  Card(
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => NewsDetailScreen(
-                            item: store.news.first,
-                          ),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (latestNewsImage != null) latestNewsImage,
-                          Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          const Positioned(
+                            left: 18,
+                            right: 18,
+                            bottom: 17,
+                            child: Row(
                               children: [
-                                Text(
-                                  store.news.first.date,
-                                  style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                    fontWeight: FontWeight.w700,
+                                Expanded(
+                                  child: Text(
+                                    'Sujet nächstes Jahr',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w900,
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  store.news.first.title,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  store.news.first.text,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
+                                CircleAvatar(
+                                  backgroundColor: FlapBrand.burgundy,
+                                  foregroundColor: Colors.white,
+                                  child: Icon(Icons.arrow_forward_rounded),
                                 ),
                               ],
                             ),
@@ -219,60 +241,136 @@ class StartScreen extends StatelessWidget {
                         ],
                       ),
                     ),
-                  )
-                else
-                  const Card(
-                    child: ListTile(
-                      title: Text('Keine News vorhanden'),
-                    ),
                   ),
-                const SizedBox(height: 20),
-                const SectionTitle('Nächste Termine', action: 'Alle'),
-                const SizedBox(height: 8),
-                ...store.events.take(2).map(
-                  (e) => Card(
-                    child: ListTile(
-                      leading: SizedBox(
-                        width: 48,
+                  const SizedBox(height: 28),
+                  const _BrandSectionTitle(
+                    overline: 'AKTUELL',
+                    title: 'News',
+                  ),
+                  const SizedBox(height: 10),
+                  if (latest != null)
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => NewsDetailScreen(item: latest),
+                          ),
+                        ),
                         child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              e.day,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
+                            if (latestImage != null) latestImage,
+                            Container(
+                              color: const Color(0xFF191B1E),
+                              padding: const EdgeInsets.all(18),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    latest.date.toUpperCase(),
+                                    style: const TextStyle(
+                                      color: FlapBrand.gold,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.2,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 7),
+                                  Text(
+                                    latest.title,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 23,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    latest.text,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            Text(e.month),
                           ],
                         ),
                       ),
-                      title: Text(e.title),
-                      subtitle: Text('${e.location} · ${e.time}'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => EventDetailScreen(event: e),
+                    )
+                  else
+                    const _DarkInfoCard(text: 'Noch keine News vorhanden.'),
+                  const SizedBox(height: 28),
+                  const _BrandSectionTitle(
+                    overline: 'KALENDER',
+                    title: 'Nächste Termine',
+                  ),
+                  const SizedBox(height: 10),
+                  ...store.events.take(2).map(
+                    (event) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Card(
+                        color: const Color(0xFF191B1E),
+                        child: ListTile(
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          leading: Container(
+                            width: 58,
+                            height: 62,
+                            decoration: BoxDecoration(
+                              color: FlapBrand.burgundy,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  event.day,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 23,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                Text(
+                                  event.month,
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          title: Text(
+                            event.title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${event.location} · ${event.time}',
+                            style: const TextStyle(color: Colors.white60),
+                          ),
+                          trailing:
+                              const Icon(Icons.chevron_right, color: Colors.white70),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => EventDetailScreen(event: event),
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                Card(
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.photo_library_outlined),
-                    ),
-                    title: const Text(
-                      'Vergangene Sujet',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: const Text(
-                      'Frühere Sujets, Mottos und Erinnerungen',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
+                  const SizedBox(height: 18),
+                  _GalleryTile(
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => const RemoteContentScreen(
@@ -285,11 +383,152 @@ class StartScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BrandSectionTitle extends StatelessWidget {
+  final String overline;
+  final String title;
+  final String? trailing;
+  final VoidCallback? onTap;
+
+  const _BrandSectionTitle({
+    required this.overline,
+    required this.title,
+    this.trailing,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                overline,
+                style: const TextStyle(
+                  color: FlapBrand.gold,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.6,
                 ),
-              ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 25,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (trailing != null)
+          TextButton(
+            onPressed: onTap,
+            child: Text(
+              trailing!,
+              style: const TextStyle(color: FlapBrand.gold),
             ),
           ),
-        ],
+      ],
+    );
+  }
+}
+
+class _DarkInfoCard extends StatelessWidget {
+  final String text;
+  const _DarkInfoCard({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: const Color(0xFF191B1E),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Text(text, style: const TextStyle(color: Colors.white70)),
+      ),
+    );
+  }
+}
+
+class _GalleryTile extends StatelessWidget {
+  final VoidCallback onTap;
+  const _GalleryTile({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(26),
+      onTap: onTap,
+      child: Container(
+        height: 150,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(26),
+          image: const DecorationImage(
+            image: AssetImage('assets/images/archive_top_hats_night.jpg'),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(26),
+            gradient: const LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [Color(0xEE000000), Color(0x33000000)],
+            ),
+          ),
+          child: const Row(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ARCHIV & GALERIE',
+                      style: TextStyle(
+                        color: FlapBrand.gold,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                    SizedBox(height: 5),
+                    Text(
+                      'Vergangene Sujet',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              CircleAvatar(
+                backgroundColor: FlapBrand.burgundy,
+                foregroundColor: Colors.white,
+                child: Icon(Icons.photo_library_outlined),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
