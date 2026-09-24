@@ -134,6 +134,11 @@ class ApiService {
       final json = Map<String, dynamic>.from(
         value as Map<String, dynamic>,
       );
+      final imageUrls = (json['image_urls'] as List<dynamic>? ?? const [])
+          .map((value) => value.toString())
+          .map((value) => value.startsWith('/') ? '$baseUrl$value' : value)
+          .toList();
+      json['image_urls'] = imageUrls;
       final imageUrl = json['image_url']?.toString() ?? '';
       if (imageUrl.startsWith('/')) {
         json['image_url'] = '$baseUrl$imageUrl';
@@ -162,6 +167,11 @@ class ApiService {
             .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final imageUrls = (json['image_urls'] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .map((value) => value.startsWith('/') ? '$baseUrl$value' : value)
+        .toList();
+    json['image_urls'] = imageUrls;
     final imageUrl = json['image_url']?.toString() ?? '';
     if (imageUrl.startsWith('/')) {
       json['image_url'] = '$baseUrl$imageUrl';

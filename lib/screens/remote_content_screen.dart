@@ -96,7 +96,28 @@ class _ContentCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (item.imageUrl.isNotEmpty)
+          if (item.imageUrls.isNotEmpty)
+            SizedBox(
+              height: 220,
+              child: ListView.separated(
+                padding: const EdgeInsets.all(8),
+                scrollDirection: Axis.horizontal,
+                itemCount: item.imageUrls.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, index) => ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.network(
+                    item.imageUrls[index],
+                    headers: headers,
+                    width: 280,
+                    height: 220,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            )
+          else if (item.imageUrl.isNotEmpty)
             Image.network(
               item.imageUrl,
               headers: headers,

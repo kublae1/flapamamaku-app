@@ -283,9 +283,9 @@
           <label>Titel</label><input name="title" required>
           <label>Text / Beschreibung</label><textarea name="text"></textarea>
           <label>Link (optional)</label><input name="link_url" placeholder="https://...">
-          <label>Bild (optional)</label>
-          <input name="image_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
-          <p class="meta">JPG, PNG, WebP oder GIF · max. 12 MB</p>
+          <label>Bilder (optional)</label>
+          <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+          <p class="meta">Mehrere Bilder gleichzeitig möglich · JPG, PNG, WebP oder GIF · max. 12 MB pro Bild</p>
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card">
@@ -707,7 +707,7 @@ async function loadContent() {
       <h3>${contentLabels[item.section] || item.section}: ${item.title}</h3>
       <div class="meta">Datenbank-ID ${item.id} · gespeichert ${formatDateTimeCH(item.created_at)}</div>
       ${preview ? `<p>${preview}</p>` : ""}
-      ${item.image_url ? '<div class="meta">✓ Bild gespeichert</div>' : '<div class="meta">Kein Bild</div>'}
+      ${item.image_urls?.length ? `<div class="meta">✓ ${item.image_urls.length} Bilder gespeichert</div>` : '<div class="meta">Keine Bilder</div>'}
       ${item.link_url ? `<div class="meta">Link: <a href="${item.link_url}" target="_blank" rel="noopener">${item.link_url}</a></div>` : ""}
       <div class="actions">
         <button type="button" class="edit">Bearbeiten</button>
@@ -758,11 +758,11 @@ document.getElementById("content-form").addEventListener("submit", async event =
     }),
   });
 
-  const file = form.elements.image_file.files[0];
-  if (file) {
+  const files = [...form.elements.image_files.files];
+  if (files.length) {
     const upload = new FormData();
-    upload.append("image", file);
-    await api(`/api/content/${saved.id}/image`, {
+    files.forEach(file => upload.append("images", file));
+    await api(`/api/content/${saved.id}/images`, {
       method:"POST",
       body:upload,
     });
@@ -850,7 +850,7 @@ async function startAdmin() {
   showAdmin();
   applyPermissions();
   document.getElementById("status").textContent =
-    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.6`;
+    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.7`;
 
   if (currentUser.can_news) {
     document.querySelector("#news-form [name=date]").value =

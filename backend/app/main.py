@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.6",
+    version="0.8.7",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -207,6 +207,19 @@ def init_db() -> None:
                 image_data BLOB,
                 image_mime TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS content_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_id INTEGER NOT NULL,
+                image_data BLOB NOT NULL,
+                image_mime TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(content_id) REFERENCES content_items(id)
             )
             """
         )
@@ -492,11 +505,22 @@ CONTENT_PERMISSIONS = {
 
 def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
-    has_image = bool(item.pop("image_data", None))
+    has_legacy_image = bool(item.pop("image_data", None))
     item.pop("image_mime", None)
-    item["image_url"] = (
-        f"/api/content/{item['id']}/image" if has_image else ""
+    image_urls: list[str] = []
+    if has_legacy_image:
+        image_urls.append(f"/api/content/{item['id']}/image")
+    with connect() as db:
+        image_rows = db.execute(
+            "SELECT id FROM content_images WHERE content_id = ? ORDER BY id ASC",
+            (item["id"],),
+        ).fetchall()
+    image_urls.extend(
+        f"/api/content/{item['id']}/images/{image_row['id']}"
+        for image_row in image_rows
     )
+    item["image_urls"] = image_urls
+    item["image_url"] = image_urls[0] if image_urls else ""
     return item
 
 
@@ -527,7 +551,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.6"}
+    return {"status": "ok", "version": "0.8.7"}
 
 
 @app.get("/admin")
@@ -842,8 +866,81 @@ def delete_content(
         if row is None:
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(row["section"], user)
+        db.execute("DELETE FROM content_images WHERE content_id = ?", (row_id,))
         db.execute("DELETE FROM content_items WHERE id = ?", (row_id,))
         db.commit()
+
+
+@app.post("/api/content/{row_id}/images")
+async def upload_content_images(
+    row_id: int,
+    images: list[UploadFile] = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not images:
+        raise HTTPException(status_code=400, detail="Keine Bilder ausgewählt")
+    if len(images) > 30:
+        raise HTTPException(status_code=413, detail="Maximal 30 Bilder pro Upload")
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    prepared: list[tuple[bytes, str]] = []
+    for image in images:
+        if image.content_type not in allowed_types:
+            raise HTTPException(status_code=415, detail="Unsupported image type")
+        data = await image.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="Empty image")
+        if len(data) > 12 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Image too large")
+        prepared.append((data, image.content_type or "application/octet-stream"))
+
+    with connect() as db:
+        existing = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        now = datetime.now(timezone.utc).isoformat()
+        db.executemany(
+            """
+            INSERT INTO content_images (
+                content_id, image_data, image_mime, created_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            [(row_id, data, mime, now) for data, mime in prepared],
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_content(row)
+
+
+@app.get("/api/content/{row_id}/images/{image_id}")
+def get_content_gallery_image(
+    row_id: int,
+    image_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        row = db.execute(
+            """
+            SELECT image_data, image_mime
+            FROM content_images
+            WHERE id = ? AND content_id = ?
+            """,
+            (image_id, row_id),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return Response(
+        content=row["image_data"],
+        media_type=row["image_mime"] or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @app.post("/api/content/{row_id}/image")

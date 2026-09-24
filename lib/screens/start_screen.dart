@@ -5,7 +5,7 @@ import '../data/app_store.dart';
 import '../models/app_data.dart';
 import '../widgets/section_title.dart';
 import 'year_motto_screen.dart';
-import 'archive_screen.dart';
+import 'remote_content_screen.dart';
 import 'content_detail_screens.dart';
 
 class StartScreen extends StatelessWidget {
@@ -174,7 +174,7 @@ class StartScreen extends StatelessWidget {
                     child: Icon(Icons.photo_library_outlined),
                   ),
                   title: const Text(
-                    'Archiv',
+                    'Vergangene Sujet',
                     style: TextStyle(fontWeight: FontWeight.w800),
                   ),
                   subtitle: const Text(
@@ -182,7 +182,14 @@ class StartScreen extends StatelessWidget {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ArchiveScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const RemoteContentScreen(
+                        section: 'archive',
+                        title: 'Vergangene Sujet',
+                        emptyText: 'Noch keine vergangenen Sujets hinterlegt.',
+                        icon: Icons.history,
+                      ),
+                    ),
                   ),
                 ),
               ),

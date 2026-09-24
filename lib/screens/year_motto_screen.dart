@@ -21,7 +21,7 @@ class _YearMottoScreenState extends State<YearMottoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(title: const Text('Aktuelles Sujet')),
+      appBar: AppBar(title: const Text('Sujet nächstes Jahr')),
       body: Stack(
         children: [
           PageView.builder(

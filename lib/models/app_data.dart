@@ -5,6 +5,7 @@ class ContentItem {
   final String text;
   final String linkUrl;
   final String imageUrl;
+  final List<String> imageUrls;
   final String createdAt;
 
   const ContentItem({
@@ -14,6 +15,7 @@ class ContentItem {
     this.text = '',
     this.linkUrl = '',
     this.imageUrl = '',
+    this.imageUrls = const [],
     this.createdAt = '',
   });
 
@@ -25,6 +27,9 @@ class ContentItem {
       text: json['text']?.toString() ?? '',
       linkUrl: json['link_url']?.toString() ?? '',
       imageUrl: json['image_url']?.toString() ?? '',
+      imageUrls: (json['image_urls'] as List<dynamic>? ?? const [])
+          .map((value) => value.toString())
+          .toList(),
       createdAt: json['created_at']?.toString() ?? '',
     );
   }
