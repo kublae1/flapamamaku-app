@@ -189,8 +189,18 @@
             <label>Benutzername</label>
             <input name="account_username" autocomplete="off">
             <label>Passwort</label>
-            <input name="account_password" type="password" minlength="6" autocomplete="new-password">
-            <p class="meta">Bei bestehendem Konto leer lassen, wenn das Passwort nicht geändert werden soll.</p>
+            <input
+              name="account_password"
+              type="password"
+              minlength="6"
+              maxlength="200"
+              autocomplete="new-password"
+              placeholder="Mindestens 6 Zeichen"
+            >
+            <p class="meta">
+              Neues Konto: Passwort mit mindestens 6 Zeichen eingeben.
+              Bestehendes Konto: Feld leer lassen, wenn das Passwort unverändert bleiben soll.
+            </p>
             <label><input name="account_active" type="checkbox" checked> Konto aktiv</label>
             <h3>Berechtigungen</h3>
             <div class="permission-grid">
@@ -223,8 +233,17 @@
           <select name="member_id"><option value="">Kein Mitglied verknüpft</option></select>
           <label>Benutzername</label><input name="username" required>
           <label>Passwort</label>
-          <input name="password" type="password" minlength="6">
-          <p class="meta">Bei bestehendem Benutzer leer lassen, wenn das Passwort nicht geändert werden soll.</p>
+          <input
+            name="password"
+            type="password"
+            minlength="6"
+            maxlength="200"
+            placeholder="Mindestens 6 Zeichen"
+          >
+          <p class="meta">
+            Neues Konto: Passwort mit mindestens 6 Zeichen eingeben.
+            Bestehender Benutzer: Feld leer lassen, wenn das Passwort unverändert bleiben soll.
+          </p>
           <label><input name="active" type="checkbox" checked> Konto aktiv</label>
           <h3>Berechtigungen</h3>
           <div class="permission-grid">
@@ -495,11 +514,21 @@ Object.keys(resources).forEach(resource => {
           accountData[key] = form.elements[`account_${key}`].checked;
         });
 
-        await api(accountId ? `/api/users/${accountId}` : "/api/users", {
-          method: accountId ? "PUT" : "POST",
-          body: JSON.stringify(accountData),
-        });
-        await loadUsers();
+        try {
+          await api(accountId ? `/api/users/${accountId}` : "/api/users", {
+            method: accountId ? "PUT" : "POST",
+            body: JSON.stringify(accountData),
+          });
+          await loadUsers();
+        } catch (error) {
+          alert(
+            "Benutzerkonto konnte nicht gespeichert werden. " +
+            "Das Passwort muss bei einem neuen Konto mindestens 6 Zeichen lang sein. " +
+            "Prüfe auch, ob der Benutzername bereits verwendet wird."
+          );
+          console.error(error);
+          return;
+        }
       }
     }
 
@@ -543,14 +572,23 @@ document.getElementById("users-form").addEventListener("submit", async event => 
     alert("Für einen neuen Benutzer ist ein Passwort mit mindestens 6 Zeichen nötig.");
     return;
   }
-  await api(id ? `/api/users/${id}` : "/api/users", {
-    method: id ? "PUT" : "POST",
-    body: JSON.stringify(data),
-  });
-  form.reset();
-  form.elements.id.value = "";
-  form.elements.active.checked = true;
-  await loadUsers();
+  try {
+    await api(id ? `/api/users/${id}` : "/api/users", {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(data),
+    });
+    form.reset();
+    form.elements.id.value = "";
+    form.elements.active.checked = true;
+    await loadUsers();
+  } catch (error) {
+    alert(
+      "Benutzer konnte nicht gespeichert werden. " +
+      "Für ein neues Konto muss das Passwort mindestens 6 Zeichen lang sein. " +
+      "Prüfe auch, ob der Benutzername bereits verwendet wird."
+    );
+    console.error(error);
+  }
 });
 
 document.getElementById("logout-button").addEventListener("click", async () => {
