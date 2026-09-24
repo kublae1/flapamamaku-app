@@ -45,7 +45,7 @@ class NewsScreen extends StatelessWidget {
       body: RefreshIndicator(
         onRefresh: store.refreshFromServer,
         child: items.isEmpty
-            ? const ListView(
+            ? ListView(
                 physics: AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.all(24),
                 children: [
