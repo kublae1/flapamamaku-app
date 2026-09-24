@@ -22,14 +22,23 @@ jobs:
             flutter create --platforms=android --project-name flapamamaku_app .
           fi
 
-      - name: Allow app network access
+      - name: Configure Android permissions and biometrics
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"
           fi
+          if ! grep -q 'android.permission.USE_BIOMETRIC' "$MANIFEST"; then
+            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>' "$MANIFEST"
+          fi
           if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
             sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
+          fi
+
+          MAIN_ACTIVITY=$(find android/app/src/main -name MainActivity.kt | head -n 1)
+          if [ -n "$MAIN_ACTIVITY" ]; then
+            sed -i 's/import io.flutter.embedding.android.FlutterActivity/import io.flutter.embedding.android.FlutterFragmentActivity/' "$MAIN_ACTIVITY"
+            sed -i 's/: FlutterActivity()/: FlutterFragmentActivity()/' "$MAIN_ACTIVITY"
           fi
 
       - name: Install dependencies
