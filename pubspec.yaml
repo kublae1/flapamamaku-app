@@ -1,7 +1,7 @@
 name: flapamamaku_app
 description: FLAPAMAMAKU Fasnachtsgruppe Luzern - mobile app
 publish_to: 'none'
-version: 0.8.0+15
+version: 0.8.1+16
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -13,6 +13,8 @@ dependencies:
   url_launcher: ^6.3.2
   http: ^1.5.0
   shared_preferences: ^2.5.3
+  local_auth: ^2.3.0
+  flutter_secure_storage: ^9.2.4
 
 dev_dependencies:
   flutter_test:
