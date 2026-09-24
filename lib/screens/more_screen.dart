@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+
 import '../data/app_store.dart';
-import 'year_motto_screen.dart';
-import 'archive_screen.dart';
-import 'content_detail_screens.dart';
 import 'admin_screen.dart';
+import 'content_detail_screens.dart';
+import 'remote_content_screen.dart';
 
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
@@ -69,53 +69,62 @@ class MoreScreen extends StatelessWidget {
                 ],
               ),
             ),
-          _menuItem(
+          _remoteSection(
             context,
-            Icons.auto_awesome_outlined,
-            'Aktuelles Sujet',
-            'Fotos und aktuelles Fasnachtssujet',
-            () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const YearMottoScreen()),
-            ),
+            section: 'sujet',
+            icon: Icons.auto_awesome_outlined,
+            title: 'Aktuelles Sujet',
+            subtitle: 'Fotos und aktuelles Fasnachtssujet',
+            emptyText: 'Noch kein aktuelles Sujet hinterlegt.',
           ),
-          _menuItem(
+          _remoteSection(
             context,
-            Icons.history,
-            'Archiv',
-            'Frühere Mottos, Sujets und Bilder',
-            () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ArchiveScreen()),
-            ),
+            section: 'archive',
+            icon: Icons.history,
+            title: 'Archiv',
+            subtitle: 'Frühere Mottos, Sujets und Bilder',
+            emptyText: 'Noch keine Archiveinträge hinterlegt.',
           ),
-          _section(
+          _remoteSection(
             context,
-            Icons.description_outlined,
-            'Dokumente',
-            'Protokolle, Reglemente und interne Informationen.',
+            section: 'documents',
+            icon: Icons.description_outlined,
+            title: 'Dokumente',
+            subtitle: 'Protokolle, Reglemente und interne Informationen.',
+            emptyText: 'Noch keine Dokumente hinterlegt.',
           ),
-          _section(
+          _remoteSection(
             context,
-            Icons.photo_album_outlined,
-            'Fotoalben',
-            'Fotoalben von Anlässen, Umzügen und gemeinsamen Aktivitäten.',
+            section: 'photos',
+            icon: Icons.photo_album_outlined,
+            title: 'Fotoalben',
+            subtitle:
+                'Fotoalben von Anlässen, Umzügen und gemeinsamen Aktivitäten.',
+            emptyText: 'Noch keine Fotoalben hinterlegt.',
           ),
-          _section(
+          _remoteSection(
             context,
-            Icons.how_to_vote_outlined,
-            'Umfragen',
-            'Interne Umfragen und Abstimmungen der Gruppe.',
+            section: 'polls',
+            icon: Icons.how_to_vote_outlined,
+            title: 'Umfragen',
+            subtitle: 'Interne Umfragen und Abstimmungen der Gruppe.',
+            emptyText: 'Noch keine Umfragen hinterlegt.',
           ),
-          _section(
+          _remoteSection(
             context,
-            Icons.link,
-            'Links',
-            'Nützliche Webseiten und Verweise der Fasnachtsgruppe.',
+            section: 'links',
+            icon: Icons.link,
+            title: 'Links',
+            subtitle: 'Nützliche Webseiten und Verweise der Fasnachtsgruppe.',
+            emptyText: 'Noch keine Links hinterlegt.',
           ),
-          _section(
+          _remoteSection(
             context,
-            Icons.mail_outline,
-            'Kontakt',
-            'Kontaktinformationen und Ansprechpersonen.',
+            section: 'contact',
+            icon: Icons.mail_outline,
+            title: 'Kontakt',
+            subtitle: 'Kontaktinformationen und Ansprechpersonen.',
+            emptyText: 'Noch keine Kontaktinformationen hinterlegt.',
           ),
           _section(
             context,
@@ -123,13 +132,41 @@ class MoreScreen extends StatelessWidget {
             'Einstellungen',
             'Benachrichtigungen, Datenschutz und App-Einstellungen.',
           ),
-          _section(
+          _remoteSection(
             context,
-            Icons.info_outline,
-            'Über uns',
-            'Informationen über FLAPAMAMAKU und die Geschichte der Gruppe.',
+            section: 'about',
+            icon: Icons.info_outline,
+            title: 'Über uns',
+            subtitle: 'Informationen über FLAPAMAMAKU und die Geschichte der Gruppe.',
+            emptyText: 'Noch keine Informationen hinterlegt.',
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _remoteSection(
+    BuildContext context, {
+    required String section,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String emptyText,
+  }) {
+    return _menuItem(
+      context,
+      icon,
+      title,
+      subtitle,
+      () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => RemoteContentScreen(
+            section: section,
+            title: title,
+            emptyText: emptyText,
+            icon: icon,
+          ),
+        ),
       ),
     );
   }
