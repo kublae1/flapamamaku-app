@@ -22,9 +22,28 @@ class MoreScreen extends StatelessWidget {
               context,
               Icons.admin_panel_settings_outlined,
               'Administration',
-              'News, Termine und Mitglieder verwalten',
+              'Nur freigegebene Bereiche verwalten',
               () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const AdminScreen()),
+              ),
+            ),
+          if (store.serverConfigured && store.isAuthenticated)
+            Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                leading: const Icon(Icons.account_circle_outlined),
+                title: Text(
+                  store.signedInName.isEmpty
+                      ? 'Angemeldet'
+                      : store.signedInName,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('Benutzerkonto'),
+                trailing: TextButton.icon(
+                  onPressed: store.logout,
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Abmelden'),
+                ),
               ),
             ),
           _menuItem(
