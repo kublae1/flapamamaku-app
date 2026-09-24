@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../data/app_store.dart';
 import '../models/app_data.dart';
 
 class NewsDetailScreen extends StatelessWidget {
@@ -22,6 +23,7 @@ class NewsDetailScreen extends StatelessWidget {
                 child: item.imageUrl.isNotEmpty
                     ? Image.network(
                         item.imageUrl,
+                        headers: AppStoreScope.of(context).api.authHeaders,
                         width: double.infinity,
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) =>
