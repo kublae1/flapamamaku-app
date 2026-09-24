@@ -36,6 +36,48 @@ class _EventsScreenState extends State<EventsScreen> {
     );
   }
 
+  Future<void> _deleteEvent(
+    BuildContext context,
+    int index,
+  ) async {
+    final store = AppStoreScope.of(context);
+    final event = store.events[index];
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Termin löschen?'),
+        content: Text('„${event.title}“ wird endgültig gelöscht.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Löschen'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await store.deleteEvent(index);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Termin gelöscht.')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Termin konnte nicht gelöscht werden.')),
+        );
+      }
+    }
+  }
+
   Future<bool> _handleSwipe(
     BuildContext context,
     int index,
@@ -75,7 +117,8 @@ class _EventsScreenState extends State<EventsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final events = AppStoreScope.of(context).events;
+    final store = AppStoreScope.of(context);
+    final events = store.events;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Termine')),
@@ -194,7 +237,13 @@ class _EventsScreenState extends State<EventsScreen> {
                   ],
                 ),
                 isThreeLine: true,
-                trailing: const Icon(Icons.chevron_right),
+                trailing: store.canEvents
+                    ? IconButton(
+                        tooltip: 'Termin löschen',
+                        onPressed: () => _deleteEvent(context, i),
+                        icon: const Icon(Icons.delete_outline),
+                      )
+                    : const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => EventDetailScreen(event: e),

@@ -92,6 +92,23 @@ class AppStore extends ChangeNotifier {
   bool get canAdminPage => currentUser?['can_admin_page'] == true;
   bool get canManageUsers => currentUser?['can_manage_users'] == true;
 
+  bool canEditContentSection(String section) {
+    switch (section) {
+      case 'sujet':
+      case 'archive':
+      case 'photos':
+        return canPhotos;
+      case 'documents':
+        return canDocuments;
+      case 'polls':
+        return canPolls;
+      case 'links':
+        return canLinks;
+      default:
+        return false;
+    }
+  }
+
   bool get canAdminister =>
       !api.isConfigured || canNews || canEvents || canMembers;
   bool get serverConfigured => api.isConfigured;
@@ -372,6 +389,18 @@ class AppStore extends ChangeNotifier {
     if (role == currentRole) return;
     currentRole = role;
     notifyListeners();
+  }
+
+  Future<void> deleteContentItem(ContentItem item) async {
+    if (item.id == null) return;
+    try {
+      await api.deleteContent(item.id!);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<void> addNews(NewsItem item) async {

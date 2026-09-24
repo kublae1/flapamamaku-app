@@ -29,6 +29,50 @@ class RemoteContentScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _deleteItem(
+    BuildContext context,
+    AppStore store,
+    ContentItem item,
+  ) async {
+    if (item.id == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eintrag löschen?'),
+        content: Text(
+          '„${item.title}“ wird inklusive zugehöriger Bilder gelöscht.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Löschen'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await store.deleteContentItem(item);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Eintrag gelöscht.')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Eintrag konnte nicht gelöscht werden.')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
@@ -70,6 +114,9 @@ class RemoteContentScreen extends StatelessWidget {
                     onOpenLink: item.linkUrl.isEmpty
                         ? null
                         : () => _openLink(context, item.linkUrl),
+                    onDelete: store.canEditContentSection(section)
+                        ? () => _deleteItem(context, store, item)
+                        : null,
                   );
                 },
               ),
@@ -82,11 +129,13 @@ class _ContentCard extends StatelessWidget {
   final ContentItem item;
   final Map<String, String> headers;
   final VoidCallback? onOpenLink;
+  final VoidCallback? onDelete;
 
   const _ContentCard({
     required this.item,
     required this.headers,
     this.onOpenLink,
+    this.onDelete,
   });
 
   @override
@@ -144,15 +193,26 @@ class _ContentCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                 ],
-                if (onOpenLink != null) ...[
+                if (onOpenLink != null || onDelete != null) ...[
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: OutlinedButton.icon(
-                      onPressed: onOpenLink,
-                      icon: const Icon(Icons.open_in_new),
-                      label: const Text('Öffnen'),
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (onOpenLink != null)
+                        OutlinedButton.icon(
+                          onPressed: onOpenLink,
+                          icon: const Icon(Icons.open_in_new),
+                          label: const Text('Öffnen'),
+                        ),
+                      if (onOpenLink != null && onDelete != null)
+                        const SizedBox(width: 8),
+                      if (onDelete != null)
+                        OutlinedButton.icon(
+                          onPressed: onDelete,
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Löschen'),
+                        ),
+                    ],
                   ),
                 ],
               ],
