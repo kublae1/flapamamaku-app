@@ -47,9 +47,19 @@ class _MembersScreenState extends State<MembersScreen> {
           ),
         ],
       ),
-      body: filtered.isEmpty
-          ? const Center(child: Text('Keine Mitglieder gefunden'))
-          : ListView.separated(
+      body: RefreshIndicator(
+        onRefresh: store.refreshFromServer,
+        child: filtered.isEmpty
+            ? const ListView(
+                physics: AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.all(24),
+                children: [
+                  SizedBox(height: 120),
+                  Center(child: Text('Keine Mitglieder gefunden')),
+                ],
+              )
+            : ListView.separated(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               itemCount: filtered.length,
               separatorBuilder: (_, __) => const Divider(height: 1),
@@ -87,6 +97,7 @@ class _MembersScreenState extends State<MembersScreen> {
                 );
               },
             ),
+      ),
     );
   }
 }

@@ -122,8 +122,11 @@ class _EventsScreenState extends State<EventsScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Termine')),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
+      body: RefreshIndicator(
+        onRefresh: store.refreshFromServer,
+        child: ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
         itemCount: events.length,
         itemBuilder: (_, i) {
           final e = events[i];
@@ -253,6 +256,7 @@ class _EventsScreenState extends State<EventsScreen> {
             ),
           );
         },
+      ),
       ),
     );
   }

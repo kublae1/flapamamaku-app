@@ -46,8 +46,11 @@ class StartScreen extends StatelessWidget {
         ? null
         : _newsImage(store.news.first, store.api.authHeaders);
 
-    return CustomScrollView(
-      slivers: [
+    return RefreshIndicator(
+      onRefresh: store.refreshFromServer,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
         SliverAppBar(
           expandedHeight: 285,
           pinned: true,
@@ -197,6 +200,7 @@ class StartScreen extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 }

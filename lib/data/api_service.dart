@@ -1,8 +1,19 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import '../models/app_data.dart';
+
+class DownloadedImage {
+  final Uint8List bytes;
+  final String mimeType;
+
+  const DownloadedImage({
+    required this.bytes,
+    required this.mimeType,
+  });
+}
 
 class ApiService {
   ApiService({String? baseUrl})
@@ -73,6 +84,18 @@ class ApiService {
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
+
+  Future<DownloadedImage> downloadImage(String url) async {
+    final response = await http
+        .get(Uri.parse(url), headers: authHeaders)
+        .timeout(const Duration(seconds: 20));
+    _ensureSuccess(response);
+    return DownloadedImage(
+      bytes: response.bodyBytes,
+      mimeType: response.headers['content-type']?.split(';').first.trim() ??
+          'image/jpeg',
+    );
+  }
 
   Future<List<NewsItem>> fetchNews() async {
     final response = await http

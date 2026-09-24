@@ -42,11 +42,18 @@ class NewsScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('News')),
-      body: items.isEmpty
-          ? const Center(child: Text('Noch keine News vorhanden'))
-          : RefreshIndicator(
-              onRefresh: AppStoreScope.of(context).refreshFromServer,
-              child: ListView.separated(
+      body: RefreshIndicator(
+        onRefresh: store.refreshFromServer,
+        child: items.isEmpty
+            ? const ListView(
+                physics: AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.all(24),
+                children: [
+                  SizedBox(height: 120),
+                  Center(child: Text('Noch keine News vorhanden')),
+                ],
+              )
+            : ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
                 itemCount: items.length,
@@ -111,7 +118,7 @@ class NewsScreen extends StatelessWidget {
                   );
                 },
               ),
-            ),
+      ),
     );
   }
 }

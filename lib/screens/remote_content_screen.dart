@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
@@ -189,6 +190,20 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                     onDelete: store.canEditContentSection(widget.section)
                         ? () => _deleteItem(context, store, item)
                         : null,
+                    onOpenImage: (imageIndex) {
+                      final urls = item.imageUrls.isNotEmpty
+                          ? item.imageUrls
+                          : [item.imageUrl];
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => _ImageViewerScreen(
+                            title: item.title,
+                            urls: urls,
+                            initialIndex: imageIndex,
+                          ),
+                        ),
+                      );
+                    },
                   );
                 },
               ),
@@ -202,10 +217,12 @@ class _ContentCard extends StatelessWidget {
   final Map<String, String> headers;
   final VoidCallback? onOpenLink;
   final VoidCallback? onDelete;
+  final ValueChanged<int> onOpenImage;
 
   const _ContentCard({
     required this.item,
     required this.headers,
+    required this.onOpenImage,
     this.onOpenLink,
     this.onDelete,
   });
@@ -225,27 +242,58 @@ class _ContentCard extends StatelessWidget {
                 scrollDirection: Axis.horizontal,
                 itemCount: item.imageUrls.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, index) => ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.network(
-                    item.imageUrls[index],
-                    headers: headers,
-                    width: 280,
-                    height: 220,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                itemBuilder: (_, index) => InkWell(
+                  onTap: () => onOpenImage(index),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Stack(
+                      alignment: Alignment.bottomRight,
+                      children: [
+                        Image.network(
+                          item.imageUrls[index],
+                          headers: headers,
+                          width: 280,
+                          height: 220,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              const SizedBox.shrink(),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: CircleAvatar(
+                            radius: 17,
+                            child: Icon(Icons.zoom_in, size: 20),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             )
           else if (item.imageUrl.isNotEmpty)
-            Image.network(
-              item.imageUrl,
-              headers: headers,
-              width: double.infinity,
-              height: 210,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            InkWell(
+              onTap: () => onOpenImage(0),
+              child: Stack(
+                alignment: Alignment.bottomRight,
+                children: [
+                  Image.network(
+                    item.imageUrl,
+                    headers: headers,
+                    width: double.infinity,
+                    height: 210,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: CircleAvatar(
+                      radius: 17,
+                      child: Icon(Icons.zoom_in, size: 20),
+                    ),
+                  ),
+                ],
+              ),
             ),
           Padding(
             padding: const EdgeInsets.all(16),
@@ -291,6 +339,146 @@ class _ContentCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ImageViewerScreen extends StatefulWidget {
+  final String title;
+  final List<String> urls;
+  final int initialIndex;
+
+  const _ImageViewerScreen({
+    required this.title,
+    required this.urls,
+    required this.initialIndex,
+  });
+
+  @override
+  State<_ImageViewerScreen> createState() => _ImageViewerScreenState();
+}
+
+class _ImageViewerScreenState extends State<_ImageViewerScreen> {
+  late final PageController _controller;
+  late int index;
+  bool sharing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    index = widget.initialIndex;
+    _controller = PageController(initialPage: index);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String _extension(String mimeType) {
+    switch (mimeType) {
+      case 'image/png':
+        return 'png';
+      case 'image/webp':
+        return 'webp';
+      case 'image/gif':
+        return 'gif';
+      default:
+        return 'jpg';
+    }
+  }
+
+  String _safeName(String value) {
+    final cleaned = value
+        .replaceAll(RegExp(r'[^A-Za-z0-9ÄÖÜäöü_-]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+    return cleaned.isEmpty ? 'FLAPAMAMAKU' : cleaned;
+  }
+
+  Future<void> _shareCurrent() async {
+    if (sharing) return;
+    setState(() => sharing = true);
+    final store = AppStoreScope.of(context);
+    try {
+      final downloaded = await store.api.downloadImage(widget.urls[index]);
+      final extension = _extension(downloaded.mimeType);
+      final filename =
+          '${_safeName(widget.title)}_${index + 1}.$extension';
+      await SharePlus.instance.share(
+        ShareParams(
+          title: 'Bild speichern oder teilen',
+          files: [
+            XFile.fromData(
+              downloaded.bytes,
+              mimeType: downloaded.mimeType,
+            ),
+          ],
+          fileNameOverrides: [filename],
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bild konnte nicht bereitgestellt werden.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => sharing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final headers = AppStoreScope.of(context).api.authHeaders;
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Text(
+          widget.urls.length > 1
+              ? '${widget.title} · ${index + 1}/${widget.urls.length}'
+              : widget.title,
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Speichern / Teilen',
+            onPressed: sharing ? null : _shareCurrent,
+            icon: sharing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.download_outlined),
+          ),
+        ],
+      ),
+      body: PageView.builder(
+        controller: _controller,
+        itemCount: widget.urls.length,
+        onPageChanged: (value) => setState(() => index = value),
+        itemBuilder: (_, imageIndex) => InteractiveViewer(
+          minScale: 1,
+          maxScale: 5,
+          child: Center(
+            child: Image.network(
+              widget.urls[imageIndex],
+              headers: headers,
+              width: double.infinity,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Center(
+                child: Text(
+                  'Bild konnte nicht geladen werden.',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

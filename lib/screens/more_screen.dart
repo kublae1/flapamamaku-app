@@ -14,8 +14,11 @@ class MoreScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Mehr')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      body: RefreshIndicator(
+        onRefresh: store.refreshFromServer,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
         children: [
           if (store.canAdminister)
             _menuItem(
@@ -128,6 +131,7 @@ class MoreScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }
