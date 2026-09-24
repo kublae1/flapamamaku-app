@@ -57,7 +57,15 @@ class _MembersScreenState extends State<MembersScreen> {
                 final member = filtered[i];
                 return ListTile(
                   leading: CircleAvatar(
-                    child: Text(member.name.characters.first),
+                    backgroundImage: member.photoUrl.isNotEmpty
+                        ? NetworkImage(
+                            member.photoUrl,
+                            headers: store.api.authHeaders,
+                          )
+                        : null,
+                    child: member.photoUrl.isEmpty
+                        ? Text(member.name.characters.first)
+                        : null,
                   ),
                   title: Text(
                     member.name,
