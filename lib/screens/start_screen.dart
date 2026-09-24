@@ -11,12 +11,13 @@ import 'content_detail_screens.dart';
 class StartScreen extends StatelessWidget {
   const StartScreen({super.key});
 
-  Widget? _newsImage(NewsItem item) {
+  Widget? _newsImage(NewsItem item, Map<String, String> headers) {
     if (item.imageUrl.isNotEmpty) {
       return AspectRatio(
         aspectRatio: 16 / 9,
         child: Image.network(
           item.imageUrl,
+          headers: headers,
           width: double.infinity,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => const SizedBox.shrink(),
@@ -41,8 +42,9 @@ class StartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final latestNewsImage =
-        store.news.isEmpty ? null : _newsImage(store.news.first);
+    final latestNewsImage = store.news.isEmpty
+        ? null
+        : _newsImage(store.news.first, store.api.authHeaders);
 
     return CustomScrollView(
       slivers: [
