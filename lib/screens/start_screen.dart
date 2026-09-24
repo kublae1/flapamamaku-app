@@ -17,16 +17,6 @@ class StartScreen extends StatelessWidget {
     return items.first;
   }
 
-  String _heroImage(ContentItem? item) {
-    if (item == null) return '';
-    if (item.imageUrls.isNotEmpty) {
-      for (final url in item.imageUrls) {
-        if (url.trim().isNotEmpty) return url;
-      }
-    }
-    return item.imageUrl.trim();
-  }
-
   String _mottoYear(ContentItem? sujet) {
     final values = [
       sujet?.title ?? '',
@@ -39,15 +29,7 @@ class StartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final hero = _latestContent(store, 'hero');
     final sujet = _latestContent(store, 'sujet');
-    final heroImage = _heroImage(hero);
-    final heroTitle = hero != null && hero.title.trim().isNotEmpty
-        ? hero.title.trim()
-        : 'Die Schweine Rocker';
-    final heroSubtitle = hero != null && hero.text.trim().isNotEmpty
-        ? hero.text.trim()
-        : 'in der Bar';
     final mottoYear = _mottoYear(sujet);
 
     return Scaffold(
@@ -99,56 +81,12 @@ class StartScreen extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   height: 480,
-                  child: heroImage.isNotEmpty
-                      ? Image.network(
-                          heroImage,
-                          headers: store.api.authHeaders,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Image.asset(
-                            'assets/images/hero_wasserturm_saurocker.jpg',
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      : Image.asset(
-                          'assets/images/hero_wasserturm_saurocker.jpg',
-                          fit: BoxFit.cover,
-                        ),
-                ),
-                if (heroImage.isNotEmpty)
-                  Positioned(
-                    left: 22,
-                    right: 22,
-                    bottom: 24,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(16, 13, 16, 14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xB8000000),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            heroTitle,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 25,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            heroSubtitle,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 23,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  child: Image.asset(
+                    'assets/images/hero_wasserturm_saurocker.jpg',
+                    fit: BoxFit.cover,
+                    alignment: Alignment.center,
                   ),
+                ),
               ],
             ),
             Padding(
