@@ -471,7 +471,7 @@ class _EventAdminList extends StatelessWidget {
             child: ListTile(
               title: Text(store.events[i].title),
               subtitle: Text(
-                '${store.events[i].day}. ${store.events[i].month} · '
+                '${store.events[i].displayDate} · '
                 '${store.events[i].time}',
               ),
               onTap: () => onEdit(i),

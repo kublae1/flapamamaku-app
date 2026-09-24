@@ -140,11 +140,12 @@ class MoreScreen extends StatelessWidget {
     required String subtitle,
     required String emptyText,
   }) {
+    final count = AppStoreScope.of(context).contentFor(section).length;
     return _menuItem(
       context,
       icon,
       title,
-      subtitle,
+      '$count Einträge · $subtitle',
       () => Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => RemoteContentScreen(

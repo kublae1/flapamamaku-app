@@ -157,7 +157,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
           const SizedBox(height: 20),
           _InfoRow(
             icon: Icons.calendar_month_outlined,
-            text: '${event.day}. ${event.month}',
+            text: event.displayDate,
           ),
           _InfoRow(icon: Icons.schedule_outlined, text: event.time),
           _InfoRow(icon: Icons.location_on_outlined, text: event.location),

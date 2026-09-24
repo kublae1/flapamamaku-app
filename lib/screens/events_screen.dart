@@ -139,26 +139,24 @@ class _EventsScreenState extends State<EventsScreen> {
               margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
                 leading: Container(
-                  width: 54,
-                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  width: 92,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     border: Border.all(
                       color: Theme.of(context).colorScheme.primary,
                     ),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        e.day,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(e.month),
-                    ],
+                  child: Text(
+                    e.displayDate,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 title: Text(
@@ -168,7 +166,7 @@ class _EventsScreenState extends State<EventsScreen> {
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${e.location}\n${e.time}'),
+                    Text('${e.displayDate}\n${e.location}\n${e.time}'),
                     const SizedBox(height: 4),
                     Text(
                       '${e.registrationCount} angemeldet',

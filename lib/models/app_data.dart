@@ -84,6 +84,14 @@ class EventItem {
     this.registeredByMe = false,
   });
 
+  String get displayDate {
+    final parsed = DateTime.tryParse(eventDate);
+    if (parsed == null) return '$day. $month';
+    final d = parsed.day.toString().padLeft(2, '0');
+    final m = parsed.month.toString().padLeft(2, '0');
+    return '$d.$m.${parsed.year}';
+  }
+
   factory EventItem.fromJson(Map<String, dynamic> json) {
     return EventItem(
       json['day']?.toString() ?? '',
