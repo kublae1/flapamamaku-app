@@ -215,8 +215,6 @@
               <label><input type="checkbox" name="account_can_photos"> Fotos/Fotoalben verwalten</label>
               <label><input type="checkbox" name="account_can_polls"> Umfragen verwalten</label>
               <label><input type="checkbox" name="account_can_links"> Links verwalten</label>
-              <label><input type="checkbox" name="account_can_contact"> Kontakt bearbeiten</label>
-              <label><input type="checkbox" name="account_can_about"> Über uns bearbeiten</label>
               <label><input type="checkbox" name="account_can_admin_page"> PC-Adminseite benutzen</label>
               <label><input type="checkbox" name="account_can_manage_users"> Benutzer/Berechtigungen verwalten</label>
             </div>
@@ -258,8 +256,6 @@
             <label><input type="checkbox" name="can_photos"> Fotos/Fotoalben verwalten</label>
             <label><input type="checkbox" name="can_polls"> Umfragen verwalten</label>
             <label><input type="checkbox" name="can_links"> Links verwalten</label>
-            <label><input type="checkbox" name="can_contact"> Kontakt bearbeiten</label>
-            <label><input type="checkbox" name="can_about"> Über uns bearbeiten</label>
             <label><input type="checkbox" name="can_admin_page"> PC-Adminseite benutzen</label>
             <label><input type="checkbox" name="can_manage_users"> Benutzer/Berechtigungen verwalten</label>
           </div>
@@ -276,14 +272,12 @@
           <input type="hidden" name="id">
           <label>Bereich</label>
           <select name="section" required>
-            <option value="sujet">Aktuelles Sujet</option>
-            <option value="archive">Archiv</option>
+            <option value="sujet">Sujet nächstes Jahr</option>
+            <option value="archive">Vergangene Sujet</option>
             <option value="documents">Dokumente</option>
             <option value="photos">Fotoalben</option>
             <option value="polls">Umfragen</option>
             <option value="links">Links</option>
-            <option value="contact">Kontakt</option>
-            <option value="about">Über uns</option>
           </select>
           <label>Titel</label><input name="title" required>
           <label>Text / Beschreibung</label><textarea name="text"></textarea>
@@ -311,7 +305,7 @@ let userAccounts = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
-  "can_polls","can_links","can_contact","can_about","can_admin_page","can_manage_users"
+  "can_polls","can_links","can_admin_page","can_manage_users"
 ];
 
 const contentPermissions = {
@@ -321,19 +315,15 @@ const contentPermissions = {
   photos: "can_photos",
   polls: "can_polls",
   links: "can_links",
-  contact: "can_contact",
-  about: "can_about",
 };
 
 const contentLabels = {
-  sujet: "Aktuelles Sujet",
-  archive: "Archiv",
+  sujet: "Sujet nächstes Jahr",
+  archive: "Vergangene Sujet",
   documents: "Dokumente",
   photos: "Fotoalben",
   polls: "Umfragen",
   links: "Links",
-  contact: "Kontakt",
-  about: "Über uns",
 };
 
 const resources = {
@@ -509,7 +499,7 @@ async function loadUsers() {
       .map(key => ({
         can_news:"News",can_events:"Termine",can_members:"Mitglieder",
         can_documents:"Dokumente",can_photos:"Fotos",can_polls:"Umfragen",
-        can_links:"Links",can_contact:"Kontakt",can_about:"Über uns",
+        can_links:"Links",
         can_admin_page:"PC-Admin",can_manage_users:"Benutzerrechte"
       })[key]).join(", ");
     const div = document.createElement("div");
@@ -802,7 +792,7 @@ async function startAdmin() {
   showAdmin();
   applyPermissions();
   document.getElementById("status").textContent =
-    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.3`;
+    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.4`;
 
   if (currentUser.can_news) {
     document.querySelector("#news-form [name=date]").value =
