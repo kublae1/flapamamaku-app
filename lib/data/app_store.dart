@@ -18,7 +18,8 @@ class AppStore extends ChangeNotifier {
       : api = api ?? ApiService(),
         news = List<NewsItem>.from(newsItems),
         events = List<EventItem>.from(eventItems),
-        members = List<MemberItem>.from(initialMembers) {
+        members = List<MemberItem>.from(initialMembers),
+        content = <ContentItem>[] {
     _sortNews();
     _sortEvents();
 
@@ -42,6 +43,7 @@ class AppStore extends ChangeNotifier {
   final List<NewsItem> news;
   final List<EventItem> events;
   final List<MemberItem> members;
+  final List<ContentItem> content;
 
   Timer? _syncTimer;
   bool isSyncing = false;
@@ -283,9 +285,14 @@ class AppStore extends ChangeNotifier {
     members
       ..clear()
       ..addAll(initialMembers);
+    content.clear();
     _sortNews();
     _sortEvents();
     notifyListeners();
+  }
+
+  List<ContentItem> contentFor(String section) {
+    return content.where((item) => item.section == section).toList();
   }
 
   void _sortNews() {
@@ -315,6 +322,7 @@ class AppStore extends ChangeNotifier {
       final remoteNews = await api.fetchNews();
       final remoteEvents = await api.fetchEvents();
       final remoteMembers = await api.fetchMembers();
+      final remoteContent = await api.fetchContent();
 
       news
         ..clear()
@@ -325,6 +333,9 @@ class AppStore extends ChangeNotifier {
       members
         ..clear()
         ..addAll(remoteMembers);
+      content
+        ..clear()
+        ..addAll(remoteContent);
 
       _sortNews();
       _sortEvents();
