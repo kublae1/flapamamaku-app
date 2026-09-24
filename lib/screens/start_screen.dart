@@ -50,43 +50,15 @@ class StartScreen extends StatelessWidget {
           expandedHeight: 285,
           pinned: true,
           backgroundColor: const Color(0xFF8A101B),
-          title: const Text('FLAPAMAMAKU'),
           flexibleSpace: FlexibleSpaceBar(
             background: Stack(
               fit: StackFit.expand,
               children: [
-                ColoredBox(
-                  color: Color(0xFF8A101B),
-                  child: Center(
-                    child: Image.asset(
-                      'assets/FLAPAMAMAKU App-Icon.png',
-                      width: double.infinity,
-                      height: double.infinity,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black12, Colors.black87],
-                    ),
-                  ),
-                ),
-                const Positioned(
-                  left: 22,
-                  right: 22,
-                  bottom: 22,
-                  child: Text(
-                    'Zäme ade Fasnacht Luzern!',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 29,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+                Image.asset(
+                  'assets/FLAPAMAMAKU App-Icon.png',
+                  width: double.infinity,
+                  height: double.infinity,
+                  fit: BoxFit.cover,
                 ),
               ],
             ),
