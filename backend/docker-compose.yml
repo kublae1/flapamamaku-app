@@ -1,6 +1,7 @@
 services:
   flapamamaku-backend:
     image: ghcr.io/kublae1/flapamamaku-backend:latest
+    pull_policy: always
     container_name: flapamamaku-backend
     restart: unless-stopped
     ports:
