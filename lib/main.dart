@@ -3,6 +3,7 @@ import 'data/app_store.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'screens/biometric_lock_screen.dart';
+import 'theme/flap_brand.dart';
 
 void main() {
   runApp(const FlapamamakuApp());
@@ -35,16 +36,7 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
             title: 'FLAPAMAMAKU',
-            theme: ThemeData(
-              colorScheme: ColorScheme.fromSeed(seedColor: appColor),
-              useMaterial3: true,
-              scaffoldBackgroundColor: const Color(0xFFF7F5F2),
-              appBarTheme: AppBarTheme(
-                backgroundColor: appColor,
-                foregroundColor: Colors.white,
-                centerTitle: true,
-              ),
-            ),
+            theme: FlapBrand.theme(store.themeColor),
             home: Builder(
               builder: (context) {
                 final store = AppStoreScope.of(context);
