@@ -38,21 +38,18 @@ class SettingsScreen extends StatelessWidget {
             final (name, value) = entry;
             final selected = store.themeColorValue == value;
             return Card(
-              child: RadioListTile<int>(
-                value: value,
-                groupValue: store.themeColorValue,
-                onChanged: (newValue) {
-                  if (newValue != null) {
-                    store.setThemeColor(newValue);
-                  }
-                },
-                secondary: CircleAvatar(
+              child: ListTile(
+                onTap: () => store.setThemeColor(value),
+                leading: CircleAvatar(
                   backgroundColor: Color(value),
                   child: selected
                       ? const Icon(Icons.check, color: Colors.white)
                       : null,
                 ),
                 title: Text(name),
+                trailing: selected
+                    ? const Icon(Icons.radio_button_checked)
+                    : const Icon(Icons.radio_button_off),
               ),
             );
           }),
