@@ -1,3 +1,35 @@
+class ContentItem {
+  final int? id;
+  final String section;
+  final String title;
+  final String text;
+  final String linkUrl;
+  final String imageUrl;
+  final String createdAt;
+
+  const ContentItem({
+    this.id,
+    required this.section,
+    required this.title,
+    this.text = '',
+    this.linkUrl = '',
+    this.imageUrl = '',
+    this.createdAt = '',
+  });
+
+  factory ContentItem.fromJson(Map<String, dynamic> json) {
+    return ContentItem(
+      id: json['id'] as int?,
+      section: json['section']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      text: json['text']?.toString() ?? '',
+      linkUrl: json['link_url']?.toString() ?? '',
+      imageUrl: json['image_url']?.toString() ?? '',
+      createdAt: json['created_at']?.toString() ?? '',
+    );
+  }
+}
+
 class NewsItem {
   final int? id;
   final String date;
