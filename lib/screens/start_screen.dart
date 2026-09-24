@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
 import '../models/app_data.dart';
+import '../theme/flap_brand.dart';
 import '../widgets/section_title.dart';
 import 'year_motto_screen.dart';
 import 'remote_content_screen.dart';
@@ -66,16 +67,52 @@ class StartScreen extends StatelessWidget {
           SliverAppBar(
             expandedHeight: 285,
             pinned: true,
-            backgroundColor: const Color(0xFF8A101B),
+            backgroundColor: FlapBrand.charcoal,
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 fit: StackFit.expand,
                 children: [
                   Image.asset(
-                    'assets/FLAPAMAMAKU App-Icon.png',
+                    'assets/images/hero_fireworks.jpg',
                     width: double.infinity,
                     height: double.infinity,
                     fit: BoxFit.cover,
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x22000000), Color(0xDD000000)],
+                      ),
+                    ),
+                  ),
+                  const Positioned(
+                    left: 20,
+                    right: 20,
+                    bottom: 24,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'DIE SCHWEINE ROCKER',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.4,
+                          ),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'der Stadt Luzern',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -86,7 +123,7 @@ class StartScreen extends StatelessWidget {
             sliver: SliverList.list(
               children: [
                 InkWell(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(22),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const YearMottoScreen()),
                   ),
@@ -131,7 +168,7 @@ class StartScreen extends StatelessWidget {
                           headers: store.api.authHeaders,
                         ),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 26),
                 const SectionTitle('Aktuelle News', action: 'Alle'),
                 const SizedBox(height: 8),
                 if (store.news.isNotEmpty)
