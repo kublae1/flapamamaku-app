@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.3",
+    version="0.8.4",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -512,7 +512,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.3"}
+    return {"status": "ok", "version": "0.8.4"}
 
 
 @app.get("/admin")
