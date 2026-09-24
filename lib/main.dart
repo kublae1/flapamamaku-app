@@ -30,7 +30,6 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final appColor = store.themeColor;
         return AppStoreScope(
           store: store,
           child: MaterialApp(
