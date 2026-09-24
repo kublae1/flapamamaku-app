@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FLAPAMAMAKU Administration</title>
+  <title>FLAPAMAMAKU App-Verwaltung</title>
   <style>
     :root {
       font-family: Inter, Arial, sans-serif;
@@ -96,8 +96,8 @@
 <body>
 <header>
   <div>
-    <h1>FLAPAMAMAKU Administration</h1>
-    <small>PC-Verwaltung für App-Inhalte</small>
+    <h1>FLAPAMAMAKU App-Verwaltung</h1>
+    <small>Zentrale Docker-Verwaltung für die Inhalte der Handy-App</small>
   </div>
   <div class="status" id="status">API wird geprüft …</div>
 </header>
@@ -128,7 +128,7 @@
       <button data-panel="events" data-permission="can_events">Termine</button>
       <button data-panel="members" data-permission="can_members">Mitglieder</button>
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
-      <button data-panel="content" id="content-nav">Mehr</button>
+      <button data-panel="content" id="content-nav">Fotos & Inhalte</button>
       <button id="logout-button">Abmelden</button>
     </nav>
 
@@ -269,7 +269,7 @@
     <section id="content" class="panel">
       <div class="grid">
         <form class="card" id="content-form">
-          <h2>Bereich „Mehr“</h2>
+          <h2>Fotos & weitere App-Inhalte</h2>
           <input type="hidden" name="id">
           <label>Bereich</label>
           <select name="section" required>
@@ -290,7 +290,7 @@
         </form>
         <div class="card">
           <h2>Datenbank-Einträge</h2>
-          <p class="meta">Hier siehst du alle bereits gespeicherten Einträge aus „Mehr“.</p>
+          <p class="meta">Änderungen an Fotos, Sujet, Archiv und weiteren Inhalten werden zentral gespeichert und von der Handy-App geladen.</p>
           <label>Bereich anzeigen</label>
           <select id="content-filter">
             <option value="">Alle Bereiche</option>
