@@ -115,12 +115,13 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   }
 
   Future<void> _register() async {
+    final store = AppStoreScope.of(context);
     final result = await _ask(
       'Anmelden',
       'Für „${widget.event.title}“ anmelden?',
     );
     if (result != null && widget.event.id != null) {
-      await AppStoreScope.of(context).setEventRegistration(widget.event, result);
+      await store.setEventRegistration(widget.event, result);
       if (mounted) {
         setState(() => registered = result);
         await _loadRegistrations();

@@ -41,7 +41,8 @@ class _EventsScreenState extends State<EventsScreen> {
     int index,
     DismissDirection direction,
   ) async {
-    final event = AppStoreScope.of(context).events[index];
+    final store = AppStoreScope.of(context);
+    final event = store.events[index];
 
     if (direction == DismissDirection.endToStart) {
       final result = await _ask(
@@ -50,7 +51,7 @@ class _EventsScreenState extends State<EventsScreen> {
         question: 'Für „${event.title}“ anmelden?',
       );
       if (result != null && event.id != null) {
-        await AppStoreScope.of(context).setEventRegistration(event, result);
+        await store.setEventRegistration(event, result);
       }
       return false;
     }
