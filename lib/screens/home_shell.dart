@@ -26,8 +26,9 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(child: pages[index]),
+      body: SafeArea(top: false, child: pages[index]),
       bottomNavigationBar: NavigationBar(
+        height: 72,
         selectedIndex: index,
         onDestinationSelected: (value) => setState(() => index = value),
         destinations: const [
