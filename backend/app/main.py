@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.0",
+    version="0.8.2",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -76,6 +76,13 @@ class MemberPayload(BaseModel):
     address: str = ""
     occupation: str = ""
     employer: str = ""
+
+
+class ContentPayload(BaseModel):
+    section: str = Field(min_length=1, max_length=40)
+    title: str = Field(min_length=1, max_length=200)
+    text: str = ""
+    link_url: str = ""
 
 
 class LoginPayload(BaseModel):
@@ -184,6 +191,21 @@ def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS content_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                section TEXT NOT NULL,
+                title TEXT NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                link_url TEXT NOT NULL DEFAULT '',
+                image_data BLOB,
+                image_mime TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
         db.execute(
             """
@@ -417,6 +439,44 @@ def delete_row(resource: str, row_id: int) -> None:
         db.commit()
 
 
+CONTENT_PERMISSIONS = {
+    "sujet": "can_photos",
+    "archive": "can_photos",
+    "documents": "can_documents",
+    "photos": "can_photos",
+    "polls": "can_polls",
+    "links": "can_links",
+    "contact": "can_contact",
+    "about": "can_about",
+}
+
+
+def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    has_image = bool(item.pop("image_data", None))
+    item.pop("image_mime", None)
+    item["image_url"] = (
+        f"/api/content/{item['id']}/image" if has_image else ""
+    )
+    return item
+
+
+def _content_permission(section: str) -> str:
+    permission = CONTENT_PERMISSIONS.get(section)
+    if permission is None:
+        raise HTTPException(status_code=422, detail="Unbekannter Bereich")
+    return permission
+
+
+def _require_content_permission(
+    section: str,
+    user: dict[str, Any],
+) -> None:
+    permission = _content_permission(section)
+    if not user.get(permission, False):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {
@@ -428,7 +488,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.0"}
+    return {"status": "ok", "version": "0.8.2"}
 
 
 @app.get("/admin")
@@ -648,6 +708,185 @@ def delete_user(
         cursor = db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        db.commit()
+
+
+@app.get("/api/content")
+def get_content(
+    section: str | None = None,
+    _: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM content_items"
+    values: list[Any] = []
+    if section:
+        _content_permission(section)
+        sql += " WHERE section = ?"
+        values.append(section)
+    sql += " ORDER BY created_at DESC, id DESC"
+
+    with connect() as db:
+        rows = db.execute(sql, values).fetchall()
+    return [_serialize_content(row) for row in rows]
+
+
+@app.post("/api/content")
+def post_content(
+    payload: ContentPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_content_permission(payload.section, user)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """
+            INSERT INTO content_items (
+                section, title, text, link_url, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (payload.section, payload.title, payload.text, payload.link_url, now),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+    return _serialize_content(row)
+
+
+@app.put("/api/content/{row_id}")
+def put_content(
+    row_id: int,
+    payload: ContentPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_content_permission(payload.section, user)
+    with connect() as db:
+        current = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if current is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(current["section"], user)
+        db.execute(
+            """
+            UPDATE content_items
+            SET section = ?, title = ?, text = ?, link_url = ?
+            WHERE id = ?
+            """,
+            (
+                payload.section,
+                payload.title,
+                payload.text,
+                payload.link_url,
+                row_id,
+            ),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_content(row)
+
+
+@app.delete("/api/content/{row_id}", status_code=204)
+def delete_content(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        row = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(row["section"], user)
+        db.execute("DELETE FROM content_items WHERE id = ?", (row_id,))
+        db.commit()
+
+
+@app.post("/api/content/{row_id}/image")
+async def upload_content_image(
+    row_id: int,
+    image: UploadFile = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if image.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+
+    data = await image.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        db.execute(
+            """
+            UPDATE content_items
+            SET image_data = ?, image_mime = ?
+            WHERE id = ?
+            """,
+            (data, image.content_type, row_id),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_content(row)
+
+
+@app.get("/api/content/{row_id}/image")
+def get_content_image(
+    row_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        row = db.execute(
+            "SELECT image_data, image_mime FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    if row is None or row["image_data"] is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return Response(
+        content=row["image_data"],
+        media_type=row["image_mime"] or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.delete("/api/content/{row_id}/image", status_code=204)
+def delete_content_image(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        db.execute(
+            """
+            UPDATE content_items
+            SET image_data = NULL, image_mime = ''
+            WHERE id = ?
+            """,
+            (row_id,),
+        )
         db.commit()
 
 
