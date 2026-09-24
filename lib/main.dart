@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'data/app_store.dart';
 import 'screens/home_shell.dart';
+import 'screens/login_screen.dart';
 
 void main() {
   runApp(const FlapamamakuApp());
@@ -41,7 +42,20 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
             centerTitle: true,
           ),
         ),
-        home: const HomeShell(),
+        home: Builder(
+          builder: (context) {
+            final store = AppStoreScope.of(context);
+            if (!store.authReady) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (store.serverConfigured && !store.isAuthenticated) {
+              return const LoginScreen();
+            }
+            return const HomeShell();
+          },
+        ),
       ),
     );
   }
