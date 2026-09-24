@@ -181,6 +181,33 @@
           <label>Wohnort / Adresse</label><input name="address">
           <label>Beruf</label><input name="occupation">
           <label>Arbeitgeber</label><input name="employer">
+
+          <div id="member-account-block" class="hidden">
+            <hr style="margin:20px 0;border:0;border-top:1px solid #eee6de">
+            <h3>Benutzerkonto</h3>
+            <input type="hidden" name="account_user_id">
+            <label>Benutzername</label>
+            <input name="account_username" autocomplete="off">
+            <label>Passwort</label>
+            <input name="account_password" type="password" minlength="6" autocomplete="new-password">
+            <p class="meta">Bei bestehendem Konto leer lassen, wenn das Passwort nicht geändert werden soll.</p>
+            <label><input name="account_active" type="checkbox" checked> Konto aktiv</label>
+            <h3>Berechtigungen</h3>
+            <div class="permission-grid">
+              <label><input type="checkbox" name="account_can_news"> News verwalten</label>
+              <label><input type="checkbox" name="account_can_events"> Termine verwalten</label>
+              <label><input type="checkbox" name="account_can_members"> Mitglieder verwalten</label>
+              <label><input type="checkbox" name="account_can_documents"> Dokumente verwalten</label>
+              <label><input type="checkbox" name="account_can_photos"> Fotos/Fotoalben verwalten</label>
+              <label><input type="checkbox" name="account_can_polls"> Umfragen verwalten</label>
+              <label><input type="checkbox" name="account_can_links"> Links verwalten</label>
+              <label><input type="checkbox" name="account_can_contact"> Kontakt bearbeiten</label>
+              <label><input type="checkbox" name="account_can_about"> Über uns bearbeiten</label>
+              <label><input type="checkbox" name="account_can_admin_page"> PC-Adminseite benutzen</label>
+              <label><input type="checkbox" name="account_can_manage_users"> Benutzer/Berechtigungen verwalten</label>
+            </div>
+          </div>
+
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card"><h2>Mitglieder</h2><div id="members-list"></div></div>
@@ -225,6 +252,7 @@
 let token = sessionStorage.getItem("flapamamaku_token") || "";
 let currentUser = null;
 let bootstrapRequired = false;
+let userAccounts = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
@@ -263,6 +291,9 @@ function showAdmin() {
 }
 
 function applyPermissions() {
+  document.getElementById("member-account-block")
+    .classList.toggle("hidden", !currentUser?.can_manage_users);
+
   document.querySelectorAll("[data-permission]").forEach(button => {
     button.classList.toggle("hidden", !currentUser?.[button.dataset.permission]);
   });
@@ -327,6 +358,9 @@ async function load(resource) {
       <h3>${label(resource, item)}</h3>
       <div class="meta">${item.location || item.email || item.text || ""}</div>
       ${resource === "news" && item.image_url ? `<div class="meta">Foto gespeichert</div>` : ""}
+      ${resource === "members" && currentUser?.can_manage_users
+        ? `<div class="meta">${userAccounts.some(user => Number(user.member_id) === Number(item.id)) ? "Benutzerkonto vorhanden" : "Kein Benutzerkonto"}</div>`
+        : ""}
       <div class="actions">
         <button type="button" class="edit">Bearbeiten</button>
         <button type="button" class="delete">Löschen</button>
@@ -344,6 +378,19 @@ function edit(resource, item) {
   resources[resource].forEach(key => {
     if (form.elements[key]) form.elements[key].value = item[key] || "";
   });
+
+  if (resource === "members" && currentUser?.can_manage_users) {
+    const account = userAccounts.find(user => Number(user.member_id) === Number(item.id));
+    form.elements.account_user_id.value = account?.id || "";
+    form.elements.account_username.value = account?.username || "";
+    form.elements.account_password.value = "";
+    form.elements.account_active.checked = account ? !!account.active : true;
+    permissionFields.forEach(key => {
+      const field = form.elements[`account_${key}`];
+      if (field) field.checked = account ? !!account[key] : false;
+    });
+  }
+
   form.scrollIntoView({behavior: "smooth"});
 }
 
@@ -371,6 +418,7 @@ async function loadMembersForSelects() {
 async function loadUsers() {
   if (!currentUser?.can_manage_users) return;
   const users = await api("/api/users");
+  userAccounts = users;
   const list = document.getElementById("users-list");
   list.innerHTML = "";
   users.forEach(user => {
@@ -425,6 +473,36 @@ Object.keys(resources).forEach(resource => {
       id ? `/api/${resource}/${id}` : `/api/${resource}`,
       {method: id ? "PUT" : "POST", body}
     );
+
+    if (resource === "members" && currentUser?.can_manage_users) {
+      const username = form.elements.account_username.value.trim();
+      const accountId = form.elements.account_user_id.value;
+      const password = form.elements.account_password.value;
+
+      if (username) {
+        if (!accountId && password.length < 6) {
+          alert("Für ein neues Benutzerkonto ist ein Passwort mit mindestens 6 Zeichen nötig.");
+          return;
+        }
+
+        const accountData = {
+          member_id: saved.id,
+          username,
+          password,
+          active: form.elements.account_active.checked,
+        };
+        permissionFields.forEach(key => {
+          accountData[key] = form.elements[`account_${key}`].checked;
+        });
+
+        await api(accountId ? `/api/users/${accountId}` : "/api/users", {
+          method: accountId ? "PUT" : "POST",
+          body: JSON.stringify(accountData),
+        });
+        await loadUsers();
+      }
+    }
+
     if (resource === "news") {
       const file = form.elements.image_file.files[0];
       if (file) {
@@ -435,7 +513,19 @@ Object.keys(resources).forEach(resource => {
     }
     form.reset();
     form.elements.id.value = "";
-    if (resource === "members") form.elements.role.value = "Präsident";
+    if (resource === "members") {
+      form.elements.role.value = "Präsident";
+      if (currentUser?.can_manage_users) {
+        form.elements.account_user_id.value = "";
+        form.elements.account_username.value = "";
+        form.elements.account_password.value = "";
+        form.elements.account_active.checked = true;
+        permissionFields.forEach(key => {
+          const field = form.elements[`account_${key}`];
+          if (field) field.checked = false;
+        });
+      }
+    }
     if (resource === "news") form.elements.date.value = new Date().toLocaleDateString("de-CH");
     await load(resource);
     if (resource === "members" && currentUser?.can_manage_users) {
@@ -520,11 +610,11 @@ async function startAdmin() {
     await load("news");
   }
   if (currentUser.can_events) await load("events");
+  if (currentUser.can_manage_users) await loadUsers();
   if (currentUser.can_members || currentUser.can_manage_users) {
     await load("members");
     await loadMembersForSelects();
   }
-  if (currentUser.can_manage_users) await loadUsers();
 }
 
 (async () => {
