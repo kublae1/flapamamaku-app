@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_data.dart';
 import 'api_service.dart';
@@ -20,11 +21,16 @@ class AppStore extends ChangeNotifier {
     _sortEvents();
 
     if (this.api.isConfigured) {
-      refreshFromServer();
+      restoreSession();
       _syncTimer = Timer.periodic(
         const Duration(seconds: 30),
-        (_) => refreshFromServer(),
+        (_) {
+          if (isAuthenticated) refreshFromServer();
+        },
       );
+    } else {
+      authReady = true;
+      isAuthenticated = true;
     }
   }
 
@@ -40,9 +46,122 @@ class AppStore extends ChangeNotifier {
   DateTime? lastSuccessfulSync;
 
   UserRole currentRole = UserRole.admin;
+  bool authReady = false;
+  bool isAuthenticated = false;
+  bool isAuthenticating = false;
+  Map<String, dynamic>? currentUser;
+  String? authError;
 
-  bool get canAdminister => currentRole == UserRole.admin;
+  bool get canNews => currentUser?['can_news'] == true;
+  bool get canEvents => currentUser?['can_events'] == true;
+  bool get canMembers => currentUser?['can_members'] == true;
+  bool get canDocuments => currentUser?['can_documents'] == true;
+  bool get canPhotos => currentUser?['can_photos'] == true;
+  bool get canPolls => currentUser?['can_polls'] == true;
+  bool get canLinks => currentUser?['can_links'] == true;
+  bool get canContact => currentUser?['can_contact'] == true;
+  bool get canAbout => currentUser?['can_about'] == true;
+  bool get canAdminPage => currentUser?['can_admin_page'] == true;
+  bool get canManageUsers => currentUser?['can_manage_users'] == true;
+
+  bool get canAdminister =>
+      !api.isConfigured || canNews || canEvents || canMembers;
   bool get serverConfigured => api.isConfigured;
+
+  String get signedInName =>
+      currentUser?['member_name']?.toString().isNotEmpty == true
+          ? currentUser!['member_name'].toString()
+          : currentUser?['username']?.toString() ?? '';
+
+  Future<void> restoreSession() async {
+    authReady = false;
+    notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('flapamamaku_token');
+    if (token == null || token.isEmpty) {
+      api.setToken(null);
+      authReady = true;
+      isAuthenticated = false;
+      notifyListeners();
+      return;
+    }
+
+    api.setToken(token);
+    try {
+      currentUser = await api.fetchMe();
+      isAuthenticated = true;
+      authError = null;
+      await refreshFromServer();
+    } catch (_) {
+      api.setToken(null);
+      currentUser = null;
+      isAuthenticated = false;
+      await prefs.remove('flapamamaku_token');
+    } finally {
+      authReady = true;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> login(String username, String password) async {
+    if (!api.isConfigured) return true;
+
+    isAuthenticating = true;
+    authError = null;
+    notifyListeners();
+
+    try {
+      final result = await api.login(username.trim(), password);
+      final token = result['token']?.toString() ?? '';
+      if (token.isEmpty) {
+        throw const ApiException('Kein Sitzungstoken erhalten.');
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('flapamamaku_token', token);
+      currentUser = Map<String, dynamic>.from(
+        result['user'] as Map<String, dynamic>,
+      );
+      isAuthenticated = true;
+      await refreshFromServer();
+      return true;
+    } catch (error) {
+      authError = 'Benutzername oder Passwort falsch.';
+      isAuthenticated = false;
+      currentUser = null;
+      return false;
+    } finally {
+      isAuthenticating = false;
+      authReady = true;
+      notifyListeners();
+    }
+  }
+
+  Future<void> logout() async {
+    try {
+      await api.logout();
+    } catch (_) {
+      api.setToken(null);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('flapamamaku_token');
+    currentUser = null;
+    isAuthenticated = false;
+    authError = null;
+    news
+      ..clear()
+      ..addAll(newsItems);
+    events
+      ..clear()
+      ..addAll(eventItems);
+    members
+      ..clear()
+      ..addAll(initialMembers);
+    _sortNews();
+    _sortEvents();
+    notifyListeners();
+  }
 
   void _sortNews() {
     news.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -62,7 +181,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> refreshFromServer() async {
-    if (!api.isConfigured || isSyncing) return;
+    if (!api.isConfigured || !isAuthenticated || isSyncing) return;
 
     isSyncing = true;
     notifyListeners();
