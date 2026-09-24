@@ -101,53 +101,155 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addNews(NewsItem item) {
-    news.add(item);
-    _sortNews();
-    notifyListeners();
+  Future<void> addNews(NewsItem item) async {
+    if (!api.isConfigured) {
+      news.add(item);
+      _sortNews();
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.saveNews(item);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void updateNews(int index, NewsItem item) {
-    news[index] = item;
-    _sortNews();
-    notifyListeners();
+  Future<void> updateNews(int index, NewsItem item) async {
+    if (!api.isConfigured) {
+      news[index] = item;
+      _sortNews();
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.saveNews(item);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void deleteNews(int index) {
-    news.removeAt(index);
-    notifyListeners();
+  Future<void> deleteNews(int index) async {
+    final item = news[index];
+    if (!api.isConfigured || item.id == null) {
+      news.removeAt(index);
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.deleteNews(item.id!);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void addEvent(EventItem item) {
-    events.add(item);
-    _sortEvents();
-    notifyListeners();
+  Future<void> addEvent(EventItem item) async {
+    if (!api.isConfigured) {
+      events.add(item);
+      _sortEvents();
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.saveEvent(item);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void updateEvent(int index, EventItem item) {
-    events[index] = item;
-    _sortEvents();
-    notifyListeners();
+  Future<void> updateEvent(int index, EventItem item) async {
+    if (!api.isConfigured) {
+      events[index] = item;
+      _sortEvents();
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.saveEvent(item);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void deleteEvent(int index) {
-    events.removeAt(index);
-    notifyListeners();
+  Future<void> deleteEvent(int index) async {
+    final item = events[index];
+    if (!api.isConfigured || item.id == null) {
+      events.removeAt(index);
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.deleteEvent(item.id!);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void addMember(MemberItem item) {
-    members.add(item);
-    notifyListeners();
+  Future<void> addMember(MemberItem item) async {
+    if (!api.isConfigured) {
+      members.add(item);
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.saveMember(item);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void updateMember(int index, MemberItem item) {
-    members[index] = item;
-    notifyListeners();
+  Future<void> updateMember(int index, MemberItem item) async {
+    if (!api.isConfigured) {
+      members[index] = item;
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.saveMember(item);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
-  void deleteMember(int index) {
-    members.removeAt(index);
-    notifyListeners();
+  Future<void> deleteMember(int index) async {
+    final item = members[index];
+    if (!api.isConfigured || item.id == null) {
+      members.removeAt(index);
+      notifyListeners();
+      return;
+    }
+    try {
+      await api.deleteMember(item.id!);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   @override
