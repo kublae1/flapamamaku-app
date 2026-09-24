@@ -4,7 +4,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/app_store.dart';
 import '../models/app_data.dart';
 
-class RemoteContentScreen extends StatelessWidget {
+enum _ContentSort {
+  newest,
+  oldest,
+  titleAsc,
+  titleDesc,
+}
+
+class RemoteContentScreen extends StatefulWidget {
   final String section;
   final String title;
   final String emptyText;
@@ -17,6 +24,13 @@ class RemoteContentScreen extends StatelessWidget {
     required this.icon,
     super.key,
   });
+
+  @override
+  State<RemoteContentScreen> createState() => _RemoteContentScreenState();
+}
+
+class _RemoteContentScreenState extends State<RemoteContentScreen> {
+  _ContentSort sort = _ContentSort.newest;
 
   Future<void> _openLink(BuildContext context, String value) async {
     final uri = Uri.tryParse(value);
@@ -73,13 +87,71 @@ class RemoteContentScreen extends StatelessWidget {
     }
   }
 
+  List<ContentItem> _sortedItems(List<ContentItem> source) {
+    final items = List<ContentItem>.from(source);
+    switch (sort) {
+      case _ContentSort.newest:
+        items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      case _ContentSort.oldest:
+        items.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      case _ContentSort.titleAsc:
+        items.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
+      case _ContentSort.titleDesc:
+        items.sort(
+          (a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()),
+        );
+    }
+    return items;
+  }
+
+  String _sortLabel(_ContentSort value) {
+    switch (value) {
+      case _ContentSort.newest:
+        return 'Neueste zuerst';
+      case _ContentSort.oldest:
+        return 'Älteste zuerst';
+      case _ContentSort.titleAsc:
+        return 'Titel A–Z';
+      case _ContentSort.titleDesc:
+        return 'Titel Z–A';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final items = store.contentFor(section);
+    final items = _sortedItems(store.contentFor(widget.section));
 
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          PopupMenuButton<_ContentSort>(
+            tooltip: 'Sortieren',
+            icon: const Icon(Icons.sort),
+            initialValue: sort,
+            onSelected: (value) => setState(() => sort = value),
+            itemBuilder: (context) => _ContentSort.values
+                .map(
+                  (value) => PopupMenuItem<_ContentSort>(
+                    value: value,
+                    child: Row(
+                      children: [
+                        if (value == sort) ...[
+                          const Icon(Icons.check, size: 18),
+                          const SizedBox(width: 8),
+                        ],
+                        Text(_sortLabel(value)),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: store.refreshFromServer,
         child: items.isEmpty
@@ -89,13 +161,13 @@ class RemoteContentScreen extends StatelessWidget {
                 children: [
                   const SizedBox(height: 80),
                   Icon(
-                    icon,
+                    widget.icon,
                     size: 64,
                     color: Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(height: 18),
                   Text(
-                    emptyText,
+                    widget.emptyText,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
@@ -114,7 +186,7 @@ class RemoteContentScreen extends StatelessWidget {
                     onOpenLink: item.linkUrl.isEmpty
                         ? null
                         : () => _openLink(context, item.linkUrl),
-                    onDelete: store.canEditContentSection(section)
+                    onDelete: store.canEditContentSection(widget.section)
                         ? () => _deleteItem(context, store, item)
                         : null,
                   );

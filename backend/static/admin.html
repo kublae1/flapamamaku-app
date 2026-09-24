@@ -301,6 +301,13 @@
             <option value="polls">Umfragen</option>
             <option value="links">Links</option>
           </select>
+          <label>Sortierung</label>
+          <select id="content-sort">
+            <option value="newest">Neueste zuerst</option>
+            <option value="oldest">Älteste zuerst</option>
+            <option value="title-asc">Titel A–Z</option>
+            <option value="title-desc">Titel Z–A</option>
+          </select>
           <p class="meta" id="content-summary"></p>
           <div id="content-list"></div>
         </div>
@@ -675,12 +682,26 @@ async function loadContent() {
   const list = document.getElementById("content-list");
   const summary = document.getElementById("content-summary");
   const filter = document.getElementById("content-filter")?.value || "";
+  const sort = document.getElementById("content-sort")?.value || "newest";
   list.innerHTML = "";
 
   const visibleItems = items.filter(item => canEditContentSection(item.section));
   const filteredItems = filter
     ? visibleItems.filter(item => item.section === filter)
     : visibleItems;
+
+  filteredItems.sort((a, b) => {
+    if (sort === "oldest") {
+      return (a.created_at || "").localeCompare(b.created_at || "");
+    }
+    if (sort === "title-asc") {
+      return (a.title || "").localeCompare(b.title || "", "de", {sensitivity:"base"});
+    }
+    if (sort === "title-desc") {
+      return (b.title || "").localeCompare(a.title || "", "de", {sensitivity:"base"});
+    }
+    return (b.created_at || "").localeCompare(a.created_at || "");
+  });
 
   const counts = Object.keys(contentLabels)
     .map(section => {
@@ -737,6 +758,7 @@ async function removeContent(id) {
 }
 
 document.getElementById("content-filter").addEventListener("change", loadContent);
+document.getElementById("content-sort").addEventListener("change", loadContent);
 
 document.getElementById("content-form").addEventListener("submit", async event => {
   event.preventDefault();
@@ -850,7 +872,7 @@ async function startAdmin() {
   showAdmin();
   applyPermissions();
   document.getElementById("status").textContent =
-    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.7`;
+    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.9`;
 
   if (currentUser.can_news) {
     document.querySelector("#news-form [name=date]").value =
