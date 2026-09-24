@@ -50,9 +50,33 @@ class StartScreen extends StatelessWidget {
     return images;
   }
 
+  ContentItem? _heroItem(AppStore store) {
+    final items = List<ContentItem>.from(store.contentFor('hero'));
+    if (items.isEmpty) return null;
+    items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return items.first;
+  }
+
+  String _heroImage(ContentItem? item) {
+    if (item == null) return '';
+    if (item.imageUrls.isNotEmpty) {
+      return item.imageUrls.firstWhere(
+        (url) => url.trim().isNotEmpty,
+        orElse: () => item.imageUrl,
+      );
+    }
+    return item.imageUrl;
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
+    final hero = _heroItem(store);
+    final heroImage = _heroImage(hero);
+    final heroTitle =
+        hero?.title.trim().isNotEmpty == true ? hero!.title.trim() : 'DIE SCHWEINE ROCKER';
+    final heroSubtitle =
+        hero?.text.trim().isNotEmpty == true ? hero!.text.trim() : 'in der Bar';
     final sujetImages = _sujetImages(store);
     final latest = store.news.isEmpty ? null : store.news.first;
     final latestImage =
@@ -71,10 +95,20 @@ class StartScreen extends StatelessWidget {
                   SizedBox(
                     height: 330,
                     width: double.infinity,
-                    child: Image.asset(
-                      'assets/images/hero_fireworks.jpg',
-                      fit: BoxFit.cover,
-                    ),
+                    child: heroImage.isNotEmpty
+                        ? Image.network(
+                            heroImage,
+                            headers: store.api.authHeaders,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Image.asset(
+                              'assets/images/year_motto_pig_rockers.jpg',
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : Image.asset(
+                            'assets/images/year_motto_pig_rockers.jpg',
+                            fit: BoxFit.cover,
+                          ),
                   ),
                   Container(
                     height: 330,
@@ -133,7 +167,7 @@ class StartScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const Positioned(
+                  Positioned(
                     left: 18,
                     right: 18,
                     bottom: 34,
@@ -141,18 +175,18 @@ class StartScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'DIE SCHWEINE ROCKER',
-                          style: TextStyle(
+                          heroTitle.toUpperCase(),
+                          style: const TextStyle(
                             color: FlapBrand.gold,
                             fontSize: 13,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 1.8,
                           ),
                         ),
-                        SizedBox(height: 5),
+                        const SizedBox(height: 5),
                         Text(
-                          'in der Bar',
-                          style: TextStyle(
+                          heroSubtitle,
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 34,
                             height: 1,
