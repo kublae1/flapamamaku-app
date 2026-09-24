@@ -120,10 +120,25 @@ class AdminScreen extends StatelessWidget {
       imageUrl: existing?.imageUrl ?? '',
     );
 
-    if (index == null) {
-      store.addNews(item);
-    } else {
-      store.updateNews(index, item);
+    try {
+      if (index == null) {
+        await store.addNews(item);
+      } else {
+        await store.updateNews(index, item);
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(index == null ? 'News gespeichert.' : 'News aktualisiert.'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('News konnten nicht gespeichert werden: $error')),
+        );
+      }
     }
   }
 
@@ -198,10 +213,25 @@ class AdminScreen extends StatelessWidget {
       eventDate: eventDate.text.trim(),
     );
 
-    if (index == null) {
-      store.addEvent(item);
-    } else {
-      store.updateEvent(index, item);
+    try {
+      if (index == null) {
+        await store.addEvent(item);
+      } else {
+        await store.updateEvent(index, item);
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(index == null ? 'Termin gespeichert.' : 'Termin aktualisiert.'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Termin konnte nicht gespeichert werden: $error')),
+        );
+      }
     }
   }
 
@@ -328,10 +358,25 @@ class AdminScreen extends StatelessWidget {
       photoUrl: existing?.photoUrl ?? '',
     );
 
-    if (index == null) {
-      store.addMember(item);
-    } else {
-      store.updateMember(index, item);
+    try {
+      if (index == null) {
+        await store.addMember(item);
+      } else {
+        await store.updateMember(index, item);
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(index == null ? 'Mitglied gespeichert.' : 'Mitglied aktualisiert.'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Mitglied konnte nicht gespeichert werden: $error')),
+        );
+      }
     }
   }
 
