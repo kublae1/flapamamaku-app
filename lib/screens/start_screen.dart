@@ -73,10 +73,12 @@ class StartScreen extends StatelessWidget {
     final store = AppStoreScope.of(context);
     final hero = _heroItem(store);
     final heroImage = _heroImage(hero);
-    final heroTitle =
-        hero?.title.trim().isNotEmpty == true ? hero!.title.trim() : 'DIE SCHWEINE ROCKER';
-    final heroSubtitle =
-        hero?.text.trim().isNotEmpty == true ? hero!.text.trim() : 'in der Bar';
+    final heroTitle = hero != null && hero.title.trim().isNotEmpty
+        ? hero.title.trim()
+        : 'DIE SCHWEINE ROCKER';
+    final heroSubtitle = hero != null && hero.text.trim().isNotEmpty
+        ? hero.text.trim()
+        : 'in der Bar';
     final sujetImages = _sujetImages(store);
     final latest = store.news.isEmpty ? null : store.news.first;
     final latestImage =
