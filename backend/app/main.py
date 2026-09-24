@@ -443,6 +443,18 @@ def auth_status() -> dict[str, bool]:
     return {"bootstrap_required": count == 0}
 
 
+@app.get("/api/auth/bootstrap-members")
+def bootstrap_members() -> list[dict[str, Any]]:
+    with connect() as db:
+        count = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if count:
+            raise HTTPException(status_code=403, detail="Ersteinrichtung abgeschlossen")
+        rows = db.execute(
+            "SELECT id, name FROM members ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 @app.post("/api/auth/bootstrap")
 def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
     with connect() as db:
