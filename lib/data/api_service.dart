@@ -29,9 +29,16 @@ class ApiService {
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final values = jsonDecode(response.body) as List<dynamic>;
-    return values
-        .map((value) => NewsItem.fromJson(value as Map<String, dynamic>))
-        .toList();
+    return values.map((value) {
+      final json = Map<String, dynamic>.from(
+        value as Map<String, dynamic>,
+      );
+      final imageUrl = json['image_url']?.toString() ?? '';
+      if (imageUrl.startsWith('/')) {
+        json['image_url'] = '$baseUrl$imageUrl';
+      }
+      return NewsItem.fromJson(json);
+    }).toList();
   }
 
   Future<List<EventItem>> fetchEvents() async {
