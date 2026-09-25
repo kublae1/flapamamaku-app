@@ -17,6 +17,16 @@ class StartScreen extends StatelessWidget {
     return items.first;
   }
 
+  String _contentImage(ContentItem? item) {
+    if (item == null) return '';
+    if (item.imageUrls.isNotEmpty) {
+      for (final url in item.imageUrls) {
+        if (url.trim().isNotEmpty) return url.trim();
+      }
+    }
+    return item.imageUrl.trim();
+  }
+
   String _mottoYear(ContentItem? sujet) {
     final values = [
       sujet?.title ?? '',
@@ -29,6 +39,8 @@ class StartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
+    final hero = _latestContent(store, 'hero');
+    final heroImage = _contentImage(hero);
     final sujet = _latestContent(store, 'sujet');
     final mottoYear = _mottoYear(sujet);
 
@@ -81,11 +93,23 @@ class StartScreen extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   height: 480,
-                  child: Image.asset(
-                    'assets/images/hero_wasserturm_saurocker.jpg',
-                    fit: BoxFit.cover,
-                    alignment: Alignment.center,
-                  ),
+                  child: heroImage.isNotEmpty
+                      ? Image.network(
+                          heroImage,
+                          headers: store.api.authHeaders,
+                          fit: BoxFit.cover,
+                          alignment: Alignment.center,
+                          errorBuilder: (_, __, ___) => Image.asset(
+                            'assets/images/hero_wasserturm_saurocker.jpg',
+                            fit: BoxFit.cover,
+                            alignment: Alignment.center,
+                          ),
+                        )
+                      : Image.asset(
+                          'assets/images/hero_wasserturm_saurocker.jpg',
+                          fit: BoxFit.cover,
+                          alignment: Alignment.center,
+                        ),
                 ),
               ],
             ),
