@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../theme/flap_brand.dart';
 
 class BiometricLockScreen extends StatefulWidget {
   const BiometricLockScreen({super.key});
@@ -28,31 +29,48 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
     final store = AppStoreScope.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('FLAPAMAMAKU')),
+      backgroundColor: FlapBrand.charcoal,
+      appBar: AppBar(
+        title: const Text(
+          'FLAPAMAMAKU',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
-            child: Card(
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF191B1E),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: const Color(0x18FFFFFF)),
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(22),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(Icons.fingerprint, size: 68),
+                    const Icon(
+                      Icons.fingerprint_rounded,
+                      size: 76,
+                      color: FlapBrand.gold,
+                    ),
                     const SizedBox(height: 14),
                     Text(
                       'App entsperren',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
                           ),
                     ),
                     const SizedBox(height: 8),
                     const Text(
                       'Mit Fingerabdruck, Gesichtserkennung oder Geräte-PIN entsperren.',
                       textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white70, height: 1.4),
                     ),
                     if (store.authError != null) ...[
                       const SizedBox(height: 12),
@@ -67,6 +85,11 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                     ],
                     const SizedBox(height: 18),
                     FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: FlapBrand.burgundy,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(52),
+                      ),
                       onPressed: store.isBiometricAuthenticating
                           ? null
                           : store.unlockWithBiometrics,
@@ -77,12 +100,18 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.fingerprint),
-                      label: const Text('Entsperren'),
+                      label: const Text(
+                        'Biometrisch entsperren',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     TextButton(
                       onPressed: store.usePasswordInstead,
-                      child: const Text('Mit Benutzername und Passwort anmelden'),
+                      child: const Text(
+                        'Mit Benutzername und Passwort anmelden',
+                        style: TextStyle(color: FlapBrand.gold),
+                      ),
                     ),
                   ],
                 ),

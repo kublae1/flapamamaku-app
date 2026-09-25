@@ -159,7 +159,16 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
         onRefresh: store.refreshFromServer,
         child: items.isEmpty
             ? _EmptyState(icon: widget.icon, text: widget.emptyText)
-            : _isVisualSection
+            : widget.section == 'links'
+                ? _LinkList(
+                    items: items,
+                    headers: store.api.authHeaders,
+                    onOpen: (item) => _openLink(context, item.linkUrl),
+                    onDelete: store.canEditContentSection(widget.section)
+                        ? (item) => _deleteItem(context, store, item)
+                        : null,
+                  )
+                : _isVisualSection
                 ? _VisualAlbumList(
                     items: items,
                     headers: store.api.authHeaders,
@@ -188,6 +197,136 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                     },
                   ),
       ),
+    );
+  }
+}
+
+class _LinkList extends StatelessWidget {
+  final List<ContentItem> items;
+  final Map<String, String> headers;
+  final ValueChanged<ContentItem> onOpen;
+  final ValueChanged<ContentItem>? onDelete;
+
+  const _LinkList({
+    required this.items,
+    required this.headers,
+    required this.onOpen,
+    this.onDelete,
+  });
+
+  String _logo(ContentItem item) {
+    for (final value in item.imageUrls) {
+      if (value.trim().isNotEmpty) return value.trim();
+    }
+    return item.imageUrl.trim();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, index) {
+        final item = items[index];
+        final logo = _logo(item);
+        final canOpen = item.linkUrl.trim().isNotEmpty;
+
+        return Material(
+          color: const Color(0xFF191B1E),
+          borderRadius: BorderRadius.circular(18),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: canOpen ? () => onOpen(item) : null,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 66,
+                    height: 66,
+                    decoration: BoxDecoration(
+                      color: logo.isEmpty ? FlapBrand.burgundy : Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: logo.isEmpty
+                        ? const Icon(
+                            Icons.link_rounded,
+                            color: Colors.white,
+                            size: 31,
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Image.network(
+                              logo,
+                              headers: headers,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => const Icon(
+                                Icons.link_rounded,
+                                color: FlapBrand.burgundy,
+                                size: 31,
+                              ),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        if (item.text.trim().isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            item.text.trim(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white60),
+                          ),
+                        ],
+                        if (canOpen) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            item.linkUrl,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: FlapBrand.gold,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (canOpen)
+                    const Icon(
+                      Icons.open_in_new_rounded,
+                      color: FlapBrand.gold,
+                    ),
+                  if (onDelete != null)
+                    IconButton(
+                      tooltip: 'Löschen',
+                      color: Colors.white54,
+                      onPressed: () => onDelete!(item),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

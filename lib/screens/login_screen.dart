@@ -164,6 +164,54 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           ),
                         ),
+                        const SizedBox(height: 16),
+                        const Row(
+                          children: [
+                            Expanded(
+                              child: Divider(color: Color(0x33FFFFFF)),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(
+                                'oder',
+                                style: TextStyle(color: Colors.white54),
+                              ),
+                            ),
+                            Expanded(
+                              child: Divider(color: Color(0x33FFFFFF)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 52,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: FlapBrand.gold),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            onPressed: store.isBiometricAuthenticating
+                                ? null
+                                : store.loginWithBiometrics,
+                            icon: store.isBiometricAuthenticating
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.fingerprint_rounded),
+                            label: const Text(
+                              'Biometrisch anmelden',
+                              style: TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
 import '../models/app_data.dart';
+import '../theme/flap_brand.dart';
 
 class AdminScreen extends StatelessWidget {
   const AdminScreen({super.key});
@@ -386,8 +387,12 @@ class AdminScreen extends StatelessWidget {
 
     if (!store.canAdminister) {
       return const Scaffold(
+        backgroundColor: FlapBrand.charcoal,
         body: Center(
-          child: Text('Keine Administrator-Berechtigung.'),
+          child: Text(
+            'Keine Administrator-Berechtigung.',
+            style: TextStyle(color: Colors.white70),
+          ),
         ),
       );
     }
@@ -425,8 +430,12 @@ class AdminScreen extends StatelessWidget {
 
     if (tabs.isEmpty) {
       return const Scaffold(
+        backgroundColor: FlapBrand.charcoal,
         body: Center(
-          child: Text('Keine Verwaltungsberechtigung vorhanden.'),
+          child: Text(
+            'Keine Verwaltungsberechtigung vorhanden.',
+            style: TextStyle(color: Colors.white70),
+          ),
         ),
       );
     }
@@ -434,12 +443,17 @@ class AdminScreen extends StatelessWidget {
     return DefaultTabController(
       length: tabs.length,
       child: Scaffold(
+        backgroundColor: FlapBrand.charcoal,
         appBar: AppBar(
-          title: const Text('Administration'),
+          title: const Text(
+            'Administration',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
           bottom: TabBar(
-            labelColor: Colors.black,
-            unselectedLabelColor: Colors.black,
-            indicatorColor: Colors.black,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white60,
+            indicatorColor: FlapBrand.gold,
+            indicatorWeight: 3,
             tabs: tabs,
           ),
         ),
@@ -463,9 +477,15 @@ class _NewsAdminList extends StatelessWidget {
     final store = AppStoreScope.of(context);
 
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: FlapBrand.burgundy,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(50),
+          ),
           onPressed: onAdd,
           icon: const Icon(Icons.add),
           label: const Text('Neue News'),
@@ -473,14 +493,24 @@ class _NewsAdminList extends StatelessWidget {
         const SizedBox(height: 12),
         for (var i = 0; i < store.news.length; i++)
           Card(
+            color: const Color(0xFF191B1E),
             child: ListTile(
-              title: Text(store.news[i].title),
-              subtitle: Text(store.news[i].date),
+              title: Text(
+                store.news[i].title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              subtitle: Text(
+                store.news[i].date,
+                style: const TextStyle(color: Colors.white60),
+              ),
               onTap: () => onEdit(i),
               trailing: IconButton(
                 tooltip: 'Löschen',
                 onPressed: () => store.deleteNews(i),
-                icon: const Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_outline, color: Colors.white54),
               ),
             ),
           ),
@@ -503,9 +533,15 @@ class _EventAdminList extends StatelessWidget {
     final store = AppStoreScope.of(context);
 
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: FlapBrand.burgundy,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(50),
+          ),
           onPressed: onAdd,
           icon: const Icon(Icons.add),
           label: const Text('Termin erfassen'),
@@ -513,17 +549,25 @@ class _EventAdminList extends StatelessWidget {
         const SizedBox(height: 12),
         for (var i = 0; i < store.events.length; i++)
           Card(
+            color: const Color(0xFF191B1E),
             child: ListTile(
-              title: Text(store.events[i].title),
+              title: Text(
+                store.events[i].title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
               subtitle: Text(
                 '${store.events[i].displayDate} · '
                 '${store.events[i].time}',
+                style: const TextStyle(color: Colors.white60),
               ),
               onTap: () => onEdit(i),
               trailing: IconButton(
                 tooltip: 'Löschen',
                 onPressed: () => store.deleteEvent(i),
-                icon: const Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_outline, color: Colors.white54),
               ),
             ),
           ),
@@ -546,9 +590,15 @@ class _MemberAdminList extends StatelessWidget {
     final store = AppStoreScope.of(context);
 
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: FlapBrand.burgundy,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(50),
+          ),
           onPressed: onAdd,
           icon: const Icon(Icons.person_add_alt_1),
           label: const Text('Mitglied erfassen'),
@@ -556,18 +606,26 @@ class _MemberAdminList extends StatelessWidget {
         const SizedBox(height: 12),
         for (var i = 0; i < store.members.length; i++)
           Card(
+            color: const Color(0xFF191B1E),
             child: ListTile(
-              title: Text(store.members[i].name),
+              title: Text(
+                store.members[i].name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
               subtitle: Text(
                 store.members[i].occupation.isEmpty
                     ? store.members[i].role
                     : '${store.members[i].role} · ${store.members[i].occupation}',
+                style: const TextStyle(color: Colors.white60),
               ),
               onTap: () => onEdit(i),
               trailing: IconButton(
                 tooltip: 'Löschen',
                 onPressed: () => store.deleteMember(i),
-                icon: const Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_outline, color: Colors.white54),
               ),
             ),
           ),

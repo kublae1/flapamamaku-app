@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/app_store.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
+import 'flap_image_viewer_screen.dart';
 import 'members_screen.dart';
 import 'more_screen.dart';
 import 'year_motto_screen.dart';
@@ -41,6 +42,10 @@ class StartScreen extends StatelessWidget {
     final store = AppStoreScope.of(context);
     final hero = _latestContent(store, 'hero');
     final heroImage = _contentImage(hero);
+    final heroTitle = hero == null || hero.title.trim().isEmpty
+        ? 'FLAPAMAMAKU'
+        : hero.title.trim();
+    const fallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
     final sujet = _latestContent(store, 'sujet');
     final mottoYear = _mottoYear(sujet);
 
@@ -88,30 +93,57 @@ class StartScreen extends StatelessWidget {
                 ],
               ),
             ),
-            Stack(
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  height: 480,
-                  child: heroImage.isNotEmpty
-                      ? Image.network(
-                          heroImage,
-                          headers: store.api.authHeaders,
-                          fit: BoxFit.cover,
-                          alignment: Alignment.center,
-                          errorBuilder: (_, __, ___) => Image.asset(
-                            'assets/images/hero_wasserturm_saurocker.jpg',
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => FlapImageViewerScreen(
+                    title: heroTitle,
+                    imageUrl: heroImage,
+                    imageAsset: fallbackHero,
+                  ),
+                ),
+              ),
+              child: Stack(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    height: 480,
+                    child: heroImage.isNotEmpty
+                        ? Image.network(
+                            heroImage,
+                            headers: store.api.authHeaders,
+                            fit: BoxFit.cover,
+                            alignment: Alignment.center,
+                            errorBuilder: (_, __, ___) => Image.asset(
+                              fallbackHero,
+                              fit: BoxFit.cover,
+                              alignment: Alignment.center,
+                            ),
+                          )
+                        : Image.asset(
+                            fallbackHero,
                             fit: BoxFit.cover,
                             alignment: Alignment.center,
                           ),
-                        )
-                      : Image.asset(
-                          'assets/images/hero_wasserturm_saurocker.jpg',
-                          fit: BoxFit.cover,
-                          alignment: Alignment.center,
-                        ),
-                ),
-              ],
+                  ),
+                  Positioned(
+                    right: 14,
+                    bottom: 14,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(
+                        color: Color(0xB8000000),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.zoom_in_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),

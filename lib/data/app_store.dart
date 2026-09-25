@@ -213,6 +213,36 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  Future<bool> loginWithBiometrics() async {
+    if (isBiometricAuthenticating) return false;
+
+    try {
+      biometricAvailable =
+          await _localAuth.canCheckBiometrics &&
+          await _localAuth.isDeviceSupported();
+    } catch (_) {
+      biometricAvailable = false;
+    }
+
+    if (!biometricAvailable) {
+      authError = 'Auf diesem Gerät ist keine biometrische Anmeldung verfügbar.';
+      notifyListeners();
+      return false;
+    }
+
+    final token = await _secureStorage.read(key: 'flapamamaku_token');
+    if (token == null || token.isEmpty) {
+      authError =
+          'Bitte zuerst einmal mit Benutzername und Passwort anmelden.';
+      notifyListeners();
+      return false;
+    }
+
+    biometricUnlockPending = true;
+    notifyListeners();
+    return unlockWithBiometrics();
+  }
+
   Future<void> usePasswordInstead() async {
     api.setToken(null);
     currentUser = null;

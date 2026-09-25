@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../data/app_store.dart';
 import '../models/app_data.dart';
+import '../theme/flap_brand.dart';
+import 'flap_image_viewer_screen.dart';
 
 class NewsDetailScreen extends StatelessWidget {
   final NewsItem item;
@@ -10,52 +13,95 @@ class NewsDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppStoreScope.of(context);
+    final hasImage = item.imageUrl.isNotEmpty || item.imageAsset.isNotEmpty;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('News')),
+      backgroundColor: FlapBrand.charcoal,
+      appBar: AppBar(
+        title: const Text('News', style: TextStyle(fontWeight: FontWeight.w900)),
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.zero,
         children: [
-          if (item.imageUrl.isNotEmpty || item.imageAsset.isNotEmpty) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: item.imageUrl.isNotEmpty
-                    ? Image.network(
-                        item.imageUrl,
-                        headers: AppStoreScope.of(context).api.authHeaders,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) =>
-                            const SizedBox.shrink(),
-                      )
-                    : Image.asset(
-                        item.imageAsset,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                      ),
+          if (hasImage)
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => FlapImageViewerScreen(
+                    title: item.title,
+                    imageUrl: item.imageUrl,
+                    imageAsset: item.imageAsset,
+                  ),
+                ),
+              ),
+              child: Stack(
+                children: [
+                  AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: item.imageUrl.isNotEmpty
+                        ? Image.network(
+                            item.imageUrl,
+                            headers: store.api.authHeaders,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const _ImageError(),
+                          )
+                        : Image.asset(
+                            item.imageAsset,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                  ),
+                  const Positioned(
+                    right: 14,
+                    bottom: 14,
+                    child: _ZoomBadge(),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 20),
-          ],
-          Text(
-            item.title,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 34),
+            child: Column(
+              children: [
+                Text(
+                  item.title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  item.date,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: FlapBrand.gold,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  item.text,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 16,
+                    height: 1.55,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            item.date,
-            style: TextStyle(color: Theme.of(context).colorScheme.primary),
-          ),
-          const SizedBox(height: 20),
-          Text(item.text, style: Theme.of(context).textTheme.bodyLarge),
         ],
       ),
     );
   }
 }
+
 class EventDetailScreen extends StatefulWidget {
   final EventItem event;
 
@@ -134,9 +180,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       'Kalender',
       '„${widget.event.title}“ in den Kalender eintragen?',
     );
-    if (result != null && mounted) {
-      setState(() => inCalendar = result);
-    }
+    if (result != null && mounted) setState(() => inCalendar = result);
   }
 
   @override
@@ -144,82 +188,157 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
     final event = widget.event;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Termin')),
+      backgroundColor: FlapBrand.charcoal,
+      appBar: AppBar(
+        title: const Text('Termin', style: TextStyle(fontWeight: FontWeight.w900)),
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.zero,
         children: [
-          Text(
-            event.title,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(20, 30, 20, 28),
+            color: FlapBrand.burgundy,
+            child: Column(
+              children: [
+                const Icon(
+                  Icons.calendar_month_rounded,
+                  color: Colors.white,
+                  size: 52,
                 ),
-          ),
-          const SizedBox(height: 20),
-          _InfoRow(
-            icon: Icons.calendar_month_outlined,
-            text: event.displayDate,
-          ),
-          _InfoRow(icon: Icons.schedule_outlined, text: event.time),
-          _InfoRow(icon: Icons.location_on_outlined, text: event.location),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _register,
-                  icon: Icon(
-                    registered
-                        ? Icons.check_circle
-                        : Icons.how_to_reg_outlined,
+                const SizedBox(height: 12),
+                Text(
+                  event.displayDate,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
                   ),
-                  label: Text(registered ? 'Angemeldet' : 'Anmelden'),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _addToCalendar,
-                  icon: Icon(
-                    inCalendar
-                        ? Icons.event_available
-                        : Icons.calendar_month_outlined,
-                  ),
-                  label: Text(inCalendar ? 'Im Kalender' : 'Kalender'),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Angemeldete Mitglieder (${registrations.length})',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 22, 18, 34),
+            child: Column(
+              children: [
+                Text(
+                  event.title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _DarkPanel(
+                  child: Column(
+                    children: [
+                      _DarkInfoRow(
+                        icon: Icons.calendar_month_outlined,
+                        text: event.displayDate,
+                      ),
+                      const _DarkDivider(),
+                      _DarkInfoRow(
+                        icon: Icons.schedule_outlined,
+                        text: event.time,
+                      ),
+                      const _DarkDivider(),
+                      _DarkInfoRow(
+                        icon: Icons.location_on_outlined,
+                        text: event.location,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: FlapBrand.burgundy,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size.fromHeight(52),
                         ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (registrations.isEmpty)
-                    const Text('Noch niemand angemeldet.')
-                  else
-                    ...registrations.map(
-                      (name) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.person_outline, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(child: Text(name)),
-                          ],
+                        onPressed: _register,
+                        icon: Icon(
+                          registered
+                              ? Icons.check_circle
+                              : Icons.how_to_reg_outlined,
                         ),
+                        label: Text(registered ? 'Angemeldet' : 'Anmelden'),
                       ),
                     ),
-                ],
-              ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: FlapBrand.gold),
+                          minimumSize: const Size.fromHeight(52),
+                        ),
+                        onPressed: _addToCalendar,
+                        icon: Icon(
+                          inCalendar
+                              ? Icons.event_available
+                              : Icons.calendar_month_outlined,
+                        ),
+                        label: Text(inCalendar ? 'Im Kalender' : 'Kalender'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _DarkPanel(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Angemeldete Mitglieder (${registrations.length})',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (registrations.isEmpty)
+                          const Text(
+                            'Noch niemand angemeldet.',
+                            style: TextStyle(color: Colors.white60),
+                          )
+                        else
+                          ...registrations.map(
+                            (name) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.person_outline,
+                                    color: FlapBrand.gold,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      name,
+                                      style: const TextStyle(color: Colors.white70),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -234,10 +353,7 @@ class MemberDetailScreen extends StatelessWidget {
   const MemberDetailScreen({required this.member, super.key});
 
   Future<void> _launch(BuildContext context, Uri uri) async {
-    final ok = await launchUrl(
-      uri,
-      mode: LaunchMode.externalApplication,
-    );
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Aktion konnte nicht geöffnet werden.')),
@@ -246,26 +362,24 @@ class MemberDetailScreen extends StatelessWidget {
   }
 
   Future<void> _call(BuildContext context, String number) async {
-    if (number.isEmpty) return;
-    await _launch(context, Uri(scheme: 'tel', path: number));
+    if (number.isNotEmpty) await _launch(context, Uri(scheme: 'tel', path: number));
   }
 
   Future<void> _mail(BuildContext context) async {
-    if (member.email.isEmpty) return;
-    await _launch(context, Uri(scheme: 'mailto', path: member.email));
+    if (member.email.isNotEmpty) {
+      await _launch(context, Uri(scheme: 'mailto', path: member.email));
+    }
   }
 
   Future<void> _maps(BuildContext context) async {
     if (member.address.isEmpty) return;
-    final uri = Uri.https(
-      'www.google.com',
-      '/maps/search/',
-      {
+    await _launch(
+      context,
+      Uri.https('www.google.com', '/maps/search/', {
         'api': '1',
         'query': member.address,
-      },
+      }),
     );
-    await _launch(context, uri);
   }
 
   Future<void> _openEmployerWebsite(BuildContext context) async {
@@ -275,154 +389,171 @@ class MemberDetailScreen extends StatelessWidget {
         ? value
         : 'https://$value';
     final uri = Uri.tryParse(normalized);
-    if (uri == null) return;
-    await _launch(context, uri);
+    if (uri != null) await _launch(context, uri);
   }
+
+  String _value(String value) => value.isEmpty ? 'Nicht hinterlegt' : value;
 
   @override
   Widget build(BuildContext context) {
-    final partner = member.partnerName.isEmpty
-        ? 'Nicht hinterlegt'
-        : member.partnerName;
-    final email = member.email.isEmpty
-        ? 'Nicht hinterlegt'
-        : member.email;
-    final address = member.address.isEmpty
-        ? 'Nicht hinterlegt'
-        : member.address;
-    final occupation = member.occupation.isEmpty
-        ? 'Nicht hinterlegt'
-        : member.occupation;
-    final employer = member.employer.isEmpty
-        ? 'Nicht hinterlegt'
-        : member.employer;
+    final headers = AppStoreScope.of(context).api.authHeaders;
 
     Widget phoneTile(String label, String number, IconData icon) {
-      return ListTile(
-        leading: Icon(icon),
-        title: Text(label),
-        subtitle: Text(number.isEmpty ? 'Nicht hinterlegt' : number),
-        trailing: IconButton(
-          tooltip: 'Anrufen',
-          onPressed: number.isEmpty ? null : () => _call(context, number),
-          icon: const Icon(Icons.call),
-        ),
+      return _DarkInfoTile(
+        icon: icon,
+        title: label,
+        value: _value(number),
+        actionIcon: Icons.call_rounded,
+        onAction: number.isEmpty ? null : () => _call(context, number),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Mitglied')),
+      backgroundColor: FlapBrand.charcoal,
+      appBar: AppBar(
+        title: const Text('Mitglied', style: TextStyle(fontWeight: FontWeight.w900)),
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.zero,
         children: [
-          Center(
-            child: CircleAvatar(
-              radius: 72,
-              backgroundImage: member.photoUrl.isNotEmpty
-                  ? NetworkImage(
+          if (member.photoUrl.isNotEmpty)
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => FlapImageViewerScreen(
+                    title: member.name,
+                    imageUrl: member.photoUrl,
+                  ),
+                ),
+              ),
+              child: Stack(
+                children: [
+                  AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: Image.network(
                       member.photoUrl,
-                      headers: AppStoreScope.of(context).api.authHeaders,
-                    )
-                  : null,
-              child: member.photoUrl.isEmpty
-                  ? Text(
-                      member.name.characters.first,
-                      style: const TextStyle(
-                        fontSize: 42,
-                        fontWeight: FontWeight.w800,
+                      headers: headers,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const _ImageError(),
+                    ),
+                  ),
+                  const Positioned(
+                    right: 14,
+                    bottom: 14,
+                    child: _ZoomBadge(),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              height: 230,
+              color: FlapBrand.burgundy,
+              alignment: Alignment.center,
+              child: Text(
+                member.name.isEmpty ? '?' : member.name.characters.first,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 76,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 20, 18, 34),
+            child: Column(
+              children: [
+                Text(
+                  member.name,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 25,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  member.role,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: FlapBrand.gold,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (member.since.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    member.since,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white60),
+                  ),
+                ],
+                const SizedBox(height: 22),
+                _DarkPanel(
+                  child: Column(
+                    children: [
+                      _DarkInfoTile(
+                        icon: Icons.favorite_outline,
+                        title: 'Partnerin / Partner',
+                        value: _value(member.partnerName),
                       ),
-                    )
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            member.name,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            member.role,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(member.since, textAlign: TextAlign.center),
-          const SizedBox(height: 24),
-          Card(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.favorite_outline),
-                  title: const Text('Partnerin / Partner'),
-                  subtitle: Text(partner),
-                ),
-                const Divider(height: 1),
-                phoneTile('Mobil', member.phoneMobile, Icons.smartphone),
-                const Divider(height: 1),
-                phoneTile(
-                  'Telefon privat',
-                  member.phonePrivate,
-                  Icons.phone_outlined,
-                ),
-                const Divider(height: 1),
-                phoneTile(
-                  'Telefon Arbeit',
-                  member.phoneWork,
-                  Icons.business_center_outlined,
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.mail_outline),
-                  title: const Text('E-Mail'),
-                  subtitle: Text(email),
-                  trailing: IconButton(
-                    tooltip: 'E-Mail schreiben',
-                    onPressed: member.email.isEmpty
-                        ? null
-                        : () => _mail(context),
-                    icon: const Icon(Icons.send_outlined),
+                      const _DarkDivider(),
+                      phoneTile('Mobil', member.phoneMobile, Icons.smartphone),
+                      const _DarkDivider(),
+                      phoneTile(
+                        'Telefon privat',
+                        member.phonePrivate,
+                        Icons.phone_outlined,
+                      ),
+                      const _DarkDivider(),
+                      phoneTile(
+                        'Telefon Arbeit',
+                        member.phoneWork,
+                        Icons.business_center_outlined,
+                      ),
+                      const _DarkDivider(),
+                      _DarkInfoTile(
+                        icon: Icons.mail_outline,
+                        title: 'E-Mail',
+                        value: _value(member.email),
+                        actionIcon: Icons.send_outlined,
+                        onAction: member.email.isEmpty ? null : () => _mail(context),
+                      ),
+                      const _DarkDivider(),
+                      _DarkInfoTile(
+                        icon: Icons.home_outlined,
+                        title: 'Wohnort',
+                        value: _value(member.address),
+                        actionIcon: Icons.map_outlined,
+                        onAction: member.address.isEmpty ? null : () => _maps(context),
+                      ),
+                    ],
                   ),
                 ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.home_outlined),
-                  title: const Text('Wohnort'),
-                  subtitle: Text(address),
-                  trailing: IconButton(
-                    tooltip: 'In Google Maps öffnen',
-                    onPressed: member.address.isEmpty
-                        ? null
-                        : () => _maps(context),
-                    icon: const Icon(Icons.map_outlined),
+                const SizedBox(height: 14),
+                _DarkPanel(
+                  child: Column(
+                    children: [
+                      _DarkInfoTile(
+                        icon: Icons.badge_outlined,
+                        title: 'Beruf',
+                        value: _value(member.occupation),
+                      ),
+                      const _DarkDivider(),
+                      _DarkInfoTile(
+                        icon: Icons.business_outlined,
+                        title: 'Arbeitgeber',
+                        value: _value(member.employer),
+                        actionIcon: Icons.open_in_new_rounded,
+                        onAction: member.employerUrl.isEmpty
+                            ? null
+                            : () => _openEmployerWebsite(context),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.badge_outlined),
-                  title: const Text('Beruf'),
-                  subtitle: Text(occupation),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.business_outlined),
-                  title: const Text('Arbeitgeber'),
-                  subtitle: Text(employer),
-                  trailing: member.employerUrl.isEmpty
-                      ? null
-                      : const Icon(Icons.open_in_new),
-                  onTap: member.employerUrl.isEmpty
-                      ? null
-                      : () => _openEmployerWebsite(context),
                 ),
               ],
             ),
@@ -433,67 +564,129 @@ class MemberDetailScreen extends StatelessWidget {
   }
 }
 
-class SimpleSectionScreen extends StatelessWidget {
-  final String title;
-  final String description;
-  final IconData icon;
+class _DarkPanel extends StatelessWidget {
+  final Widget child;
 
-  const SimpleSectionScreen({
-    required this.title,
-    required this.description,
-    required this.icon,
-    super.key,
-  });
+  const _DarkPanel({required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Icon(icon, size: 64, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(height: 20),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            description,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-        ],
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF191B1E),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x18FFFFFF)),
       ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
     );
   }
 }
 
-class _InfoRow extends StatelessWidget {
+class _DarkInfoRow extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  const _InfoRow({required this.icon, required this.text});
+  const _DarkInfoRow({required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          Icon(icon, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 12),
+          Icon(icon, color: FlapBrand.gold),
+          const SizedBox(width: 13),
           Expanded(
             child: Text(
-              text,
-              style: Theme.of(context).textTheme.titleMedium,
+              text.isEmpty ? 'Nicht hinterlegt' : text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DarkInfoTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+  final IconData? actionIcon;
+  final VoidCallback? onAction;
+
+  const _DarkInfoTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    this.actionIcon,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: FlapBrand.gold),
+      title: Text(
+        title,
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+      ),
+      subtitle: Text(value, style: const TextStyle(color: Colors.white60)),
+      trailing: actionIcon == null
+          ? null
+          : IconButton(
+              onPressed: onAction,
+              color: onAction == null ? Colors.white24 : FlapBrand.gold,
+              icon: Icon(actionIcon),
+            ),
+      onTap: onAction,
+    );
+  }
+}
+
+class _DarkDivider extends StatelessWidget {
+  const _DarkDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Divider(height: 1, color: Color(0x22FFFFFF));
+  }
+}
+
+class _ZoomBadge extends StatelessWidget {
+  const _ZoomBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: const BoxDecoration(
+        color: Color(0xCC000000),
+        shape: BoxShape.circle,
+      ),
+      child: const Icon(Icons.zoom_in_rounded, color: Colors.white, size: 22),
+    );
+  }
+}
+
+class _ImageError extends StatelessWidget {
+  const _ImageError();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF24272B),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.broken_image_outlined,
+        color: Colors.white54,
+        size: 50,
       ),
     );
   }
