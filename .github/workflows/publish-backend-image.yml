@@ -3,7 +3,7 @@ name: Publish Backend Image
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, feature/docker-integration-v2 ]
     paths:
       - "backend/**"
       - ".github/workflows/publish-backend-image.yml"

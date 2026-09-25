@@ -20,10 +20,11 @@ class _HomeShellState extends State<HomeShell> {
     NewsScreen(),
     EventsScreen(),
     RemoteContentScreen.archiveStyle(
-      section: 'photos',
+      section: 'gallery',
       title: 'Galerie',
       emptyText: 'Noch keine Fotos oder Alben hinterlegt.',
       icon: Icons.photo_library_outlined,
+      individualImages: true,
     ),
     MoreScreen(),
   ];

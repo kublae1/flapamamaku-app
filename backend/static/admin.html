@@ -213,7 +213,7 @@
               <label><input type="checkbox" name="account_can_events"> Termine verwalten</label>
               <label><input type="checkbox" name="account_can_members"> Mitglieder verwalten</label>
               <label><input type="checkbox" name="account_can_documents"> Dokumente verwalten</label>
-              <label><input type="checkbox" name="account_can_photos"> Fotos/Fotoalben verwalten</label>
+              <label><input type="checkbox" name="account_can_photos"> Galerie/Fotoalben verwalten</label>
               <label><input type="checkbox" name="account_can_polls"> Umfragen verwalten</label>
               <label><input type="checkbox" name="account_can_links"> Links verwalten</label>
               <label><input type="checkbox" name="account_can_admin_page"> PC-Adminseite benutzen</label>
@@ -254,7 +254,7 @@
             <label><input type="checkbox" name="can_events"> Termine verwalten</label>
             <label><input type="checkbox" name="can_members"> Mitglieder verwalten</label>
             <label><input type="checkbox" name="can_documents"> Dokumente verwalten</label>
-            <label><input type="checkbox" name="can_photos"> Fotos/Fotoalben verwalten</label>
+            <label><input type="checkbox" name="can_photos"> Galerie/Fotoalben verwalten</label>
             <label><input type="checkbox" name="can_polls"> Umfragen verwalten</label>
             <label><input type="checkbox" name="can_links"> Links verwalten</label>
             <label><input type="checkbox" name="can_admin_page"> PC-Adminseite benutzen</label>
@@ -276,6 +276,7 @@
             <option value="hero">Startseite / Sau-Rocker-Hero</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
+            <option value="gallery">Galerie / Einzelbilder</option>
             <option value="documents">Dokumente</option>
             <option value="photos">Fotoalben</option>
             <option value="polls">Umfragen</option>
@@ -286,7 +287,7 @@
           <label>Link (optional)</label><input name="link_url" placeholder="https://...">
           <label>Bilder (optional)</label>
           <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
-          <p class="meta">Mehrere Bilder gleichzeitig möglich · JPG, PNG, WebP oder GIF · max. 12 MB pro Bild</p>
+          <p class="meta">Galerie: pro Eintrag ein einzelnes Bild · Fotoalben: mehrere Bilder möglich · JPG, PNG, WebP oder GIF · max. 12 MB pro Bild</p>
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card">
@@ -298,6 +299,7 @@
             <option value="hero">Startseite / Sau-Rocker-Hero</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
+            <option value="gallery">Galerie / Einzelbilder</option>
             <option value="documents">Dokumente</option>
             <option value="photos">Fotoalben</option>
             <option value="polls">Umfragen</option>
@@ -334,6 +336,7 @@ const contentPermissions = {
   hero: "can_photos",
   sujet: "can_photos",
   archive: "can_photos",
+  gallery: "can_photos",
   documents: "can_documents",
   photos: "can_photos",
   polls: "can_polls",
@@ -344,6 +347,7 @@ const contentLabels = {
   hero: "Startseite / Sau-Rocker-Hero",
   sujet: "Sujet nächstes Jahr",
   archive: "Vergangene Sujet",
+  gallery: "Galerie / Einzelbilder",
   documents: "Dokumente",
   photos: "Fotoalben",
   polls: "Umfragen",

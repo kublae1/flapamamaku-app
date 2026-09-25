@@ -495,6 +495,7 @@ CONTENT_PERMISSIONS = {
     "hero": "can_photos",
     "sujet": "can_photos",
     "archive": "can_photos",
+    "gallery": "can_photos",
     "documents": "can_documents",
     "photos": "can_photos",
     "polls": "can_polls",

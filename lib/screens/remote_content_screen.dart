@@ -14,6 +14,7 @@ class RemoteContentScreen extends StatefulWidget {
   final String emptyText;
   final IconData icon;
   final bool archiveStyle;
+  final bool individualImages;
 
   const RemoteContentScreen({
     required this.section,
@@ -21,6 +22,7 @@ class RemoteContentScreen extends StatefulWidget {
     required this.emptyText,
     required this.icon,
     this.archiveStyle = false,
+    this.individualImages = false,
     super.key,
   });
 
@@ -30,6 +32,7 @@ class RemoteContentScreen extends StatefulWidget {
     required this.emptyText,
     required this.icon,
     this.archiveStyle = true,
+    this.individualImages = false,
     super.key,
   });
 
@@ -118,6 +121,32 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
     return const [];
   }
 
+  List<ContentItem> _individualItems(List<ContentItem> items) {
+    final result = <ContentItem>[];
+    for (final item in items) {
+      final urls = _images(item);
+      if (urls.isEmpty) {
+        result.add(item);
+        continue;
+      }
+      for (final url in urls) {
+        result.add(
+          ContentItem(
+            id: item.id,
+            section: item.section,
+            title: item.title,
+            text: item.text,
+            linkUrl: item.linkUrl,
+            imageUrl: url,
+            imageUrls: [url],
+            createdAt: item.createdAt,
+          ),
+        );
+      }
+    }
+    return result;
+  }
+
   void _openAlbum(BuildContext context, ContentItem item, int initialIndex) {
     final urls = _images(item);
     if (urls.isEmpty) return;
@@ -135,7 +164,14 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final items = _sortedItems(store.contentFor(widget.section));
+    final sectionItems = store.contentFor(widget.section);
+    final sourceItems = widget.section == 'gallery' && sectionItems.isEmpty
+        ? store.contentFor('photos')
+        : sectionItems;
+    final sortedItems = _sortedItems(sourceItems);
+    final items = widget.individualImages
+        ? _individualItems(sortedItems)
+        : sortedItems;
 
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,

@@ -98,6 +98,7 @@ class AppStore extends ChangeNotifier {
       case 'sujet':
       case 'archive':
       case 'photos':
+      case 'gallery':
         return canPhotos;
       case 'documents':
         return canDocuments;
