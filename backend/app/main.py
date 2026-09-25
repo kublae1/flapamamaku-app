@@ -493,6 +493,7 @@ def delete_row(resource: str, row_id: int) -> None:
 
 CONTENT_PERMISSIONS = {
     "hero": "can_photos",
+    "motto": "can_photos",
     "sujet": "can_photos",
     "archive": "can_photos",
     "gallery": "can_photos",
