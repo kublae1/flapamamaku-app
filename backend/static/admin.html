@@ -273,7 +273,8 @@
           <input type="hidden" name="id">
           <label>Bereich</label>
           <select name="section" required>
-            <option value="hero">Startseite / Sau-Rocker-Hero</option>
+            <option value="hero">Startseite / Hauptbild</option>
+            <option value="motto">Jahresmotto</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
             <option value="gallery">Galerie / Einzelbilder</option>
@@ -296,7 +297,8 @@
           <label>Bereich anzeigen</label>
           <select id="content-filter">
             <option value="">Alle Bereiche</option>
-            <option value="hero">Startseite / Sau-Rocker-Hero</option>
+            <option value="hero">Startseite / Hauptbild</option>
+            <option value="motto">Jahresmotto</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
             <option value="gallery">Galerie / Einzelbilder</option>
@@ -334,6 +336,7 @@ const permissionFields = [
 
 const contentPermissions = {
   hero: "can_photos",
+  motto: "can_photos",
   sujet: "can_photos",
   archive: "can_photos",
   gallery: "can_photos",
@@ -344,7 +347,8 @@ const contentPermissions = {
 };
 
 const contentLabels = {
-  hero: "Startseite / Sau-Rocker-Hero",
+  hero: "Startseite / Hauptbild",
+  motto: "Jahresmotto",
   sujet: "Sujet nächstes Jahr",
   archive: "Vergangene Sujet",
   gallery: "Galerie / Einzelbilder",
