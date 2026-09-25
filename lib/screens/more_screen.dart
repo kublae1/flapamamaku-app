@@ -50,6 +50,14 @@ class MoreScreen extends StatelessWidget {
             const _SectionLabel('INHALTE'),
             _remoteSection(
               context,
+              section: 'motto',
+              icon: Icons.celebration_rounded,
+              title: 'Jahresmotto',
+              subtitle: 'Aktuelles Motto mit Bild und Beschreibung',
+              emptyText: 'Noch kein Jahresmotto hinterlegt.',
+            ),
+            _remoteSection(
+              context,
               section: 'sujet',
               icon: Icons.auto_awesome_rounded,
               title: 'Sujet nächstes Jahr',
@@ -175,7 +183,8 @@ class MoreScreen extends StatelessWidget {
       subtitle: count == 0 ? subtitle : '$count Einträge · $subtitle',
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => section == 'sujet' ||
+          builder: (_) => section == 'motto' ||
+                  section == 'sujet' ||
                   section == 'archive' ||
                   section == 'photos'
               ? RemoteContentScreen.archiveStyle(
