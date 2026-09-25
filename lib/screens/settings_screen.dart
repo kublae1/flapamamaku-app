@@ -6,14 +6,8 @@ import '../theme/flap_brand.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  static const colors = <(String, int)>[
-    ('Burgund', 0xFF8A101B),
-    ('Dunkelrot', 0xFFB3261E),
-    ('Blau', 0xFF2457A7),
-    ('Grün', 0xFF2E6B3A),
-    ('Violett', 0xFF6D3A8C),
-    ('Dunkelorange', 0xFF9A4F00),
-  ];
+  static const String appVersion = '0.8.14';
+  static const String buildNumber = '29';
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +25,7 @@ class SettingsScreen extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
         children: [
           const Text(
-            'APP-DESIGN',
+            'SICHERHEIT',
             style: TextStyle(
               color: FlapBrand.gold,
               fontWeight: FontWeight.w900,
@@ -39,71 +33,125 @@ class SettingsScreen extends StatelessWidget {
               letterSpacing: 1.5,
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Farbwahl',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 23,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Wähle die Hauptfarbe der App. Die Auswahl gilt nur auf diesem Gerät.',
-            style: TextStyle(color: Colors.white60, height: 1.35),
-          ),
-          const SizedBox(height: 16),
-          ...colors.map((entry) {
-            final (name, value) = entry;
-            final selected = store.themeColorValue == value;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Material(
-                color: const Color(0xFF191B1E),
-                borderRadius: BorderRadius.circular(18),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => store.setThemeColor(value),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: Color(value),
-                          child: selected
-                              ? const Icon(Icons.check_rounded, color: Colors.white)
-                              : null,
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(
-                            name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          selected
-                              ? Icons.radio_button_checked_rounded
-                              : Icons.radio_button_off_rounded,
-                          color: selected ? FlapBrand.gold : Colors.white38,
-                        ),
-                      ],
-                    ),
-                  ),
+          const SizedBox(height: 10),
+          _SettingsCard(
+            child: SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              secondary: const Icon(
+                Icons.fingerprint_rounded,
+                color: FlapBrand.gold,
+                size: 29,
+              ),
+              title: const Text(
+                'Biometrische Anmeldung',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
-            );
-          }),
+              subtitle: Text(
+                store.biometricEnabled
+                    ? 'Beim App-Start biometrisch entsperren'
+                    : 'Fingerabdruck, Gesicht oder Geräte-PIN verwenden',
+                style: const TextStyle(color: Colors.white60),
+              ),
+              value: store.biometricEnabled,
+              activeThumbColor: Colors.white,
+              activeTrackColor: FlapBrand.burgundy,
+              onChanged: (value) async {
+                final ok = await store.setBiometricEnabled(value);
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        store.authError ??
+                            'Biometrische Anmeldung konnte nicht geändert werden.',
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 22),
+          const Text(
+            'APP-INFORMATION',
+            style: TextStyle(
+              color: FlapBrand.gold,
+              fontWeight: FontWeight.w900,
+              fontSize: 11,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const _SettingsCard(
+            child: Column(
+              children: [
+                _InfoRow(
+                  icon: Icons.info_outline_rounded,
+                  title: 'App-Version',
+                  value: appVersion,
+                ),
+                Divider(height: 1, color: Color(0x22FFFFFF)),
+                _InfoRow(
+                  icon: Icons.tag_rounded,
+                  title: 'Build-Nummer',
+                  value: buildNumber,
+                ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsCard extends StatelessWidget {
+  final Widget child;
+  const _SettingsCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF191B1E),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x18FFFFFF)),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+
+  const _InfoRow({
+    required this.icon,
+    required this.title,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: FlapBrand.gold),
+      title: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      trailing: Text(
+        value,
+        style: const TextStyle(
+          color: Colors.white70,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
