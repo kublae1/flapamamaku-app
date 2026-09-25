@@ -46,8 +46,8 @@ class StartScreen extends StatelessWidget {
         ? 'FLAPAMAMAKU'
         : hero.title.trim();
     const fallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
-    final sujet = _latestContent(store, 'sujet');
-    final mottoYear = _mottoYear(sujet);
+    final motto = _latestContent(store, 'motto');
+    final mottoYear = _mottoYear(motto);
 
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
@@ -155,11 +155,10 @@ class StartScreen extends StatelessWidget {
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => const RemoteContentScreen.archiveStyle(
-                        section: 'sujet',
-                        title: 'Sujet nächstes Jahr',
-                        emptyText:
-                            'Noch kein Sujet für nächstes Jahr hinterlegt.',
-                        icon: Icons.auto_awesome_rounded,
+                        section: 'motto',
+                        title: 'Jahresmotto',
+                        emptyText: 'Noch kein Jahresmotto hinterlegt.',
+                        icon: Icons.celebration_rounded,
                       ),
                     ),
                   ),
