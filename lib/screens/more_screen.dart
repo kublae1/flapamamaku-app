@@ -175,12 +175,21 @@ class MoreScreen extends StatelessWidget {
       subtitle: count == 0 ? subtitle : '$count Einträge · $subtitle',
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => RemoteContentScreen(
-            section: section,
-            title: title,
-            emptyText: emptyText,
-            icon: icon,
-          ),
+          builder: (_) => section == 'sujet' ||
+                  section == 'archive' ||
+                  section == 'photos'
+              ? RemoteContentScreen.archiveStyle(
+                  section: section,
+                  title: title,
+                  emptyText: emptyText,
+                  icon: icon,
+                )
+              : RemoteContentScreen(
+                  section: section,
+                  title: title,
+                  emptyText: emptyText,
+                  icon: icon,
+                ),
         ),
       ),
     );

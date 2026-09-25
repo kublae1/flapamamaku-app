@@ -6,7 +6,7 @@ import '../theme/flap_brand.dart';
 import 'flap_image_viewer_screen.dart';
 import 'members_screen.dart';
 import 'more_screen.dart';
-import 'year_motto_screen.dart';
+import 'remote_content_screen.dart';
 
 class StartScreen extends StatelessWidget {
   const StartScreen({super.key});
@@ -153,7 +153,15 @@ class StartScreen extends StatelessWidget {
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const YearMottoScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const RemoteContentScreen.archiveStyle(
+                        section: 'sujet',
+                        title: 'Sujet nächstes Jahr',
+                        emptyText:
+                            'Noch kein Sujet für nächstes Jahr hinterlegt.',
+                        icon: Icons.auto_awesome_rounded,
+                      ),
+                    ),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(22, 14, 12, 14),

@@ -6,8 +6,8 @@ import '../theme/flap_brand.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  static const String appVersion = '0.8.15';
-  static const String buildNumber = '30';
+  static const String appVersion = '0.8.16';
+  static const String buildNumber = '31';
 
   @override
   Widget build(BuildContext context) {

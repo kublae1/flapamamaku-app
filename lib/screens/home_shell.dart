@@ -19,7 +19,7 @@ class _HomeShellState extends State<HomeShell> {
     StartScreen(),
     NewsScreen(),
     EventsScreen(),
-    RemoteContentScreen(
+    RemoteContentScreen.archiveStyle(
       section: 'photos',
       title: 'Galerie',
       emptyText: 'Noch keine Fotos oder Alben hinterlegt.',

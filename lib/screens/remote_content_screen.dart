@@ -13,12 +13,23 @@ class RemoteContentScreen extends StatefulWidget {
   final String title;
   final String emptyText;
   final IconData icon;
+  final bool archiveStyle;
 
   const RemoteContentScreen({
     required this.section,
     required this.title,
     required this.emptyText,
     required this.icon,
+    this.archiveStyle = false,
+    super.key,
+  });
+
+  const RemoteContentScreen.archiveStyle({
+    required this.section,
+    required this.title,
+    required this.emptyText,
+    required this.icon,
+    this.archiveStyle = true,
     super.key,
   });
 
@@ -28,11 +39,6 @@ class RemoteContentScreen extends StatefulWidget {
 
 class _RemoteContentScreenState extends State<RemoteContentScreen> {
   _ContentSort sort = _ContentSort.newest;
-
-  bool get _isVisualSection =>
-      widget.section == 'photos' ||
-      widget.section == 'archive' ||
-      widget.section == 'sujet';
 
   Future<void> _openLink(BuildContext context, String value) async {
     final uri = Uri.tryParse(value);
@@ -168,7 +174,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                         ? (item) => _deleteItem(context, store, item)
                         : null,
                   )
-                : _isVisualSection
+                : widget.archiveStyle
                 ? _VisualAlbumList(
                     items: items,
                     headers: store.api.authHeaders,
@@ -405,6 +411,7 @@ class _VisualAlbumList extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: urls.isEmpty ? null : () => onOpen(item),
               child: Stack(
                 children: [
@@ -471,47 +478,51 @@ class _VisualAlbumList extends StatelessWidget {
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        if (item.title.trim().isNotEmpty)
-                          Text(
-                            item.title.trim(),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: urls.isEmpty ? null : () => onOpen(item),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        children: [
+                          if (item.title.trim().isNotEmpty)
+                            Text(
+                              item.title.trim(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
-                          ),
-                        if (item.text.trim().isNotEmpty) ...[
-                          const SizedBox(height: 7),
-                          Text(
-                            item.text.trim(),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 15,
-                              height: 1.4,
+                          if (item.text.trim().isNotEmpty) ...[
+                            const SizedBox(height: 7),
+                            Text(
+                              item.text.trim(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 15,
+                                height: 1.4,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  if (onDelete != null)
-                    IconButton(
-                      tooltip: 'Löschen',
-                      color: Colors.white54,
-                      onPressed: () => onDelete!(item),
-                      icon: const Icon(Icons.delete_outline_rounded),
-                    ),
-                ],
+                    if (onDelete != null)
+                      IconButton(
+                        tooltip: 'Löschen',
+                        color: Colors.white54,
+                        onPressed: () => onDelete!(item),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                      ),
+                  ],
+                ),
               ),
             ),
           ],
