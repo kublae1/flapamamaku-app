@@ -72,7 +72,7 @@ class StartScreen extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   Image.asset(
-                    'assets/FLAPAMAMAKU App-Icon.png',
+                    'assets/images/hero_fireworks.jpg',
                     width: double.infinity,
                     height: double.infinity,
                     fit: BoxFit.cover,
