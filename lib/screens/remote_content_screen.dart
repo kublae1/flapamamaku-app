@@ -626,7 +626,7 @@ class _ImageViewerScreen extends StatefulWidget {
 }
 
 class _ImageViewerScreenState extends State<_ImageViewerScreen> {
-  late final PageController _controller;
+  final TransformationController _transformation = TransformationController();
   late int index;
   bool sharing = false;
 
@@ -634,13 +634,28 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
   void initState() {
     super.initState();
     index = widget.initialIndex;
-    _controller = PageController(initialPage: index);
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _transformation.dispose();
     super.dispose();
+  }
+
+  void _showImage(int nextIndex) {
+    if (nextIndex < 0 || nextIndex >= widget.urls.length) return;
+    _transformation.value = Matrix4.identity();
+    setState(() => index = nextIndex);
+  }
+
+  void _changeScale(double change) {
+    final current = _transformation.value.getMaxScaleOnAxis();
+    final target = (current + change).clamp(1.0, 5.0).toDouble();
+    _transformation.value = Matrix4.diagonal3Values(target, target, 1);
+  }
+
+  void _resetScale() {
+    _transformation.value = Matrix4.identity();
   }
 
   String _extension(String mimeType) {
@@ -729,19 +744,22 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
       ),
       body: Stack(
         children: [
-          PageView.builder(
-            controller: _controller,
-            itemCount: widget.urls.length,
-            onPageChanged: (value) => setState(() => index = value),
-            itemBuilder: (_, imageIndex) => InteractiveViewer(
+          Positioned.fill(
+            child: InteractiveViewer(
+              key: ValueKey(widget.urls[index]),
+              transformationController: _transformation,
               minScale: 1,
               maxScale: 5,
+              panEnabled: true,
+              scaleEnabled: true,
+              boundaryMargin: const EdgeInsets.all(80),
               child: Center(
                 child: Image.network(
-                  widget.urls[imageIndex],
+                  widget.urls[index],
                   headers: headers,
                   width: double.infinity,
                   fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
                   errorBuilder: (_, __, ___) => const Center(
                     child: Text(
                       'Bild konnte nicht geladen werden.',
@@ -752,25 +770,57 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
               ),
             ),
           ),
-          if (widget.urls.length > 1)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 24,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(
-                  widget.urls.length,
-                  (i) => AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: i == index ? 22 : 7,
-                    height: 7,
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    decoration: BoxDecoration(
-                      color: i == index ? FlapBrand.gold : Colors.white38,
-                      borderRadius: BorderRadius.circular(10),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 18,
+            child: SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xD9111315),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: const Color(0x33FFFFFF)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      tooltip: 'Vorheriges Bild',
+                      onPressed: index == 0 ? null : () => _showImage(index - 1),
+                      color: Colors.white,
+                      disabledColor: Colors.white24,
+                      icon: const Icon(Icons.chevron_left_rounded),
                     ),
-                  ),
+                    IconButton(
+                      tooltip: 'Verkleinern',
+                      onPressed: () => _changeScale(-0.75),
+                      color: Colors.white,
+                      icon: const Icon(Icons.zoom_out_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Originalgröße',
+                      onPressed: _resetScale,
+                      color: FlapBrand.gold,
+                      icon: const Icon(Icons.center_focus_strong_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Vergrößern',
+                      onPressed: () => _changeScale(0.75),
+                      color: Colors.white,
+                      icon: const Icon(Icons.zoom_in_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Nächstes Bild',
+                      onPressed: index == widget.urls.length - 1
+                          ? null
+                          : () => _showImage(index + 1),
+                      color: Colors.white,
+                      disabledColor: Colors.white24,
+                      icon: const Icon(Icons.chevron_right_rounded),
+                    ),
+                  ],
                 ),
               ),
             ),
