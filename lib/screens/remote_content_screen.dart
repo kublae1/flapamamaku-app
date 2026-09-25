@@ -824,6 +824,7 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
