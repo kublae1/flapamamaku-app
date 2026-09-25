@@ -160,7 +160,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
         child: items.isEmpty
             ? _EmptyState(icon: widget.icon, text: widget.emptyText)
             : _isVisualSection
-                ? _VisualAlbumGrid(
+                ? _VisualAlbumList(
                     items: items,
                     headers: store.api.authHeaders,
                     onOpen: (item) => _openAlbum(context, item, 0),
@@ -230,13 +230,13 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _VisualAlbumGrid extends StatelessWidget {
+class _VisualAlbumList extends StatelessWidget {
   final List<ContentItem> items;
   final Map<String, String> headers;
   final ValueChanged<ContentItem> onOpen;
   final ValueChanged<ContentItem>? onDelete;
 
-  const _VisualAlbumGrid({
+  const _VisualAlbumList({
     required this.items,
     required this.headers,
     required this.onOpen,
@@ -253,137 +253,129 @@ class _VisualAlbumGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
+    return ListView.separated(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.78,
-      ),
+      padding: EdgeInsets.zero,
       itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 18),
       itemBuilder: (_, index) {
         final item = items[index];
         final urls = _images(item);
-        return Material(
-          color: const Color(0xFF191B1E),
-          borderRadius: BorderRadius.circular(18),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: urls.isEmpty ? null : () => onOpen(item),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (urls.isNotEmpty)
-                        Image.network(
-                          urls.first,
-                          headers: headers,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            GestureDetector(
+              onTap: urls.isEmpty ? null : () => onOpen(item),
+              child: Stack(
+                children: [
+                  AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: urls.isNotEmpty
+                        ? Image.network(
+                            urls.first,
+                            headers: headers,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: const Color(0xFF24272B),
+                              alignment: Alignment.center,
+                              child: const Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.white54,
+                                size: 50,
+                              ),
+                            ),
+                          )
+                        : Container(
                             color: const Color(0xFF24272B),
+                            alignment: Alignment.center,
                             child: const Icon(
-                              Icons.broken_image_outlined,
+                              Icons.photo_library_outlined,
                               color: Colors.white54,
-                              size: 42,
+                              size: 50,
                             ),
                           ),
-                        )
-                      else
-                        Container(
-                          color: const Color(0xFF24272B),
-                          child: const Icon(
-                            Icons.photo_library_outlined,
-                            color: Colors.white54,
-                            size: 42,
-                          ),
-                        ),
-                      Positioned(
-                        right: 9,
-                        bottom: 9,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 9,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xCC000000),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.photo_library_rounded,
-                                color: Colors.white,
-                                size: 15,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                '${urls.length}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                  if (urls.isNotEmpty)
+                    Positioned(
+                      right: 14,
+                      bottom: 14,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xCC000000),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
                           children: [
+                            const Icon(
+                              Icons.zoom_in_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 6),
                             Text(
-                              item.title.isEmpty ? 'Fotoalbum' : item.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              '${urls.length}',
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 15,
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
-                            if (item.text.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Text(
-                                item.text,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
-                      if (onDelete != null)
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          tooltip: 'Löschen',
-                          color: Colors.white54,
-                          onPressed: () => onDelete!(item),
-                          icon: const Icon(Icons.delete_outline_rounded),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+                    ),
+                ],
+              ),
             ),
-          ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        if (item.title.trim().isNotEmpty)
+                          Text(
+                            item.title.trim(),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        if (item.text.trim().isNotEmpty) ...[
+                          const SizedBox(height: 7),
+                          Text(
+                            item.text.trim(),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 15,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (onDelete != null)
+                    IconButton(
+                      tooltip: 'Löschen',
+                      color: Colors.white54,
+                      onPressed: () => onDelete!(item),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                    ),
+                ],
+              ),
+            ),
+          ],
         );
       },
     );
