@@ -95,7 +95,7 @@ class SettingsScreen extends StatelessWidget {
                 Divider(height: 1, color: Color(0x22FFFFFF)),
                 _InfoRow(
                   icon: Icons.tag_rounded,
-                  title: 'Build-Nummer',
+                  title: 'APK-Build',
                   value: buildNumber,
                 ),
               ],

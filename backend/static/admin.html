@@ -7,75 +7,134 @@
   <style>
     :root {
       font-family: Inter, Arial, sans-serif;
-      color: #25191a;
-      background: #f6f3ef;
+      color: #f5f1eb;
+      background: #111315;
       --red: #8a101b;
-      --card: #fff;
+      --red-strong: #b51624;
+      --gold: #c7a35a;
+      --card: #191b1e;
+      --card-2: #22252a;
+      --line: rgba(255,255,255,.10);
+      --muted: rgba(255,255,255,.62);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top right, rgba(138,16,27,.20), transparent 30rem),
+        #111315;
+      color: #f5f1eb;
+    }
     header {
-      background: var(--red);
+      background: #080a0b;
       color: white;
-      padding: 20px 28px;
+      padding: 22px 28px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 20;
     }
-    header h1 { margin: 0; font-size: 26px; }
-    header small { opacity: .85; }
-    main { max-width: 1180px; margin: 0 auto; padding: 24px; }
-    nav { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
+    header h1 {
+      margin: 0;
+      font-size: 25px;
+      font-weight: 900;
+      letter-spacing: .3px;
+      color: var(--gold);
+    }
+    header small { color: var(--muted); }
+    main { max-width: 1240px; margin: 0 auto; padding: 24px; }
+    nav {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+      position: sticky;
+      top: 92px;
+      z-index: 15;
+      padding: 10px 0;
+      background: rgba(17,19,21,.94);
+      backdrop-filter: blur(12px);
+    }
     nav button, .primary {
       border: 0;
-      border-radius: 10px;
+      border-radius: 12px;
       padding: 11px 16px;
       cursor: pointer;
-      font-weight: 700;
+      font-weight: 800;
+      transition: transform .15s ease, background .15s ease;
     }
-    nav button { background: #e8e1da; }
-    nav button.active, .primary { background: var(--red); color: white; }
+    nav button {
+      background: var(--card-2);
+      color: #eee;
+      border: 1px solid var(--line);
+    }
+    nav button:hover, .primary:hover { transform: translateY(-1px); }
+    nav button.active, .primary {
+      background: var(--red);
+      color: white;
+      border-color: transparent;
+    }
     .panel { display: none; }
     .panel.active { display: block; }
-    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 20px; }
+    .grid { display: grid; grid-template-columns: minmax(340px, 410px) 1fr; gap: 20px; }
     .card {
       background: var(--card);
-      border-radius: 16px;
-      box-shadow: 0 5px 22px rgba(0,0,0,.08);
-      padding: 18px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      box-shadow: 0 14px 40px rgba(0,0,0,.22);
+      padding: 20px;
       margin-bottom: 18px;
     }
-    .auth-card { max-width: 480px; margin: 50px auto; }
-    h2 { margin-top: 0; }
-    label { display: block; font-weight: 700; margin: 12px 0 5px; }
+    .auth-card { max-width: 480px; margin: 70px auto; }
+    h2, h3 { color: white; }
+    h2 { margin-top: 0; font-weight: 900; }
+    label {
+      display: block;
+      color: #f5f1eb;
+      font-weight: 750;
+      margin: 13px 0 6px;
+    }
     input, textarea, select {
       width: 100%;
-      padding: 10px 12px;
-      border: 1px solid #cfc6bd;
-      border-radius: 9px;
+      padding: 11px 12px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 11px;
       font: inherit;
+      background: #0f1113;
+      color: white;
+      outline: none;
     }
-    input[type="checkbox"] { width: auto; }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--gold);
+      box-shadow: 0 0 0 3px rgba(199,163,90,.12);
+    }
+    input[type="file"] { background: #14171a; }
+    input[type="checkbox"] { width: auto; accent-color: var(--red-strong); }
     textarea { min-height: 120px; resize: vertical; }
-    .entry { border-bottom: 1px solid #eee6de; padding: 14px 0; }
+    .entry { border-bottom: 1px solid var(--line); padding: 15px 0; }
     .entry:last-child { border-bottom: 0; }
     .entry h3 { margin: 0 0 5px; }
-    .meta { color: #735f62; font-size: 14px; }
-    .actions { margin-top: 9px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .meta { color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
     .actions button {
-      border: 1px solid #d2c8c0;
-      background: white;
-      border-radius: 8px;
-      padding: 7px 10px;
+      border: 1px solid var(--line);
+      background: var(--card-2);
+      color: white;
+      border-radius: 9px;
+      padding: 8px 11px;
       cursor: pointer;
     }
-    .actions button.delete { color: #9b111e; }
-    .status { margin-left: auto; font-size: 14px; }
+    .actions button.delete { color: #ff8c96; }
+    .status { margin-left: auto; font-size: 14px; color: var(--muted); }
     .permission-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px 16px;
+      gap: 10px 16px;
       margin-top: 12px;
     }
     .permission-grid label {
@@ -83,13 +142,18 @@
       gap: 8px;
       align-items: center;
       margin: 0;
-      font-weight: 500;
+      font-weight: 550;
+      color: #ddd;
     }
     .hidden { display: none !important; }
-    .error { color: #9b111e; font-weight: 700; }
+    .error { color: #ff8c96; font-weight: 800; }
+    hr { border-color: var(--line) !important; }
     @media (max-width: 820px) {
+      header { position: static; }
+      nav { position: static; }
       .grid { grid-template-columns: 1fr; }
       .permission-grid { grid-template-columns: 1fr; }
+      main { padding: 16px; }
     }
   </style>
 </head>
@@ -269,7 +333,7 @@
     <section id="content" class="panel">
       <div class="grid">
         <form class="card" id="content-form">
-          <h2>Fotos & weitere App-Inhalte</h2>
+          <h2>App-Inhalte bearbeiten</h2>
           <input type="hidden" name="id">
           <label>Bereich</label>
           <select name="section" required>
@@ -288,12 +352,12 @@
           <label>Link (optional)</label><input name="link_url" placeholder="https://...">
           <label>Bilder (optional)</label>
           <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
-          <p class="meta">Galerie: pro Eintrag ein einzelnes Bild · Fotoalben: mehrere Bilder möglich · JPG, PNG, WebP oder GIF · max. 12 MB pro Bild</p>
+          <p class="meta">Hauptbild, Jahresmotto und Sujet können unabhängig gepflegt werden. Galerie: pro Eintrag ein einzelnes Bild. Fotoalben: mehrere Bilder möglich. JPG, PNG, WebP oder GIF · max. 12 MB pro Bild.</p>
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card">
           <h2>Datenbank-Einträge</h2>
-          <p class="meta">Änderungen an Fotos, Sujet, Archiv und weiteren Inhalten werden zentral gespeichert und von der Handy-App geladen.</p>
+          <p class="meta">Diese Inhalte werden zentral in Docker gespeichert. Änderungen erscheinen nach der Synchronisierung in der Handy-App; ein neuer APK-Build ist dafür nicht nötig.</p>
           <label>Bereich anzeigen</label>
           <select id="content-filter">
             <option value="">Alle Bereiche</option>
