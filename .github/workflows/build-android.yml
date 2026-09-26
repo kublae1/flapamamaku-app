@@ -113,8 +113,21 @@ jobs:
           import os
           from pathlib import Path
 
-          raw = os.environ["KEYSTORE_BASE64"].strip().replace("\ufeff", "")
-          compact = "".join(raw.split())
+          raw = os.environ["KEYSTORE_BASE64"]
+          cleaned = raw.strip().replace("\ufeff", "")
+          compact = "".join(cleaned.split())
+
+          allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+          invalid = [(i, ord(ch)) for i, ch in enumerate(compact) if ch not in allowed]
+          print(f"Keystore secret chars: {len(raw)}")
+          print(f"Keystore compact chars: {len(compact)}")
+          print(f"Keystore length mod 4: {len(compact) % 4}")
+          if invalid:
+              preview = ", ".join(f"pos {i}: U+{code:04X}" for i, code in invalid[:8])
+              raise SystemExit(
+                  f"Keystore Base64 contains {len(invalid)} invalid character(s): {preview}"
+              )
+
           try:
               data = base64.b64decode(compact, validate=True)
           except Exception as exc:
