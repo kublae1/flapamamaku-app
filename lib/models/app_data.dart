@@ -7,6 +7,7 @@ class ContentItem {
   final String imageUrl;
   final List<String> imageUrls;
   final String createdAt;
+  final int sortOrder;
 
   const ContentItem({
     this.id,
@@ -17,6 +18,7 @@ class ContentItem {
     this.imageUrl = '',
     this.imageUrls = const [],
     this.createdAt = '',
+    this.sortOrder = 0,
   });
 
   factory ContentItem.fromJson(Map<String, dynamic> json) {
@@ -31,6 +33,7 @@ class ContentItem {
           .map((value) => value.toString())
           .toList(),
       createdAt: json['created_at']?.toString() ?? '',
+      sortOrder: json['sort_order'] as int? ?? 0,
     );
   }
 }

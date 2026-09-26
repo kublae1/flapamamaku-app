@@ -6,7 +6,7 @@ import '../data/app_store.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 
-enum _ContentSort { newest, oldest, titleAsc, titleDesc }
+enum _ContentSort { manual, newest, oldest, titleAsc, titleDesc }
 
 class RemoteContentScreen extends StatefulWidget {
   final String section;
@@ -41,7 +41,7 @@ class RemoteContentScreen extends StatefulWidget {
 }
 
 class _RemoteContentScreenState extends State<RemoteContentScreen> {
-  _ContentSort sort = _ContentSort.newest;
+  _ContentSort sort = _ContentSort.manual;
 
   Future<void> _openLink(BuildContext context, String value) async {
     final uri = Uri.tryParse(value);
@@ -84,6 +84,12 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
   List<ContentItem> _sortedItems(List<ContentItem> source) {
     final items = List<ContentItem>.from(source);
     switch (sort) {
+      case _ContentSort.manual:
+        items.sort((a, b) {
+          final byOrder = a.sortOrder.compareTo(b.sortOrder);
+          if (byOrder != 0) return byOrder;
+          return (a.id ?? 0).compareTo(b.id ?? 0);
+        });
       case _ContentSort.newest:
         items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       case _ContentSort.oldest:
@@ -102,6 +108,8 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
 
   String _sortLabel(_ContentSort value) {
     switch (value) {
+      case _ContentSort.manual:
+        return 'Docker-Reihenfolge';
       case _ContentSort.newest:
         return 'Neueste zuerst';
       case _ContentSort.oldest:
@@ -140,6 +148,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
             imageUrl: url,
             imageUrls: [url],
             createdAt: item.createdAt,
+            sortOrder: item.sortOrder,
           ),
         );
       }

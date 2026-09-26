@@ -517,7 +517,7 @@
             </div>
           </div>
           <h2>Datenbank-Einträge</h2>
-          <p class="meta">Diese Inhalte werden zentral in Docker gespeichert. Änderungen erscheinen nach der Synchronisierung in der Handy-App; ein neuer APK-Build ist dafür nicht nötig.</p>
+          <p class="meta">Diese Inhalte werden zentral in Docker gespeichert. Änderungen erscheinen nach der Synchronisierung in der Handy-App; ein neuer APK-Build ist dafür nicht nötig. Bei ausgewähltem Bereich und „Docker-Reihenfolge“ kannst du Einträge mit ↑ / ↓ sortieren.</p>
           <label>Bereich anzeigen</label>
           <select id="content-filter">
             <option value="">Alle Bereiche</option>
@@ -533,6 +533,7 @@
           </select>
           <label>Sortierung</label>
           <select id="content-sort">
+            <option value="manual">Docker-Reihenfolge</option>
             <option value="newest">Neueste zuerst</option>
             <option value="oldest">Älteste zuerst</option>
             <option value="title-asc">Titel A–Z</option>
@@ -713,6 +714,8 @@ async function load(resource) {
         ? `<div class="meta">${userAccounts.some(user => Number(user.member_id) === Number(item.id)) ? "Benutzerkonto vorhanden" : "Kein Benutzerkonto"}</div>`
         : ""}
       <div class="actions">
+        <button type="button" class="move-up">↑</button>
+        <button type="button" class="move-down">↓</button>
         <button type="button" class="edit">Bearbeiten</button>
         <button type="button" class="delete">Löschen</button>
       </div>`;
@@ -986,7 +989,7 @@ async function loadContent() {
   const list = document.getElementById("content-list");
   const summary = document.getElementById("content-summary");
   const filter = document.getElementById("content-filter")?.value || "";
-  const sort = document.getElementById("content-sort")?.value || "newest";
+  const sort = document.getElementById("content-sort")?.value || "manual";
   list.innerHTML = "";
 
   const visibleItems = items.filter(item => canEditContentSection(item.section));
@@ -995,6 +998,10 @@ async function loadContent() {
     : visibleItems;
 
   filteredItems.sort((a, b) => {
+    if (sort === "manual") {
+      const order = (a.sort_order || 0) - (b.sort_order || 0);
+      return order !== 0 ? order : a.id - b.id;
+    }
     if (sort === "oldest") {
       return (a.created_at || "").localeCompare(b.created_at || "");
     }
@@ -1028,7 +1035,7 @@ async function loadContent() {
     return;
   }
 
-  filteredItems.forEach(item => {
+  filteredItems.forEach((item, index) => {
     const div = document.createElement("div");
     div.className = "entry";
     const preview = (item.text || "").length > 220
@@ -1045,10 +1052,32 @@ async function loadContent() {
         <button type="button" class="delete">Löschen</button>
       </div>
     `;
+    const up = div.querySelector(".move-up");
+    const down = div.querySelector(".move-down");
+    up.disabled = !filter || sort !== "manual" || index === 0;
+    down.disabled = !filter || sort !== "manual" || index === filteredItems.length - 1;
+    up.onclick = () => moveContentItem(filteredItems, index, index - 1);
+    down.onclick = () => moveContentItem(filteredItems, index, index + 1);
     div.querySelector(".edit").onclick = () => editContent(item);
     div.querySelector(".delete").onclick = () => removeContent(item.id);
     list.appendChild(div);
   });
+}
+
+
+async function moveContentItem(items, fromIndex, toIndex) {
+  if (toIndex < 0 || toIndex >= items.length || fromIndex === toIndex) return;
+  const ordered = [...items];
+  const [moved] = ordered.splice(fromIndex, 1);
+  ordered.splice(toIndex, 0, moved);
+  await api("/api/content/order", {
+    method:"PUT",
+    body:JSON.stringify({
+      item_ids: ordered.map(item => item.id),
+    }),
+  });
+  document.getElementById("content-sort").value = "manual";
+  await loadContent();
 }
 
 

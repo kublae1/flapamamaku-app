@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.12",
+    version="0.8.13",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -88,6 +88,10 @@ class ContentPayload(BaseModel):
 
 class ContentImageOrderPayload(BaseModel):
     image_ids: list[int]
+
+
+class ContentOrderPayload(BaseModel):
+    item_ids: list[int]
 
 
 class LoginPayload(BaseModel):
@@ -210,6 +214,7 @@ def init_db() -> None:
                 link_url TEXT NOT NULL DEFAULT '',
                 image_data BLOB,
                 image_mime TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             )
             """
@@ -289,6 +294,20 @@ def init_db() -> None:
         _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "photo_data", "BLOB")
         _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
+
+        _ensure_column(
+            db,
+            "content_items",
+            "sort_order",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execute(
+            """
+            UPDATE content_items
+            SET sort_order = id
+            WHERE sort_order = 0
+            """
+        )
 
         _ensure_column(
             db,
@@ -620,7 +639,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.12"}
+    return {"status": "ok", "version": "0.8.13"}
 
 
 @app.get("/admin")
@@ -854,11 +873,81 @@ def get_content(
         _content_permission(section)
         sql += " WHERE section = ?"
         values.append(section)
-    sql += " ORDER BY created_at DESC, id DESC"
+    sql += " ORDER BY sort_order ASC, id ASC"
 
     with connect() as db:
         rows = db.execute(sql, values).fetchall()
     return [_serialize_content(row) for row in rows]
+
+
+@app.put("/api/content/order")
+def reorder_content_items(
+    payload: ContentOrderPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        rows = db.execute(
+            f"""
+            SELECT id, section
+            FROM content_items
+            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
+            """,
+            payload.item_ids,
+        ).fetchall()
+
+        if len(rows) != len(set(payload.item_ids)):
+            raise HTTPException(status_code=422, detail="Eintragsreihenfolge ist ungültig")
+
+        sections = {row["section"] for row in rows}
+        if len(sections) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="Reihenfolge kann nur innerhalb eines Bereichs geändert werden",
+            )
+
+        section = next(iter(sections))
+        _require_content_permission(section, user)
+
+        current_rows = db.execute(
+            """
+            SELECT id
+            FROM content_items
+            WHERE section = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (section,),
+        ).fetchall()
+        current_ids = [row["id"] for row in current_rows]
+        if set(current_ids) != set(payload.item_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="Eintragsreihenfolge ist unvollständig",
+            )
+
+        for position, item_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                """
+                UPDATE content_items
+                SET sort_order = ?
+                WHERE id = ? AND section = ?
+                """,
+                (position, item_id, section),
+            )
+        db.commit()
+
+        ordered = db.execute(
+            """
+            SELECT *
+            FROM content_items
+            WHERE section = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (section,),
+        ).fetchall()
+    return [_serialize_content(row) for row in ordered]
 
 
 @app.post("/api/content")
@@ -869,13 +958,28 @@ def post_content(
     _require_content_permission(payload.section, user)
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        max_order = db.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM content_items
+            WHERE section = ?
+            """,
+            (payload.section,),
+        ).fetchone()[0]
         cursor = db.execute(
             """
             INSERT INTO content_items (
-                section, title, text, link_url, created_at
-            ) VALUES (?, ?, ?, ?, ?)
+                section, title, text, link_url, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (payload.section, payload.title, payload.text, payload.link_url, now),
+            (
+                payload.section,
+                payload.title,
+                payload.text,
+                payload.link_url,
+                max_order + 1,
+                now,
+            ),
         )
         db.commit()
         row = db.execute(
