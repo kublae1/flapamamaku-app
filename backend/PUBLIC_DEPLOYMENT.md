@@ -39,6 +39,8 @@ Wichtig:
 - Die Datenbank bleibt im persistenten Docker-Volume.
 - Zugriff aus dem Internet erfolgt nur über den Reverse Proxy.
 - `FLAPAMAMAKU_ALLOWED_ORIGINS` wird auf die echte HTTPS-Adresse gesetzt.
+- `FLAPAMAMAKU_ENV=production` deaktiviert die öffentliche API-Dokumentation.
+- Das Backend setzt zusätzliche Security-Header; HSTS wird nur im Produktionsmodus aktiviert.
 
 ## 3. Synology Reverse Proxy
 
