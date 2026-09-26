@@ -347,7 +347,7 @@
           <input type="hidden" name="image_url">
           <label>Foto (optional)</label>
           <input name="image_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
-          <p class="meta">JPG, PNG, WebP oder GIF · max. 12 MB</p>
+          <p class="meta"><strong>Empfohlen:</strong> 1600 × 1200 px (4:3) · JPG/WebP · ideal unter 1 MB · max. 12 MB</p>
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card"><h2>News-Feed</h2><div id="news-list"></div></div>
@@ -389,7 +389,7 @@
           <label>Webseite Arbeitgeber</label><input name="employer_url" placeholder="https://...">
           <label>Mitgliederfoto</label>
           <input name="photo_file" type="file" accept="image/jpeg,image/png,image/webp">
-          <p class="meta">JPG, PNG oder WebP · max. 12 MB</p>
+          <p class="meta"><strong>Empfohlen:</strong> 1200 × 1200 px (1:1) · JPG/WebP · ideal unter 1 MB · max. 12 MB</p>
 
           <div id="member-account-block" class="hidden">
             <hr style="margin:20px 0;border:0;border-top:1px solid #eee6de">
@@ -497,7 +497,8 @@
             Vorhandene Bilder beim Hochladen ersetzen
           </label>
           <div id="existing-images" class="existing-images hidden"></div>
-          <p class="meta">Hauptbild, Jahresmotto und Sujet können unabhängig gepflegt werden. Galerie: pro Eintrag ein einzelnes Bild. Fotoalben: mehrere Bilder möglich. JPG, PNG, WebP oder GIF · max. 12 MB pro Bild.</p>
+          <p class="meta" id="content-image-size-hint"></p>
+          <p class="meta">JPG, PNG, WebP oder GIF · ideal unter 1 MB · max. 12 MB pro Bild.</p>
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card">
@@ -946,6 +947,25 @@ async function loadPreviewRemoteImage(url) {
   }
 }
 
+const contentImageRecommendations = {
+  hero: "<strong>Empfohlen:</strong> 1200 × 1600 px (3:4, Hochformat) · Hauptbild füllt die Startseite optimal aus.",
+  motto: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · passt zur vollbreiten Jahresmotto-Anzeige.",
+  sujet: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · passt zur vollbreiten Sujet-Anzeige.",
+  archive: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · ideal für vergangene Sujets.",
+  gallery: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · pro Eintrag ein Bild.",
+  photos: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · innerhalb eines Albums möglichst einheitliches Format.",
+  documents: "<strong>Optionales Vorschaubild:</strong> 1200 × 900 px (4:3).",
+  polls: "<strong>Optionales Bild:</strong> 1200 × 900 px (4:3).",
+  links: "<strong>Empfohlen für Logo/Linkbild:</strong> 1000 × 1000 px (1:1, quadratisch).",
+};
+
+function updateContentImageRecommendation() {
+  const form = document.getElementById("content-form");
+  const section = form.elements.section.value;
+  const hint = document.getElementById("content-image-size-hint");
+  hint.innerHTML = contentImageRecommendations[section] || "";
+}
+
 function updateContentPreview() {
   const form = document.getElementById("content-form");
   const section = form.elements.section.value;
@@ -969,12 +989,16 @@ function updatePreviewFromSelectedFile() {
   } else {
     setPreviewImageObjectUrl("");
   }
-  updateContentPreview();
+  updateContentImageRecommendation();
+updateContentPreview();
 }
 
 ["section","title","text"].forEach(name => {
   document.getElementById("content-form").elements[name]
-    .addEventListener(name === "section" ? "change" : "input", updateContentPreview);
+    .addEventListener(name === "section" ? "change" : "input", () => {
+      updateContentPreview();
+      if (name === "section") updateContentImageRecommendation();
+    });
 });
 document.getElementById("content-form").elements.image_files
   .addEventListener("change", updatePreviewFromSelectedFile);
