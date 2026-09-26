@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.11",
+    version="0.8.12",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -84,6 +84,10 @@ class ContentPayload(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     text: str = ""
     link_url: str = ""
+
+
+class ContentImageOrderPayload(BaseModel):
+    image_ids: list[int]
 
 
 class LoginPayload(BaseModel):
@@ -218,6 +222,7 @@ def init_db() -> None:
                 content_id INTEGER NOT NULL,
                 image_data BLOB NOT NULL,
                 image_mime TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(content_id) REFERENCES content_items(id)
             )
@@ -284,6 +289,59 @@ def init_db() -> None:
         _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "photo_data", "BLOB")
         _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
+
+        _ensure_column(
+            db,
+            "content_images",
+            "sort_order",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execute(
+            """
+            UPDATE content_images
+            SET sort_order = id
+            WHERE sort_order = 0
+            """
+        )
+
+        legacy_rows = db.execute(
+            """
+            SELECT id, image_data, image_mime, created_at
+            FROM content_items
+            WHERE image_data IS NOT NULL
+            """
+        ).fetchall()
+        for legacy in legacy_rows:
+            max_order = db.execute(
+                """
+                SELECT COALESCE(MAX(sort_order), 0)
+                FROM content_images
+                WHERE content_id = ?
+                """,
+                (legacy["id"],),
+            ).fetchone()[0]
+            db.execute(
+                """
+                INSERT INTO content_images (
+                    content_id, image_data, image_mime, sort_order, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    legacy["id"],
+                    legacy["image_data"],
+                    legacy["image_mime"],
+                    max_order + 1,
+                    legacy["created_at"],
+                ),
+            )
+            db.execute(
+                """
+                UPDATE content_items
+                SET image_data = NULL, image_mime = ''
+                WHERE id = ?
+                """,
+                (legacy["id"],),
+            )
 
         member_columns = _columns(db, "members")
         if "phone" in member_columns:
@@ -508,34 +566,32 @@ CONTENT_PERMISSIONS = {
 
 def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
-    has_legacy_image = bool(item.pop("image_data", None))
+    item.pop("image_data", None)
     item.pop("image_mime", None)
-    images: list[dict[str, Any]] = []
-    if has_legacy_image:
-        images.append({
-            "id": None,
-            "url": f"/api/content/{item['id']}/image",
-            "legacy": True,
-        })
     with connect() as db:
         image_rows = db.execute(
-            "SELECT id FROM content_images WHERE content_id = ? ORDER BY id ASC",
+            """
+            SELECT id, sort_order
+            FROM content_images
+            WHERE content_id = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
             (item["id"],),
         ).fetchall()
-    images.extend(
+    images = [
         {
             "id": image_row["id"],
             "url": f"/api/content/{item['id']}/images/{image_row['id']}",
             "legacy": False,
+            "sort_order": image_row["sort_order"],
         }
         for image_row in image_rows
-    )
+    ]
     image_urls = [image["url"] for image in images]
     item["images"] = images
     item["image_urls"] = image_urls
     item["image_url"] = image_urls[0] if image_urls else ""
     return item
-
 
 def _content_permission(section: str) -> str:
     permission = CONTENT_PERMISSIONS.get(section)
@@ -564,7 +620,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.11"}
+    return {"status": "ok", "version": "0.8.12"}
 
 
 @app.get("/admin")
@@ -916,14 +972,71 @@ async def upload_content_images(
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(existing["section"], user)
         now = datetime.now(timezone.utc).isoformat()
+        max_order = db.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM content_images
+            WHERE content_id = ?
+            """,
+            (row_id,),
+        ).fetchone()[0]
         db.executemany(
             """
             INSERT INTO content_images (
-                content_id, image_data, image_mime, created_at
-            ) VALUES (?, ?, ?, ?)
+                content_id, image_data, image_mime, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            [(row_id, data, mime, now) for data, mime in prepared],
+            [
+                (row_id, data, mime, max_order + index + 1, now)
+                for index, (data, mime) in enumerate(prepared)
+            ],
         )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_content(row)
+
+
+@app.put("/api/content/{row_id}/images/order")
+def reorder_content_images(
+    row_id: int,
+    payload: ContentImageOrderPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+
+        rows = db.execute(
+            "SELECT id FROM content_images WHERE content_id = ?",
+            (row_id,),
+        ).fetchall()
+        current_ids = {row["id"] for row in rows}
+        requested_ids = payload.image_ids
+        if len(requested_ids) != len(set(requested_ids)):
+            raise HTTPException(status_code=422, detail="Doppelte Bild-ID")
+        if set(requested_ids) != current_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Bildreihenfolge ist unvollständig oder ungültig",
+            )
+
+        for position, image_id in enumerate(requested_ids, start=1):
+            db.execute(
+                """
+                UPDATE content_images
+                SET sort_order = ?
+                WHERE id = ? AND content_id = ?
+                """,
+                (position, image_id, row_id),
+            )
         db.commit()
         row = db.execute(
             "SELECT * FROM content_items WHERE id = ?",

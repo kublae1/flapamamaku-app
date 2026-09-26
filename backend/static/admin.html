@@ -269,6 +269,32 @@
       cursor:pointer;
     }
 
+  
+    .existing-image-row[draggable="true"] { cursor:grab; }
+    .existing-image-row.dragging { opacity:.45; }
+    .existing-image-row.drag-over {
+      outline:2px solid var(--gold);
+      outline-offset:-2px;
+      border-radius:10px;
+    }
+    .image-order-controls {
+      display:flex;
+      gap:5px;
+      align-items:center;
+    }
+    .image-order-button {
+      border:1px solid var(--line);
+      background:#24272b;
+      color:white;
+      border-radius:8px;
+      padding:6px 8px;
+      cursor:pointer;
+    }
+    .image-order-button:disabled {
+      opacity:.25;
+      cursor:default;
+    }
+
   </style>
 </head>
 <body>
@@ -1034,6 +1060,29 @@ function clearExistingImageObjectUrls() {
   existingImageObjectUrls = [];
 }
 
+async function saveImageOrder(item, orderedImages) {
+  if (!item?.id || !orderedImages.length) return item;
+  const updated = await api(`/api/content/${item.id}/images/order`, {
+    method:"PUT",
+    body:JSON.stringify({
+      image_ids: orderedImages.map(image => image.id),
+    }),
+  });
+  editingContentItem = updated;
+  return updated;
+}
+
+async function moveExistingImage(item, fromIndex, toIndex) {
+  if (toIndex < 0 || toIndex >= item.images.length || fromIndex === toIndex) return;
+  const images = [...item.images];
+  const [moved] = images.splice(fromIndex, 1);
+  images.splice(toIndex, 0, moved);
+  const updated = await saveImageOrder(item, images);
+  await renderExistingImages(updated);
+  loadPreviewRemoteImage(updated.image_urls?.[0] || updated.image_url || "");
+  await loadContent();
+}
+
 async function renderExistingImages(item) {
   editingContentItem = item || null;
   clearExistingImageObjectUrls();
@@ -1045,13 +1094,41 @@ async function renderExistingImages(item) {
 
   const heading = document.createElement("div");
   heading.className = "existing-images-title";
-  heading.textContent = `Vorhandene Bilder (${images.length})`;
+  heading.textContent = `Vorhandene Bilder (${images.length}) · Reihenfolge per Ziehen oder Pfeile ändern`;
   box.appendChild(heading);
+
+  let draggedIndex = null;
 
   for (let index = 0; index < images.length; index++) {
     const image = images[index];
     const row = document.createElement("div");
     row.className = "existing-image-row";
+    row.draggable = true;
+    row.dataset.index = String(index);
+
+    row.addEventListener("dragstart", event => {
+      draggedIndex = index;
+      row.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+    });
+    row.addEventListener("dragend", () => {
+      draggedIndex = null;
+      row.classList.remove("dragging");
+      box.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+    });
+    row.addEventListener("dragover", event => {
+      event.preventDefault();
+      if (draggedIndex !== null && draggedIndex !== index) {
+        row.classList.add("drag-over");
+      }
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", async event => {
+      event.preventDefault();
+      row.classList.remove("drag-over");
+      if (draggedIndex === null || draggedIndex === index) return;
+      await moveExistingImage(item, draggedIndex, index);
+    });
 
     const thumb = document.createElement("img");
     thumb.className = "existing-image-thumb";
@@ -1068,7 +1145,26 @@ async function renderExistingImages(item) {
     } catch (_) {}
 
     const label = document.createElement("div");
-    label.innerHTML = `<strong>Bild ${index + 1}</strong><div class="meta">${image.legacy ? "Altes Einzelbild" : "Galeriebild"}</div>`;
+    label.innerHTML = `<strong>Bild ${index + 1}</strong><div class="meta">Position ${index + 1}</div>`;
+
+    const controls = document.createElement("div");
+    controls.className = "image-order-controls";
+
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "image-order-button";
+    up.title = "Nach vorne";
+    up.textContent = "↑";
+    up.disabled = index === 0;
+    up.onclick = () => moveExistingImage(item, index, index - 1);
+
+    const down = document.createElement("button");
+    down.type = "button";
+    down.className = "image-order-button";
+    down.title = "Nach hinten";
+    down.textContent = "↓";
+    down.disabled = index === images.length - 1;
+    down.onclick = () => moveExistingImage(item, index, index + 1);
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -1076,11 +1172,7 @@ async function renderExistingImages(item) {
     remove.textContent = "Löschen";
     remove.onclick = async () => {
       if (!confirm(`Bild ${index + 1} wirklich löschen?`)) return;
-      if (image.legacy) {
-        await api(`/api/content/${item.id}/image`, {method:"DELETE"});
-      } else {
-        await api(`/api/content/${item.id}/images/${image.id}`, {method:"DELETE"});
-      }
+      await api(`/api/content/${item.id}/images/${image.id}`, {method:"DELETE"});
       const refreshed = await api("/api/content");
       const updated = refreshed.find(entry => entry.id === item.id);
       await renderExistingImages(updated);
@@ -1092,10 +1184,12 @@ async function renderExistingImages(item) {
       await loadContent();
     };
 
-    row.append(thumb, label, remove);
+    controls.append(up, down, remove);
+    row.append(thumb, label, controls);
     box.appendChild(row);
   }
 }
+
 
 function editContent(item) {
   const form = document.getElementById("content-form");
