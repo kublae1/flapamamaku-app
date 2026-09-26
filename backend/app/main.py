@@ -16,12 +16,13 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_DAYS = 30
+API_VERSION = "0.8.15"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.15",
+    version=API_VERSION,
     docs_url=None if IS_PRODUCTION else "/api/docs",
     openapi_url=None if IS_PRODUCTION else "/openapi.json",
     redoc_url=None,
@@ -660,7 +661,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.14"}
+    return {"status": "ok", "version": API_VERSION}
 
 
 @app.get("/admin")
