@@ -19,7 +19,7 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.10",
+    version="0.8.11",
     docs_url="/api/docs",
     redoc_url=None,
 )
@@ -510,18 +510,28 @@ def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     has_legacy_image = bool(item.pop("image_data", None))
     item.pop("image_mime", None)
-    image_urls: list[str] = []
+    images: list[dict[str, Any]] = []
     if has_legacy_image:
-        image_urls.append(f"/api/content/{item['id']}/image")
+        images.append({
+            "id": None,
+            "url": f"/api/content/{item['id']}/image",
+            "legacy": True,
+        })
     with connect() as db:
         image_rows = db.execute(
             "SELECT id FROM content_images WHERE content_id = ? ORDER BY id ASC",
             (item["id"],),
         ).fetchall()
-    image_urls.extend(
-        f"/api/content/{item['id']}/images/{image_row['id']}"
+    images.extend(
+        {
+            "id": image_row["id"],
+            "url": f"/api/content/{item['id']}/images/{image_row['id']}",
+            "legacy": False,
+        }
         for image_row in image_rows
     )
+    image_urls = [image["url"] for image in images]
+    item["images"] = images
     item["image_urls"] = image_urls
     item["image_url"] = image_urls[0] if image_urls else ""
     return item
@@ -554,7 +564,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.10"}
+    return {"status": "ok", "version": "0.8.11"}
 
 
 @app.get("/admin")
@@ -944,6 +954,57 @@ def get_content_gallery_image(
         media_type=row["image_mime"] or "application/octet-stream",
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+@app.delete("/api/content/{row_id}/images/{image_id}", status_code=204)
+def delete_content_gallery_image(
+    row_id: int,
+    image_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        cursor = db.execute(
+            "DELETE FROM content_images WHERE id = ? AND content_id = ?",
+            (image_id, row_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Bild nicht gefunden")
+        db.commit()
+
+
+@app.delete("/api/content/{row_id}/images", status_code=204)
+def delete_all_content_images(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        db.execute(
+            "DELETE FROM content_images WHERE content_id = ?",
+            (row_id,),
+        )
+        db.execute(
+            """
+            UPDATE content_items
+            SET image_data = NULL, image_mime = ''
+            WHERE id = ?
+            """,
+            (row_id,),
+        )
+        db.commit()
 
 
 @app.post("/api/content/{row_id}/image")

@@ -232,6 +232,43 @@
       aspect-ratio:3/4;
     }
 
+  
+    .existing-images {
+      margin-top:14px;
+      padding-top:12px;
+      border-top:1px solid var(--line);
+    }
+    .existing-images-title {
+      color:var(--gold);
+      font-size:13px;
+      font-weight:900;
+      margin-bottom:8px;
+    }
+    .existing-image-row {
+      display:grid;
+      grid-template-columns:72px 1fr auto;
+      gap:10px;
+      align-items:center;
+      padding:8px 0;
+      border-bottom:1px solid var(--line);
+    }
+    .existing-image-row:last-child { border-bottom:0; }
+    .existing-image-thumb {
+      width:72px;
+      height:54px;
+      object-fit:cover;
+      border-radius:8px;
+      background:#24272b;
+    }
+    .existing-image-remove {
+      border:1px solid var(--line);
+      background:#24272b;
+      color:#ff8c96;
+      border-radius:9px;
+      padding:7px 9px;
+      cursor:pointer;
+    }
+
   </style>
 </head>
 <body>
@@ -429,6 +466,11 @@
           <label>Link (optional)</label><input name="link_url" placeholder="https://...">
           <label>Bilder (optional)</label>
           <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+          <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <input name="replace_images" type="checkbox" checked>
+            Vorhandene Bilder beim Hochladen ersetzen
+          </label>
+          <div id="existing-images" class="existing-images hidden"></div>
           <p class="meta">Hauptbild, Jahresmotto und Sujet können unabhängig gepflegt werden. Galerie: pro Eintrag ein einzelnes Bild. Fotoalben: mehrere Bilder möglich. JPG, PNG, WebP oder GIF · max. 12 MB pro Bild.</p>
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
@@ -983,6 +1025,78 @@ async function loadContent() {
   });
 }
 
+
+let editingContentItem = null;
+let existingImageObjectUrls = [];
+
+function clearExistingImageObjectUrls() {
+  existingImageObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  existingImageObjectUrls = [];
+}
+
+async function renderExistingImages(item) {
+  editingContentItem = item || null;
+  clearExistingImageObjectUrls();
+  const box = document.getElementById("existing-images");
+  box.innerHTML = "";
+  const images = item?.images || [];
+  box.classList.toggle("hidden", !images.length);
+  if (!images.length) return;
+
+  const heading = document.createElement("div");
+  heading.className = "existing-images-title";
+  heading.textContent = `Vorhandene Bilder (${images.length})`;
+  box.appendChild(heading);
+
+  for (let index = 0; index < images.length; index++) {
+    const image = images[index];
+    const row = document.createElement("div");
+    row.className = "existing-image-row";
+
+    const thumb = document.createElement("img");
+    thumb.className = "existing-image-thumb";
+    thumb.alt = `Bild ${index + 1}`;
+    try {
+      const headers = token ? {Authorization: `Bearer ${token}`} : {};
+      const response = await fetch(image.url, {headers});
+      if (response.ok) {
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        existingImageObjectUrls.push(objectUrl);
+        thumb.src = objectUrl;
+      }
+    } catch (_) {}
+
+    const label = document.createElement("div");
+    label.innerHTML = `<strong>Bild ${index + 1}</strong><div class="meta">${image.legacy ? "Altes Einzelbild" : "Galeriebild"}</div>`;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "existing-image-remove";
+    remove.textContent = "Löschen";
+    remove.onclick = async () => {
+      if (!confirm(`Bild ${index + 1} wirklich löschen?`)) return;
+      if (image.legacy) {
+        await api(`/api/content/${item.id}/image`, {method:"DELETE"});
+      } else {
+        await api(`/api/content/${item.id}/images/${image.id}`, {method:"DELETE"});
+      }
+      const refreshed = await api("/api/content");
+      const updated = refreshed.find(entry => entry.id === item.id);
+      await renderExistingImages(updated);
+      if (updated) {
+        loadPreviewRemoteImage(updated.image_urls?.[0] || updated.image_url || "");
+      } else {
+        setPreviewImageObjectUrl("");
+      }
+      await loadContent();
+    };
+
+    row.append(thumb, label, remove);
+    box.appendChild(row);
+  }
+}
+
 function editContent(item) {
   const form = document.getElementById("content-form");
   form.elements.id.value = item.id;
@@ -993,6 +1107,7 @@ function editContent(item) {
   form.elements.image_files.value = "";
   updateContentPreview();
   loadPreviewRemoteImage(item.image_urls?.[0] || item.image_url || "");
+  renderExistingImages(item);
   form.scrollIntoView({behavior:"smooth"});
 }
 
@@ -1028,6 +1143,9 @@ document.getElementById("content-form").addEventListener("submit", async event =
 
   const files = [...form.elements.image_files.files];
   if (files.length) {
+    if (id && form.elements.replace_images.checked) {
+      await api(`/api/content/${saved.id}/images`, {method:"DELETE"});
+    }
     const upload = new FormData();
     files.forEach(file => upload.append("images", file));
     await api(`/api/content/${saved.id}/images`, {
@@ -1039,6 +1157,10 @@ document.getElementById("content-form").addEventListener("submit", async event =
   form.reset();
   form.elements.id.value = "";
   setPreviewImageObjectUrl("");
+  editingContentItem = null;
+  clearExistingImageObjectUrls();
+  document.getElementById("existing-images").innerHTML = "";
+  document.getElementById("existing-images").classList.add("hidden");
   updateContentPreview();
   await loadContent();
 });
