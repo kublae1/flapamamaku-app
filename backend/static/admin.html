@@ -792,6 +792,8 @@ async function loadUsers() {
       <div class="meta">${user.member_name || "Kein Mitglied verknüpft"}</div>
       <div class="meta">${user.active ? "Aktiv" : "Gesperrt"} · ${rights || "Keine Verwaltungsrechte"}</div>
       <div class="actions">
+        <button type="button" class="move-up" title="Nach oben">↑</button>
+        <button type="button" class="move-down" title="Nach unten">↓</button>
         <button type="button" class="edit">Bearbeiten</button>
         <button type="button" class="delete">Löschen</button>
       </div>`;
@@ -1078,12 +1080,17 @@ async function loadContent() {
     `;
     const up = div.querySelector(".move-up");
     const down = div.querySelector(".move-down");
-    up.disabled = !filter || sort !== "manual" || index === 0;
-    down.disabled = !filter || sort !== "manual" || index === filteredItems.length - 1;
-    up.onclick = () => moveContentItem(filteredItems, index, index - 1);
-    down.onclick = () => moveContentItem(filteredItems, index, index + 1);
-    div.querySelector(".edit").onclick = () => editContent(item);
-    div.querySelector(".delete").onclick = () => removeContent(item.id);
+    if (up && down) {
+      up.disabled = !filter || sort !== "manual" || index === 0;
+      down.disabled =
+        !filter || sort !== "manual" || index === filteredItems.length - 1;
+      up.onclick = () => moveContentItem(filteredItems, index, index - 1);
+      down.onclick = () => moveContentItem(filteredItems, index, index + 1);
+    }
+    const edit = div.querySelector(".edit");
+    const remove = div.querySelector(".delete");
+    if (edit) edit.onclick = () => editContent(item);
+    if (remove) remove.onclick = () => removeContent(item.id);
     list.appendChild(div);
   });
 }
