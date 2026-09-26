@@ -290,7 +290,7 @@ jobs:
 
       - name: Build universal release APK
         env:
-          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'http://192.168.0.215:8087' }}
+          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
         run: |
@@ -303,7 +303,7 @@ jobs:
 
       - name: Build split release APKs
         env:
-          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'http://192.168.0.215:8087' }}
+          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
         run: |
@@ -316,7 +316,7 @@ jobs:
 
       - name: Build Play Store AAB
         env:
-          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'http://192.168.0.215:8087' }}
+          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
         run: |
