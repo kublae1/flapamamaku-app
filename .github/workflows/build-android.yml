@@ -71,7 +71,39 @@ jobs:
               )
 
           gradle.write_text(text)
+
+          # Flutter creates MainActivity in the generated project package.
+          # Keep the Kotlin package aligned with the stable application ID,
+          # otherwise Android resolves .MainActivity to a class that does not exist.
+          activity_files = list(Path("android/app/src/main").rglob("MainActivity.kt"))
+          if not activity_files:
+              raise SystemExit("MainActivity.kt not found")
+
+          activity = activity_files[0]
+          activity_text = activity.read_text()
+          activity_text, count = re.subn(
+              r'^package\s+[A-Za-z0-9_.]+',
+              f'package {app_id}',
+              activity_text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit("Could not update MainActivity package declaration")
+
+          target = (
+              Path("android/app/src/main/kotlin")
+              / Path(*app_id.split("."))
+              / "MainActivity.kt"
+          )
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(activity_text)
+          if activity.resolve() != target.resolve():
+              activity.unlink()
+
           print(f"Configured Android applicationId: {app_id}")
+          print(f"Configured MainActivity package: {app_id}")
+          print(f"MainActivity path: {target}")
           PY
 
       - name: Configure Android permissions and biometrics
