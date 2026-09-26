@@ -118,6 +118,11 @@ jobs:
           if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
             sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
           fi
+          if grep -q 'android:label=' "$MANIFEST"; then
+            sed -i 's/android:label="[^"]*"/android:label="FLAPAMAMAKU"/' "$MANIFEST"
+          else
+            sed -i 's#<application#<application android:label="FLAPAMAMAKU"#' "$MANIFEST"
+          fi
 
           MAIN_ACTIVITY=$(find android/app/src/main -name MainActivity.kt | head -n 1)
           if [ -n "$MAIN_ACTIVITY" ]; then
