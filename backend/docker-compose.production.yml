@@ -10,6 +10,7 @@ services:
       - "127.0.0.1:8087:8000"
     environment:
       FLAPAMAMAKU_DB: /data/flapamamaku.db
+      FLAPAMAMAKU_ENV: production
       FLAPAMAMAKU_ALLOWED_ORIGINS: ${FLAPAMAMAKU_ALLOWED_ORIGINS}
     volumes:
       - flapamamaku-data:/data
