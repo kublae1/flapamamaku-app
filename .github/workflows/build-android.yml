@@ -108,7 +108,24 @@ jobs:
             exit 0
           fi
 
-          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/flapamamaku-release.jks
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          raw = os.environ["KEYSTORE_BASE64"].strip().replace("\ufeff", "")
+          compact = "".join(raw.split())
+          try:
+              data = base64.b64decode(compact, validate=True)
+          except Exception as exc:
+              raise SystemExit(f"Keystore Base64 could not be decoded: {exc}")
+
+          if not data:
+              raise SystemExit("Decoded keystore is empty")
+
+          Path("android/app/flapamamaku-release.jks").write_bytes(data)
+          print(f"Decoded keystore bytes: {len(data)}")
+          PY
 
           cat > android/key.properties <<EOF
           storePassword=$KEYSTORE_PASSWORD
