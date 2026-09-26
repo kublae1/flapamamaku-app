@@ -669,6 +669,22 @@ def admin() -> FileResponse:
     return FileResponse(STATIC_DIR / "admin.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "flapamamaku-icon.png",
+        media_type="image/png",
+    )
+
+
+@app.get("/flapamamaku-icon.png", include_in_schema=False)
+def flapamamaku_icon() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "flapamamaku-icon.png",
+        media_type="image/png",
+    )
+
+
 @app.get("/api/auth/status")
 def auth_status() -> dict[str, bool]:
     with connect() as db:
