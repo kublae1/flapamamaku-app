@@ -572,6 +572,7 @@
 
 <script>
 let token = sessionStorage.getItem("flapamamaku_token") || "";
+let apiVersion = "";
 let currentUser = null;
 let bootstrapRequired = false;
 let userAccounts = [];
@@ -1437,7 +1438,7 @@ async function startAdmin() {
   showAdmin();
   applyPermissions();
   document.getElementById("status").textContent =
-    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v0.8.9`;
+    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v${apiVersion || "?"}`;
 
   if (currentUser.can_news) {
     document.querySelector("#news-form [name=date]").value =
@@ -1458,6 +1459,7 @@ async function startAdmin() {
 (async () => {
   try {
     const health = await api("/api/health");
+    apiVersion = health.version || "";
     const status = await api("/api/auth/status");
     bootstrapRequired = status.bootstrap_required;
     document.getElementById("status").textContent = `API online · v${health.version}`;
