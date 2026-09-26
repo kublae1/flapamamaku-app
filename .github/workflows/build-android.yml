@@ -270,15 +270,62 @@ jobs:
       - name: Test
         run: flutter test
 
-      - name: Build release APK
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          APP_VERSION=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path("pubspec.yaml").read_text()
+          match = re.search(r"^version:\s*([^+\s]+)", text, re.MULTILINE)
+          if not match:
+              raise SystemExit("Version not found in pubspec.yaml")
+          print(match.group(1))
+          PY
+          )
+          echo "name=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "number=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Release version: $APP_VERSION+$GITHUB_RUN_NUMBER"
+
+      - name: Build universal release APK
         env:
           API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'http://192.168.0.215:8087' }}
-        run: flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
+          APP_VERSION: ${{ steps.version.outputs.name }}
+          APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+        run: |
+          flutter build apk --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$APP_BUILD_NUMBER" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER"
+
+      - name: Build split release APKs
+        env:
+          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'http://192.168.0.215:8087' }}
+          APP_VERSION: ${{ steps.version.outputs.name }}
+          APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+        run: |
+          flutter build apk --release --split-per-abi \
+            --build-name="$APP_VERSION" \
+            --build-number="$APP_BUILD_NUMBER" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER"
 
       - name: Build Play Store AAB
         env:
           API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'http://192.168.0.215:8087' }}
-        run: flutter build appbundle --release --dart-define=API_BASE_URL="$API_BASE_URL"
+          APP_VERSION: ${{ steps.version.outputs.name }}
+          APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+        run: |
+          flutter build appbundle --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$APP_BUILD_NUMBER" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER"
 
       - name: Verify permanent signing is configured for distributable builds
         if: github.ref == 'refs/heads/main'
@@ -293,4 +340,5 @@ jobs:
           name: flapamamaku-android-release
           path: |
             build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-*-release.apk
             build/app/outputs/bundle/release/app-release.aab
