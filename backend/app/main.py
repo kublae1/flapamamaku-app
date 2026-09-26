@@ -19,14 +19,20 @@ SESSION_DAYS = 30
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.13",
+    version="0.8.14",
     docs_url="/api/docs",
     redoc_url=None,
 )
 
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("FLAPAMAMAKU_ALLOWED_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -639,7 +645,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.13"}
+    return {"status": "ok", "version": "0.8.14"}
 
 
 @app.get("/admin")

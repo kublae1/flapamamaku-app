@@ -1,0 +1,18 @@
+services:
+  flapamamaku-backend:
+    image: ghcr.io/kublae1/flapamamaku-backend:latest
+    pull_policy: always
+    container_name: flapamamaku-backend
+    restart: unless-stopped
+    ports:
+      # Nur lokal auf dem Docker-/Synology-Host erreichbar.
+      # Der öffentliche Zugriff erfolgt ausschliesslich über den HTTPS-Reverse-Proxy.
+      - "127.0.0.1:8087:8000"
+    environment:
+      FLAPAMAMAKU_DB: /data/flapamamaku.db
+      FLAPAMAMAKU_ALLOWED_ORIGINS: ${FLAPAMAMAKU_ALLOWED_ORIGINS}
+    volumes:
+      - flapamamaku-data:/data
+
+volumes:
+  flapamamaku-data:
