@@ -173,10 +173,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final sectionItems = store.contentFor(widget.section);
-    final sourceItems = widget.section == 'gallery' && sectionItems.isEmpty
-        ? store.contentFor('photos')
-        : sectionItems;
+    final sourceItems = store.contentFor(widget.section);
     final sortedItems = _sortedItems(sourceItems);
     final items = widget.individualImages
         ? _individualItems(sortedItems)

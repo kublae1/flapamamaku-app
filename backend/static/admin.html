@@ -332,7 +332,8 @@
       <button data-panel="events" data-permission="can_events">Termine</button>
       <button data-panel="members" data-permission="can_members">Mitglieder</button>
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
-      <button data-panel="content" id="content-nav">Fotos & Inhalte</button>
+      <button data-panel="content" id="gallery-nav">Galerie</button>
+      <button data-panel="content" id="content-nav">Fotoalben & Inhalte</button>
       <button id="logout-button">Abmelden</button>
     </nav>
 
@@ -473,7 +474,7 @@
     <section id="content" class="panel">
       <div class="grid">
         <form class="card" id="content-form">
-          <h2>App-Inhalte bearbeiten</h2>
+          <h2 id="content-editor-title">App-Inhalte bearbeiten</h2>
           <input type="hidden" name="id">
           <label>Bereich</label>
           <select name="section" required>
@@ -626,6 +627,8 @@ function applyPermissions() {
     .some(permission => currentUser?.[permission]);
   document.getElementById("content-nav")
     .classList.toggle("hidden", !canManageContent);
+  document.getElementById("gallery-nav")
+    .classList.toggle("hidden", !currentUser?.can_photos);
   const first = [...document.querySelectorAll("nav button[data-panel]:not(.hidden)")][0];
   document.querySelectorAll("nav button[data-panel]").forEach(b => b.classList.remove("active"));
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
@@ -1273,6 +1276,23 @@ async function removeContent(id) {
 
 document.getElementById("content-filter").addEventListener("change", loadContent);
 document.getElementById("content-sort").addEventListener("change", loadContent);
+
+document.getElementById("gallery-nav").addEventListener("click", async () => {
+  document.getElementById("content-editor-title").textContent = "Galerie bearbeiten";
+  document.getElementById("content-filter").value = "gallery";
+  document.querySelector("#content-form [name=section]").value = "gallery";
+  updateContentImageRecommendation();
+  updateContentPreview();
+  await loadContent();
+});
+
+document.getElementById("content-nav").addEventListener("click", async () => {
+  document.getElementById("content-editor-title").textContent = "Fotoalben & Inhalte bearbeiten";
+  if (document.getElementById("content-filter").value === "gallery") {
+    document.getElementById("content-filter").value = "";
+  }
+  await loadContent();
+});
 updateContentImageRecommendation();
 updateContentPreview();
 
