@@ -155,6 +155,83 @@
       .permission-grid { grid-template-columns: 1fr; }
       main { padding: 16px; }
     }
+  
+    .preview-heading {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin:4px 0 12px;
+    }
+    .preview-heading h2 { margin:0; }
+    .phone-preview {
+      width:min(100%, 360px);
+      margin:0 auto 22px;
+      background:#111315;
+      border:8px solid #050607;
+      border-radius:34px;
+      overflow:hidden;
+      box-shadow:0 18px 45px rgba(0,0,0,.38);
+    }
+    .phone-preview-top {
+      background:#061018;
+      color:#e41f26;
+      text-align:center;
+      font-weight:900;
+      letter-spacing:1px;
+      padding:17px 12px 13px;
+      font-size:20px;
+    }
+    .phone-preview-section {
+      color:white;
+      text-align:center;
+      font-size:14px;
+      font-weight:800;
+      padding:10px 12px;
+      border-top:1px solid var(--line);
+      border-bottom:1px solid var(--line);
+    }
+    .phone-preview-image {
+      width:100%;
+      aspect-ratio:4/3;
+      background:#24272b;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:rgba(255,255,255,.48);
+      overflow:hidden;
+    }
+    .phone-preview-image img {
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .phone-preview-copy {
+      padding:16px 18px 20px;
+      text-align:center;
+      min-height:86px;
+    }
+    .phone-preview-copy h3 {
+      margin:0;
+      color:white;
+      font-size:20px;
+      font-weight:900;
+    }
+    .phone-preview-copy p {
+      margin:8px 0 0;
+      color:var(--muted);
+      line-height:1.4;
+      white-space:pre-wrap;
+    }
+    .phone-preview.hero-preview .phone-preview-section,
+    .phone-preview.hero-preview .phone-preview-copy {
+      display:none;
+    }
+    .phone-preview.hero-preview .phone-preview-image {
+      aspect-ratio:3/4;
+    }
+
   </style>
 </head>
 <body>
@@ -356,6 +433,21 @@
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card">
+          <div class="preview-heading">
+            <h2>App-Vorschau</h2>
+            <span class="meta">Live</span>
+          </div>
+          <div class="phone-preview hero-preview" id="content-preview">
+            <div class="phone-preview-top">FLAPAMAMAKU</div>
+            <div class="phone-preview-section" id="preview-section">Startseite / Hauptbild</div>
+            <div class="phone-preview-image" id="preview-image">
+              <span id="preview-placeholder">Bild auswählen</span>
+            </div>
+            <div class="phone-preview-copy">
+              <h3 id="preview-title"></h3>
+              <p id="preview-text"></p>
+            </div>
+          </div>
           <h2>Datenbank-Einträge</h2>
           <p class="meta">Diese Inhalte werden zentral in Docker gespeichert. Änderungen erscheinen nach der Synchronisierung in der Handy-App; ein neuer APK-Build ist dafür nicht nötig.</p>
           <label>Bereich anzeigen</label>
@@ -748,6 +840,74 @@ Object.keys(resources).forEach(resource => {
 });
 
 
+
+let previewObjectUrl = "";
+
+function clearPreviewObjectUrl() {
+  if (previewObjectUrl) {
+    URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = "";
+  }
+}
+
+function setPreviewImageObjectUrl(url) {
+  clearPreviewObjectUrl();
+  previewObjectUrl = url || "";
+  const box = document.getElementById("preview-image");
+  box.innerHTML = previewObjectUrl
+    ? `<img src="${previewObjectUrl}" alt="Vorschau">`
+    : '<span id="preview-placeholder">Bild auswählen</span>';
+}
+
+async function loadPreviewRemoteImage(url) {
+  if (!url) {
+    setPreviewImageObjectUrl("");
+    return;
+  }
+  try {
+    const headers = token ? {Authorization: `Bearer ${token}`} : {};
+    const response = await fetch(url, {headers});
+    if (!response.ok) throw new Error("preview image failed");
+    const blob = await response.blob();
+    setPreviewImageObjectUrl(URL.createObjectURL(blob));
+  } catch (_) {
+    setPreviewImageObjectUrl("");
+  }
+}
+
+function updateContentPreview() {
+  const form = document.getElementById("content-form");
+  const section = form.elements.section.value;
+  const title = form.elements.title.value.trim();
+  const body = form.elements.text.value.trim();
+
+  document.getElementById("preview-section").textContent =
+    contentLabels[section] || section;
+  document.getElementById("preview-title").textContent = title;
+  document.getElementById("preview-text").textContent = body;
+
+  const preview = document.getElementById("content-preview");
+  preview.classList.toggle("hero-preview", section === "hero");
+}
+
+function updatePreviewFromSelectedFile() {
+  const form = document.getElementById("content-form");
+  const file = form.elements.image_files.files[0];
+  if (file) {
+    setPreviewImageObjectUrl(URL.createObjectURL(file));
+  } else {
+    setPreviewImageObjectUrl("");
+  }
+  updateContentPreview();
+}
+
+["section","title","text"].forEach(name => {
+  document.getElementById("content-form").elements[name]
+    .addEventListener(name === "section" ? "change" : "input", updateContentPreview);
+});
+document.getElementById("content-form").elements.image_files
+  .addEventListener("change", updatePreviewFromSelectedFile);
+
 function canEditContentSection(section) {
   const permission = contentPermissions[section];
   return !!permission && !!currentUser?.[permission];
@@ -830,6 +990,9 @@ function editContent(item) {
   form.elements.title.value = item.title || "";
   form.elements.text.value = item.text || "";
   form.elements.link_url.value = item.link_url || "";
+  form.elements.image_files.value = "";
+  updateContentPreview();
+  loadPreviewRemoteImage(item.image_urls?.[0] || item.image_url || "");
   form.scrollIntoView({behavior:"smooth"});
 }
 
@@ -841,6 +1004,7 @@ async function removeContent(id) {
 
 document.getElementById("content-filter").addEventListener("change", loadContent);
 document.getElementById("content-sort").addEventListener("change", loadContent);
+updateContentPreview();
 
 document.getElementById("content-form").addEventListener("submit", async event => {
   event.preventDefault();
@@ -874,6 +1038,8 @@ document.getElementById("content-form").addEventListener("submit", async event =
 
   form.reset();
   form.elements.id.value = "";
+  setPreviewImageObjectUrl("");
+  updateContentPreview();
   await loadContent();
 });
 
