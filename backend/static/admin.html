@@ -1266,6 +1266,7 @@ async function removeContent(id) {
 
 document.getElementById("content-filter").addEventListener("change", loadContent);
 document.getElementById("content-sort").addEventListener("change", loadContent);
+updateContentImageRecommendation();
 updateContentPreview();
 
 document.getElementById("content-form").addEventListener("submit", async event => {
