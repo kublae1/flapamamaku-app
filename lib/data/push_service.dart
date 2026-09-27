@@ -118,6 +118,7 @@ class PushService {
           channelDescription: 'News, Termine und neue Vereinsinhalte',
           importance: Importance.high,
           priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
         );
         const details = NotificationDetails(android: androidDetails);
         await _localNotifications.show(
