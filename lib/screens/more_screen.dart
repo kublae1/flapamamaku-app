@@ -63,15 +63,15 @@ class MoreScreen extends StatelessWidget {
             ),
             _MockupMenuCard(
               icon: Icons.chat_rounded,
-              title: 'WhatsApp-Gruppe',
+              title: 'WhatsApp-Gruppe beitreten',
               subtitle: whatsappLink.isEmpty
-                  ? 'Gruppenlink ist noch nicht hinterlegt'
-                  : 'FLAPAMAMAKU-Gruppenchat direkt in WhatsApp öffnen',
+                  ? 'Einladungslink ist noch nicht hinterlegt'
+                  : 'Direkt zur FLAPAMAMAKU-Gruppe in WhatsApp',
               onTap: () {
                 if (whatsappLink.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Im Docker-Admin ist noch kein WhatsApp-Gruppenlink hinterlegt.'),
+                      content: Text('Im Docker-Admin ist noch kein WhatsApp-Einladungslink hinterlegt.'),
                     ),
                   );
                   return;
