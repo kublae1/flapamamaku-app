@@ -573,7 +573,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
       },
     );
 
-    if (saved == true && mounted) {
+    if (saved == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Deine Mitgliederdaten wurden aktualisiert.')),
       );
