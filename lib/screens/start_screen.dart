@@ -6,7 +6,7 @@ import '../theme/flap_brand.dart';
 import 'flap_image_viewer_screen.dart';
 import 'members_screen.dart';
 import 'more_screen.dart';
-import 'remote_content_screen.dart';
+import 'content_detail_screens.dart';
 
 class StartScreen extends StatelessWidget {
   const StartScreen({super.key});
@@ -28,15 +28,6 @@ class StartScreen extends StatelessWidget {
     return item.imageUrl.trim();
   }
 
-  String _mottoYear(ContentItem? sujet) {
-    final values = [
-      sujet?.title ?? '',
-      sujet?.text ?? '',
-    ].join(' ');
-    final match = RegExp(r'\b(20\d{2})\b').firstMatch(values);
-    return match?.group(1) ?? DateTime.now().year.toString();
-  }
-
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
@@ -46,8 +37,7 @@ class StartScreen extends StatelessWidget {
         ? 'FLAPAMAMAKU'
         : hero.title.trim();
     const fallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
-    final motto = _latestContent(store, 'motto');
-    final mottoYear = _mottoYear(motto);
+    final latestNews = store.news.take(3).toList();
 
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
@@ -146,60 +136,130 @@ class StartScreen extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-              child: Material(
-                color: const Color(0xFFE41F26),
-                borderRadius: BorderRadius.circular(12),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const RemoteContentScreen.archiveStyle(
-                        section: 'motto',
-                        title: 'Jahresmotto',
-                        emptyText: 'Noch kein Jahresmotto hinterlegt.',
-                        icon: Icons.celebration_rounded,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.article_rounded, color: FlapBrand.gold),
+                      SizedBox(width: 8),
+                      Text(
+                        'News',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 14, 12, 14),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Jahresmotto',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
+                  const SizedBox(height: 12),
+                  if (latestNews.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF191B1E),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0x18FFFFFF)),
+                      ),
+                      child: const Text(
+                        'Noch keine News vorhanden.',
+                        style: TextStyle(color: Colors.white60),
+                      ),
+                    )
+                  else
+                    ...latestNews.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Material(
+                          color: const Color(0xFF191B1E),
+                          borderRadius: BorderRadius.circular(16),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => NewsDetailScreen(item: item),
                               ),
-                              const SizedBox(height: 1),
-                              Text(
-                                mottoYear,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 34,
-                                  height: 1,
-                                  fontWeight: FontWeight.w900,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (item.imageUrl.isNotEmpty || item.imageAsset.isNotEmpty)
+                                  SizedBox(
+                                    width: 108,
+                                    height: 108,
+                                    child: item.imageUrl.isNotEmpty
+                                        ? Image.network(
+                                            item.imageUrl,
+                                            headers: store.api.authHeaders,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                const ColoredBox(
+                                              color: Color(0xFF24272B),
+                                            ),
+                                          )
+                                        : Image.asset(
+                                            item.imageAsset,
+                                            fit: BoxFit.cover,
+                                          ),
+                                  ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.date,
+                                          style: const TextStyle(
+                                            color: FlapBrand.gold,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          item.title,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                        if (item.text.trim().isNotEmpty) ...[
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            item.text,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white60,
+                                              height: 1.25,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ],
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 39, right: 8),
+                                  child: Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Colors.white38,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          color: Colors.white,
-                          size: 36,
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
             ),
           ],
