@@ -457,6 +457,75 @@ class ApiService {
     return MemberItem.fromJson(json);
   }
 
+  Future<MemberItem> updateOwnMember(MemberItem item) async {
+    final response = await http
+        .put(
+          _uri('/api/members/me'),
+          headers: _jsonHeaders,
+          body: jsonEncode({
+            'partner_name': item.partnerName,
+            'phone_mobile': item.phoneMobile,
+            'phone_private': item.phonePrivate,
+            'phone_work': item.phoneWork,
+            'email': item.email,
+            'address': item.address,
+            'occupation': item.occupation,
+            'employer': item.employer,
+            'employer_url': item.employerUrl,
+            'engagement': item.engagement,
+          }),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final photoUrl = json['photo_url']?.toString() ?? '';
+    if (photoUrl.startsWith('/')) {
+      json['photo_url'] = '$baseUrl$photoUrl';
+    }
+    return MemberItem.fromJson(json);
+  }
+
+  Future<MemberItem> uploadOwnMemberPhoto({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      _uri('/api/members/me/photo'),
+    );
+    request.headers.addAll(authHeaders);
+    final lowerName = filename.toLowerCase();
+    final mediaType = lowerName.endsWith('.png')
+        ? MediaType('image', 'png')
+        : lowerName.endsWith('.webp')
+            ? MediaType('image', 'webp')
+            : MediaType('image', 'jpeg');
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'photo',
+        bytes,
+        filename: filename.isEmpty ? 'mitglied.jpg' : filename,
+        contentType: mediaType,
+      ),
+    );
+    final streamed = await request.send().timeout(const Duration(seconds: 30));
+    final response = await http.Response.fromStream(streamed);
+    _ensureSuccess(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final photoUrl = json['photo_url']?.toString() ?? '';
+    if (photoUrl.startsWith('/')) {
+      json['photo_url'] = '$baseUrl$photoUrl';
+    }
+    return MemberItem.fromJson(json);
+  }
+
+  Future<void> deleteOwnMemberPhoto() async {
+    final response = await http
+        .delete(_uri('/api/members/me/photo'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
   Future<void> deleteMember(int id) async {
     final response = await http
         .delete(_uri('/api/members/$id'), headers: authHeaders)
