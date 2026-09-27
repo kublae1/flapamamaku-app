@@ -518,7 +518,11 @@
           <div id="poll-options-wrap" class="hidden">
             <label>Antwortmöglichkeiten</label>
             <textarea name="poll_options" placeholder="Ja&#10;Nein&#10;Enthaltung"></textarea>
-            <p class="meta">Eine Antwort pro Zeile. Beispiele: Ja / Nein / Enthaltung oder eigene Antworten.</p>
+            <div class="actions" style="margin-top:8px">
+              <button type="button" id="poll-preset-yes-no">Ja / Nein</button>
+              <button type="button" id="poll-preset-yes-no-abstain">Ja / Nein / Enthaltung</button>
+            </div>
+            <p class="meta">Eine Antwort pro Zeile. Mindestens zwei Möglichkeiten. Eigene Antworten sind ebenfalls möglich.</p>
           </div>
           <div id="document-upload-wrap" class="hidden">
             <label>PDF-Dokument</label>
@@ -1373,7 +1377,18 @@ document.getElementById("content-nav").addEventListener("click", async () => {
   await loadContent();
 });
 updateContentImageRecommendation();
+updateContentFormMode();
 updateContentPreview();
+
+document.getElementById("poll-preset-yes-no").addEventListener("click", () => {
+  const form = document.getElementById("content-form");
+  form.elements.poll_options.value = "Ja\nNein";
+});
+
+document.getElementById("poll-preset-yes-no-abstain").addEventListener("click", () => {
+  const form = document.getElementById("content-form");
+  form.elements.poll_options.value = "Ja\nNein\nEnthaltung";
+});
 
 document.getElementById("content-form").addEventListener("submit", async event => {
   event.preventDefault();
@@ -1385,6 +1400,17 @@ document.getElementById("content-form").addEventListener("submit", async event =
   }
 
   const id = form.elements.id.value;
+  const pollOptions = section === "polls"
+    ? form.elements.poll_options.value
+        .split(/\r?\n/)
+        .map(value => value.trim())
+        .filter(Boolean)
+    : [];
+  if (section === "polls" && pollOptions.length < 2) {
+    alert("Bitte mindestens zwei Antwortmöglichkeiten erfassen, z. B. Ja und Nein.");
+    form.elements.poll_options.focus();
+    return;
+  }
   const saved = await api(id ? `/api/content/${id}` : "/api/content", {
     method: id ? "PUT" : "POST",
     body: JSON.stringify({
@@ -1392,12 +1418,7 @@ document.getElementById("content-form").addEventListener("submit", async event =
       title: form.elements.title.value.trim(),
       text: form.elements.text.value.trim(),
       link_url: form.elements.link_url.value.trim(),
-      poll_options: section === "polls"
-        ? form.elements.poll_options.value
-            .split(/\r?\n/)
-            .map(value => value.trim())
-            .filter(Boolean)
-        : [],
+      poll_options: pollOptions,
     }),
   });
 
