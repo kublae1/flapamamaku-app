@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -19,12 +20,13 @@ from fastapi.responses import FileResponse, Response
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 from pydantic import BaseModel, Field
+from PIL import Image, ImageOps, ImageSequence
 
 
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.29"
+API_VERSION = "0.8.30"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -275,6 +277,82 @@ def connect() -> sqlite3.Connection:
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+MAX_UPLOAD_IMAGE_BYTES = 30 * 1024 * 1024
+MAX_STORED_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_IMAGE_DIMENSION = 1600
+
+
+def _optimize_image(data: bytes, mime: str) -> tuple[bytes, str]:
+    """Resize/compress uploads without cropping; preserve aspect ratio."""
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > MAX_UPLOAD_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    normalized_mime = (mime or "").lower().strip()
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            if normalized_mime == "image/gif" or (source.format or "").upper() == "GIF":
+                frames: list[Image.Image] = []
+                durations: list[int] = []
+                loop = int(source.info.get("loop", 0) or 0)
+                for frame in ImageSequence.Iterator(source):
+                    resized = frame.convert("RGBA")
+                    resized.thumbnail(
+                        (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
+                        Image.Resampling.LANCZOS,
+                    )
+                    frames.append(
+                        resized.convert("P", palette=Image.Palette.ADAPTIVE)
+                    )
+                    durations.append(int(frame.info.get("duration", source.info.get("duration", 100)) or 100))
+
+                if not frames:
+                    raise HTTPException(status_code=400, detail="Invalid image")
+
+                output = io.BytesIO()
+                frames[0].save(
+                    output,
+                    format="GIF",
+                    save_all=True,
+                    append_images=frames[1:],
+                    optimize=True,
+                    loop=loop,
+                    duration=durations,
+                )
+                optimized = output.getvalue()
+                optimized_mime = "image/gif"
+            else:
+                image = ImageOps.exif_transpose(source)
+                image.thumbnail(
+                    (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
+                    Image.Resampling.LANCZOS,
+                )
+                if image.mode not in {"RGB", "RGBA"}:
+                    image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+
+                output = io.BytesIO()
+                image.save(
+                    output,
+                    format="WEBP",
+                    quality=82,
+                    method=6,
+                    lossless=False,
+                )
+                optimized = output.getvalue()
+                optimized_mime = "image/webp"
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=415, detail="Invalid or unsupported image") from exc
+
+    if not optimized:
+        raise HTTPException(status_code=400, detail="Image optimization failed")
+    if len(optimized) > MAX_STORED_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Optimized image is still too large")
+    return optimized, optimized_mime
 
 
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
@@ -1570,22 +1648,18 @@ async def post_gallery_snapshot(
         raise HTTPException(status_code=403, detail="Keine Berechtigung für Galerie-Snapshots")
     if expires_days not in {7, 14, 30}:
         raise HTTPException(status_code=422, detail="Ablaufzeit muss 7, 14 oder 30 Tage sein")
-    data = await image.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
-
+    raw_data = await image.read()
     mime = image.content_type or ""
     if mime not in {"image/jpeg", "image/png", "image/webp"}:
-        if data.startswith(b"\xff\xd8\xff"):
+        if raw_data.startswith(b"\xff\xd8\xff"):
             mime = "image/jpeg"
-        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        elif raw_data.startswith(b"\x89PNG\r\n\x1a\n"):
             mime = "image/png"
-        elif len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        elif len(raw_data) >= 12 and raw_data[:4] == b"RIFF" and raw_data[8:12] == b"WEBP":
             mime = "image/webp"
         else:
             raise HTTPException(status_code=415, detail="Unsupported image type")
+    data, mime = _optimize_image(raw_data, mime)
 
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=expires_days)
@@ -2108,12 +2182,11 @@ async def upload_content_images(
     for image in images:
         if image.content_type not in allowed_types:
             raise HTTPException(status_code=415, detail="Unsupported image type")
-        data = await image.read()
-        if not data:
-            raise HTTPException(status_code=400, detail="Empty image")
-        if len(data) > 12 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Image too large")
-        prepared.append((data, image.content_type or "application/octet-stream"))
+        data, optimized_mime = _optimize_image(
+            await image.read(),
+            image.content_type or "",
+        )
+        prepared.append((data, optimized_mime))
 
     with connect() as db:
         existing = db.execute(
@@ -2282,11 +2355,10 @@ async def upload_content_image(
     if image.content_type not in allowed_types:
         raise HTTPException(status_code=415, detail="Unsupported image type")
 
-    data = await image.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
+    data, optimized_mime = _optimize_image(
+        await image.read(),
+        image.content_type or "",
+    )
 
     with connect() as db:
         existing = db.execute(
@@ -2302,7 +2374,7 @@ async def upload_content_image(
             SET image_data = ?, image_mime = ?
             WHERE id = ?
             """,
-            (data, image.content_type, row_id),
+            (data, optimized_mime, row_id),
         )
         db.commit()
         row = db.execute(
@@ -2787,11 +2859,10 @@ async def upload_my_member_photo(
     if photo.content_type not in allowed_types:
         raise HTTPException(status_code=415, detail="Unsupported image type")
 
-    data = await photo.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
+    data, optimized_mime = _optimize_image(
+        await photo.read(),
+        photo.content_type or "",
+    )
 
     with connect() as db:
         cursor = db.execute(
@@ -2800,7 +2871,7 @@ async def upload_my_member_photo(
             SET photo_data = ?, photo_mime = ?
             WHERE id = ?
             """,
-            (data, photo.content_type, member_id),
+            (data, optimized_mime, member_id),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
@@ -2957,11 +3028,10 @@ async def upload_member_photo(
     if photo.content_type not in allowed_types:
         raise HTTPException(status_code=415, detail="Unsupported image type")
 
-    data = await photo.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
+    data, optimized_mime = _optimize_image(
+        await photo.read(),
+        photo.content_type or "",
+    )
 
     with connect() as db:
         cursor = db.execute(
@@ -2970,7 +3040,7 @@ async def upload_member_photo(
             SET photo_data = ?, photo_mime = ?
             WHERE id = ?
             """,
-            (data, photo.content_type, row_id),
+            (data, optimized_mime, row_id),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
