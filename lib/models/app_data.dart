@@ -12,6 +12,13 @@ class ContentItem {
   final bool isSnapshot;
   final bool canDelete;
   final String expiresAt;
+  final String documentUrl;
+  final String documentName;
+  final String documentMime;
+  final List<String> pollOptions;
+  final List<int> pollCounts;
+  final int pollTotalVotes;
+  final int? pollMyVote;
 
   const ContentItem({
     this.id,
@@ -27,6 +34,13 @@ class ContentItem {
     this.isSnapshot = false,
     this.canDelete = false,
     this.expiresAt = '',
+    this.documentUrl = '',
+    this.documentName = '',
+    this.documentMime = '',
+    this.pollOptions = const [],
+    this.pollCounts = const [],
+    this.pollTotalVotes = 0,
+    this.pollMyVote,
   });
 
   factory ContentItem.fromJson(Map<String, dynamic> json) {
@@ -46,6 +60,17 @@ class ContentItem {
       isSnapshot: json['is_snapshot'] == true,
       canDelete: json['can_delete'] == true,
       expiresAt: json['expires_at']?.toString() ?? '',
+      documentUrl: json['document_url']?.toString() ?? '',
+      documentName: json['document_name']?.toString() ?? '',
+      documentMime: json['document_mime']?.toString() ?? '',
+      pollOptions: (json['poll_options'] as List<dynamic>? ?? const [])
+          .map((value) => value.toString())
+          .toList(),
+      pollCounts: (json['poll_counts'] as List<dynamic>? ?? const [])
+          .map((value) => value is int ? value : int.tryParse(value.toString()) ?? 0)
+          .toList(),
+      pollTotalVotes: json['poll_total_votes'] as int? ?? 0,
+      pollMyVote: json['poll_my_vote'] as int?,
     );
   }
 }
