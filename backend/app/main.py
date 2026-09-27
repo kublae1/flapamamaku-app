@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.17"
+API_VERSION = "0.8.18"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 
@@ -146,6 +146,15 @@ class UserPayload(BaseModel):
     can_manage_users: bool = False
 
 
+class PushTokenPayload(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+    platform: str = Field(default="android", max_length=20)
+
+
+class PushTokenDeletePayload(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+
+
 TABLES: dict[str, tuple[str, type[BaseModel]]] = {
     "news": (
         """
@@ -269,6 +278,35 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                platform TEXT NOT NULL DEFAULT 'android',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                route TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                last_error TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -537,6 +575,30 @@ def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
         f"/api/members/{item['id']}/photo" if has_photo else ""
     )
     return item
+
+
+def _queue_push_notification(
+    db: sqlite3.Connection,
+    *,
+    kind: str,
+    title: str,
+    body: str = "",
+    route: str = "",
+) -> None:
+    db.execute(
+        """
+        INSERT INTO push_notifications (
+            kind, title, body, route, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            kind,
+            title[:200],
+            body[:500],
+            route,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
 
 
 def list_rows(resource: str) -> list[dict[str, Any]]:
@@ -1073,6 +1135,65 @@ def delete_gallery_snapshot(
         db.commit()
 
 
+@app.post("/api/push/register")
+def register_push_token(
+    payload: PushTokenPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    platform = payload.platform.lower().strip()
+    if platform not in {"android", "ios"}:
+        raise HTTPException(status_code=422, detail="Unbekannte Plattform")
+    with connect() as db:
+        db.execute(
+            """
+            INSERT INTO push_tokens (
+                user_id, token, platform, enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, 1, ?, ?)
+            ON CONFLICT(token) DO UPDATE SET
+                user_id = excluded.user_id,
+                platform = excluded.platform,
+                enabled = 1,
+                updated_at = excluded.updated_at
+            """,
+            (user["id"], payload.token, platform, now, now),
+        )
+        db.commit()
+    return {"registered": True}
+
+
+@app.delete("/api/push/register", status_code=204)
+def unregister_push_token(
+    payload: PushTokenDeletePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        db.execute(
+            "DELETE FROM push_tokens WHERE token = ? AND user_id = ?",
+            (payload.token, user["id"]),
+        )
+        db.commit()
+
+
+@app.get("/api/push/status")
+def push_status(
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        count = db.execute(
+            "SELECT COUNT(*) FROM push_tokens WHERE user_id = ? AND enabled = 1",
+            (user["id"],),
+        ).fetchone()[0]
+        queued = db.execute(
+            "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL",
+        ).fetchone()[0]
+    return {
+        "registered_devices": count,
+        "queued_notifications": queued,
+        "delivery_configured": False,
+    }
+
+
 @app.get("/api/content")
 def get_content(
     section: str | None = None,
@@ -1548,7 +1669,17 @@ def post_news(
     payload: NewsPayload,
     _: dict[str, Any] = Depends(require("can_news")),
 ) -> dict[str, Any]:
-    return create_row("news", payload)
+    item = create_row("news", payload)
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="news",
+            title=payload.title,
+            body=payload.text,
+            route="/news",
+        )
+        db.commit()
+    return item
 
 
 @app.put("/api/news/{row_id}")
@@ -1674,7 +1805,17 @@ def post_events(
     payload: EventPayload,
     _: dict[str, Any] = Depends(require("can_events")),
 ) -> dict[str, Any]:
-    return create_row("events", payload)
+    item = create_row("events", payload)
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="event",
+            title=f"Neuer Termin: {payload.title}",
+            body=" ".join(part for part in [payload.event_date, payload.time, payload.location] if part),
+            route="/events",
+        )
+        db.commit()
+    return item
 
 
 @app.put("/api/events/{row_id}")
@@ -1683,7 +1824,17 @@ def put_events(
     payload: EventPayload,
     _: dict[str, Any] = Depends(require("can_events")),
 ) -> dict[str, Any]:
-    return update_row("events", row_id, payload)
+    item = update_row("events", row_id, payload)
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="event_update",
+            title=f"Termin geändert: {payload.title}",
+            body=" ".join(part for part in [payload.event_date, payload.time, payload.location] if part),
+            route="/events",
+        )
+        db.commit()
+    return item
 
 
 @app.get("/api/events/{row_id}/registrations")
