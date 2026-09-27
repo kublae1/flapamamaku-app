@@ -63,6 +63,61 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           const Text(
+            'BENACHRICHTIGUNGEN',
+            style: TextStyle(
+              color: FlapBrand.gold,
+              fontWeight: FontWeight.w900,
+              fontSize: 11,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _SettingsCard(
+            child: SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 4,
+              ),
+              secondary: const Icon(
+                Icons.notifications_active_rounded,
+                color: FlapBrand.gold,
+                size: 29,
+              ),
+              title: const Text(
+                'Push-Benachrichtigungen',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: Text(
+                store.pushAvailable
+                    ? 'Neue News sowie neue oder geänderte Termine auf dem Handy anzeigen'
+                    : 'Push-Dienst wird vorbereitet und nach Firebase-Einrichtung verfügbar',
+                style: const TextStyle(color: Colors.white60),
+              ),
+              value: store.pushEnabled,
+              activeThumbColor: Colors.white,
+              activeTrackColor: FlapBrand.burgundy,
+              onChanged: store.pushAvailable
+                  ? (value) async {
+                      final ok = await store.setPushEnabled(value);
+                      if (!ok && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              store.authError ??
+                                  'Push-Benachrichtigungen konnten nicht geändert werden.',
+                            ),
+                          ),
+                        );
+                      }
+                    }
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 22),
+          const Text(
             'APP-INFORMATION',
             style: TextStyle(
               color: FlapBrand.gold,
