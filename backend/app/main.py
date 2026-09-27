@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.23"
+API_VERSION = "0.8.24"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -433,6 +433,17 @@ def init_db() -> None:
         _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "photo_data", "BLOB")
         _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "sort_order", "INTEGER NOT NULL DEFAULT 0")
+
+        member_order_rows = db.execute(
+            "SELECT id, sort_order FROM members ORDER BY name COLLATE NOCASE ASC, id ASC"
+        ).fetchall()
+        if member_order_rows and all(int(row["sort_order"] or 0) == 0 for row in member_order_rows):
+            for position, row in enumerate(member_order_rows, start=1):
+                db.execute(
+                    "UPDATE members SET sort_order = ? WHERE id = ?",
+                    (position, row["id"]),
+                )
         _ensure_column(
             db,
             "users",
@@ -927,6 +938,8 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
             "CASE WHEN event_date = '' THEN '9999-12-31' ELSE event_date END ASC, "
             "time ASC, id ASC"
         )
+    elif resource == "members":
+        order = "sort_order ASC, name COLLATE NOCASE ASC, id ASC"
     else:
         order = "name COLLATE NOCASE ASC, id ASC"
 
@@ -2461,7 +2474,57 @@ def post_members(
     payload: MemberPayload,
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> dict[str, Any]:
-    return create_row("members", payload)
+    item = create_row("members", payload)
+    with connect() as db:
+        max_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM members WHERE id != ?",
+            (item["id"],),
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE members SET sort_order = ? WHERE id = ?",
+            (int(max_order or 0) + 1, item["id"]),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ?",
+            (item["id"],),
+        ).fetchone()
+    return _serialize_member(row)
+
+
+@app.put("/api/members/order")
+def reorder_members(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        rows = db.execute(
+            f"SELECT id FROM members WHERE id IN ({','.join('?' for _ in payload.item_ids)})",
+            payload.item_ids,
+        ).fetchall()
+        if len(rows) != len(set(payload.item_ids)):
+            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
+
+        all_ids = [row["id"] for row in db.execute(
+            "SELECT id FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
+        ).fetchall()]
+        if set(all_ids) != set(payload.item_ids):
+            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist unvollständig")
+
+        for position, member_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE members SET sort_order = ? WHERE id = ?",
+                (position, member_id),
+            )
+        db.commit()
+        ordered = db.execute(
+            "SELECT * FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
+        ).fetchall()
+
+    return [_serialize_member(row) for row in ordered]
 
 
 @app.put("/api/members/{row_id}")
