@@ -809,7 +809,82 @@ class _PollList extends StatelessWidget {
               }),
               Text(
                 total == 1 ? '1 Stimme' : '$total Stimmen',
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF24272B),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0x18FFFFFF)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Teilnehmende ($total)',
+                      style: const TextStyle(
+                        color: FlapBrand.gold,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (item.pollVoters.isEmpty)
+                      const Text(
+                        'Noch niemand hat abgestimmt.',
+                        style: TextStyle(color: Colors.white54),
+                      )
+                    else
+                      ...item.pollVoters.map((voter) {
+                        final answer =
+                            voter.optionIndex >= 0 &&
+                                    voter.optionIndex < item.pollOptions.length
+                                ? item.pollOptions[voter.optionIndex]
+                                : 'Unbekannte Antwort';
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.person_outline_rounded,
+                                color: Colors.white54,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  voter.name,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Flexible(
+                                child: Text(
+                                  answer,
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(
+                                    color: FlapBrand.gold,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                  ],
+                ),
               ),
             ],
           ),
