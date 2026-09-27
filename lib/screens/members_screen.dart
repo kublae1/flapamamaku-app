@@ -5,7 +5,7 @@ import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 import 'content_detail_screens.dart';
 
-enum _MemberSort { name, role, since }
+enum _MemberSort { manual, name, role, since }
 
 class MembersScreen extends StatefulWidget {
   const MembersScreen({super.key});
@@ -16,14 +16,16 @@ class MembersScreen extends StatefulWidget {
 
 class _MembersScreenState extends State<MembersScreen> {
   String query = '';
-  String selectedRole = 'Alle';
+  int? selectedFilterId;
   String selectedLetter = '';
-  _MemberSort sort = _MemberSort.name;
+  _MemberSort sort = _MemberSort.manual;
 
   List<MemberItem> _filtered(List<MemberItem> source) {
     final q = query.trim().toLowerCase();
     final items = source.where((member) {
-      if (selectedRole != 'Alle' && member.role != selectedRole) return false;
+      if (selectedFilterId != null && !member.filterIds.contains(selectedFilterId)) {
+        return false;
+      }
       if (selectedLetter.isNotEmpty &&
           !member.name.trim().toUpperCase().startsWith(selectedLetter)) {
         return false;
@@ -40,6 +42,11 @@ class _MembersScreenState extends State<MembersScreen> {
 
     items.sort((a, b) {
       switch (sort) {
+        case _MemberSort.manual:
+          final byOrder = a.sortOrder.compareTo(b.sortOrder);
+          return byOrder != 0
+              ? byOrder
+              : a.name.toLowerCase().compareTo(b.name.toLowerCase());
         case _MemberSort.name:
           return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         case _MemberSort.role:
@@ -59,6 +66,8 @@ class _MembersScreenState extends State<MembersScreen> {
 
   String _sortLabel(_MemberSort value) {
     switch (value) {
+      case _MemberSort.manual:
+        return 'Docker-Reihenfolge';
       case _MemberSort.name:
         return 'Nachname / Name';
       case _MemberSort.role:
@@ -71,11 +80,10 @@ class _MembersScreenState extends State<MembersScreen> {
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final roles = <String>{
-      for (final member in store.members)
-        if (member.role.trim().isNotEmpty) member.role.trim(),
-    }.toList()
-      ..sort();
+    final activeFilters = store.memberFilters
+        .where((filter) => filter.active)
+        .toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     final items = _filtered(store.members);
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -134,27 +142,29 @@ class _MembersScreenState extends State<MembersScreen> {
                 ),
                 const SizedBox(height: 10),
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: selectedRole,
-                        dropdownColor: const Color(0xFF24272B),
-                        decoration: const InputDecoration(
-                          labelText: 'Filter',
-                          prefixIcon: Icon(Icons.filter_alt_outlined),
-                        ),
-                        items: [
-                          const DropdownMenuItem(value: 'Alle', child: Text('Alle')),
-                          ...roles.map(
-                            (role) => DropdownMenuItem(
-                              value: role,
-                              child: Text(role),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Alle'),
+                            selected: selectedFilterId == null,
+                            onSelected: (_) => setState(() => selectedFilterId = null),
+                          ),
+                          ...activeFilters.map(
+                            (filter) => ChoiceChip(
+                              label: Text(filter.label),
+                              selected: selectedFilterId == filter.id,
+                              onSelected: (_) => setState(() {
+                                selectedFilterId =
+                                    selectedFilterId == filter.id ? null : filter.id;
+                              }),
                             ),
                           ),
                         ],
-                        onChanged: (value) {
-                          if (value != null) setState(() => selectedRole = value);
-                        },
                       ),
                     ),
                     const SizedBox(width: 10),
