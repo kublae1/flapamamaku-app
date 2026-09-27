@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.22"
+API_VERSION = "0.8.23"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -883,6 +883,17 @@ def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
+CONTENT_PUSH_RULES = {
+    "documents": ("document", "Neues Dokument", "/more"),
+    "polls": ("poll", "Neue Umfrage", "/more"),
+    "photos": ("photo_album", "Neues Fotoalbum", "/more"),
+    "gallery": ("gallery", "Neuer Galerie-Inhalt", "/gallery"),
+    "motto": ("motto", "Neues Jahresmotto", "/more"),
+    "sujet": ("sujet", "Neues Sujet", "/more"),
+    "archive": ("archive", "Neuer Archiv-Inhalt", "/more"),
+}
+
+
 def _queue_push_notification(
     db: sqlite3.Connection,
     *,
@@ -1718,12 +1729,22 @@ def post_content(
                 now,
             ),
         )
+        rule = CONTENT_PUSH_RULES.get(payload.section)
+        if rule is not None:
+            kind, prefix, route = rule
+            _queue_push_notification(
+                db,
+                kind=kind,
+                title=f"{prefix}: {payload.title}",
+                body=payload.text,
+                route=route,
+            )
         db.commit()
         row = db.execute(
             "SELECT * FROM content_items WHERE id = ?",
             (cursor.lastrowid,),
         ).fetchone()
-    return _serialize_content(row)
+    return _serialize_content(row, user["id"])
 
 
 @app.put("/api/content/{row_id}")
