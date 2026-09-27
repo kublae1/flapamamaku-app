@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import '../models/app_data.dart';
 
@@ -244,11 +245,19 @@ class ApiService {
       _uri('/api/gallery/snapshots?expires_days=$expiresDays'),
     );
     request.headers.addAll(authHeaders);
+    final lowerName = filename.toLowerCase();
+    final mediaType = lowerName.endsWith('.png')
+        ? MediaType('image', 'png')
+        : lowerName.endsWith('.webp')
+            ? MediaType('image', 'webp')
+            : MediaType('image', 'jpeg');
+
     request.files.add(
       http.MultipartFile.fromBytes(
         'image',
         bytes,
         filename: filename.isEmpty ? 'snapshot.jpg' : filename,
+        contentType: mediaType,
       ),
     );
     final streamed = await request.send().timeout(const Duration(seconds: 30));
