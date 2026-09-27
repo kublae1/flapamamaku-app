@@ -48,6 +48,7 @@ class AppStore extends ChangeNotifier {
   final List<NewsItem> news;
   final List<EventItem> events;
   final List<MemberItem> members;
+  final List<MemberFilterItem> memberFilters = <MemberFilterItem>[];
   final List<ContentItem> content;
 
   Timer? _syncTimer;
@@ -398,6 +399,7 @@ class AppStore extends ChangeNotifier {
     members
       ..clear()
       ..addAll(initialMembers);
+    memberFilters.clear();
     content.clear();
     _sortNews();
     _sortEvents();
@@ -435,6 +437,7 @@ class AppStore extends ChangeNotifier {
       final remoteNews = await api.fetchNews();
       final remoteEvents = await api.fetchEvents();
       final remoteMembers = await api.fetchMembers();
+      final remoteMemberFilters = await api.fetchMemberFilters();
       final remoteContent = await api.fetchContent();
 
       news
@@ -446,6 +449,9 @@ class AppStore extends ChangeNotifier {
       members
         ..clear()
         ..addAll(remoteMembers);
+      memberFilters
+        ..clear()
+        ..addAll(remoteMemberFilters);
       content
         ..clear()
         ..addAll(remoteContent);
