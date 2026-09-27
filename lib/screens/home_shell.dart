@@ -49,6 +49,7 @@ class _HomeShellState extends State<HomeShell> {
       '/news' => 1,
       '/events' => 2,
       '/gallery' => 3,
+      '/more' => 4,
       _ => 0,
     };
     if (index != nextIndex) {
