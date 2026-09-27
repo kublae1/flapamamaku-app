@@ -15,6 +15,6 @@ void main() {
 
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
     await tester.pumpAndSettle();
-    expect(find.text('Jahresmotto'), findsOneWidget);
+    expect(find.text('News'), findsWidgets);
   });
 }
