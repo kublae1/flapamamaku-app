@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.24"
+API_VERSION = "0.8.25"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -116,6 +116,10 @@ class MemberPayload(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     role: str = "Präsident"
     since: str = ""
+    birth_date: str = ""
+    status: str = "Aktiv"
+    member_group: str = ""
+    engagement: str = ""
     partner_name: str = ""
     phone_mobile: str = ""
     phone_private: str = ""
@@ -222,6 +226,10 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             name TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'Präsident',
             since TEXT NOT NULL DEFAULT '',
+            birth_date TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'Aktiv',
+            member_group TEXT NOT NULL DEFAULT '',
+            engagement TEXT NOT NULL DEFAULT '',
             partner_name TEXT NOT NULL DEFAULT '',
             phone_mobile TEXT NOT NULL DEFAULT '',
             phone_private TEXT NOT NULL DEFAULT '',
@@ -432,6 +440,10 @@ def init_db() -> None:
         _ensure_column(db, "members", "occupation", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "birth_date", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "status", "TEXT NOT NULL DEFAULT 'Aktiv'")
+        _ensure_column(db, "members", "member_group", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "engagement", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "sort_order", "INTEGER NOT NULL DEFAULT 0")
         db.execute(
             """
