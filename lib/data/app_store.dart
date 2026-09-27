@@ -150,15 +150,9 @@ class AppStore extends ChangeNotifier {
       return;
     }
 
-    if (biometricEnabled && biometricAvailable) {
-      api.setToken(null);
-      biometricUnlockPending = true;
-      authReady = true;
-      isAuthenticated = false;
-      notifyListeners();
-      return;
-    }
-
+    // A valid secure session token keeps the member signed in until
+    // they explicitly log out or an administrator revokes the session.
+    biometricUnlockPending = false;
     await _restoreWithToken(token);
   }
 
