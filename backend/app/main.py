@@ -1928,6 +1928,32 @@ def post_content(
     _require_content_permission(payload.section, user)
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        if payload.section == "sujet":
+            archive_max = db.execute(
+                """
+                SELECT COALESCE(MAX(sort_order), 0)
+                FROM content_items
+                WHERE section = 'archive'
+                """
+            ).fetchone()[0]
+            current_sujets = db.execute(
+                """
+                SELECT id
+                FROM content_items
+                WHERE section = 'sujet'
+                ORDER BY sort_order ASC, id ASC
+                """
+            ).fetchall()
+            for offset, current_sujet in enumerate(current_sujets, start=1):
+                db.execute(
+                    """
+                    UPDATE content_items
+                    SET section = 'archive', sort_order = ?
+                    WHERE id = ?
+                    """,
+                    (archive_max + offset, current_sujet["id"]),
+                )
+
         max_order = db.execute(
             """
             SELECT COALESCE(MAX(sort_order), 0)
@@ -1988,10 +2014,38 @@ def put_content(
         if current is None:
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(current["section"], user)
+        if payload.section == "sujet":
+            archive_max = db.execute(
+                """
+                SELECT COALESCE(MAX(sort_order), 0)
+                FROM content_items
+                WHERE section = 'archive'
+                """
+            ).fetchone()[0]
+            other_sujets = db.execute(
+                """
+                SELECT id
+                FROM content_items
+                WHERE section = 'sujet' AND id != ?
+                ORDER BY sort_order ASC, id ASC
+                """,
+                (row_id,),
+            ).fetchall()
+            for offset, other_sujet in enumerate(other_sujets, start=1):
+                db.execute(
+                    """
+                    UPDATE content_items
+                    SET section = 'archive', sort_order = ?
+                    WHERE id = ?
+                    """,
+                    (archive_max + offset, other_sujet["id"]),
+                )
+
         db.execute(
             """
             UPDATE content_items
-            SET section = ?, title = ?, text = ?, link_url = ?, poll_options = ?
+            SET section = ?, title = ?, text = ?, link_url = ?, poll_options = ?,
+                sort_order = CASE WHEN ? = 'sujet' THEN 1 ELSE sort_order END
             WHERE id = ?
             """,
             (
@@ -2003,6 +2057,7 @@ def put_content(
                     [value.strip() for value in payload.poll_options if value.strip()],
                     ensure_ascii=False,
                 ) if payload.section == "polls" else "[]",
+                payload.section,
                 row_id,
             ),
         )
@@ -2197,14 +2252,21 @@ async def upload_content_images(
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(existing["section"], user)
         now = datetime.now(timezone.utc).isoformat()
-        max_order = db.execute(
-            """
-            SELECT COALESCE(MAX(sort_order), 0)
-            FROM content_images
-            WHERE content_id = ?
-            """,
-            (row_id,),
-        ).fetchone()[0]
+        if existing["section"] == "sujet":
+            db.execute(
+                "DELETE FROM content_images WHERE content_id = ?",
+                (row_id,),
+            )
+            max_order = 0
+        else:
+            max_order = db.execute(
+                """
+                SELECT COALESCE(MAX(sort_order), 0)
+                FROM content_images
+                WHERE content_id = ?
+                """,
+                (row_id,),
+            ).fetchone()[0]
         db.executemany(
             """
             INSERT INTO content_images (
