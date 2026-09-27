@@ -1,3 +1,22 @@
+class PollVoter {
+  final String name;
+  final int optionIndex;
+
+  const PollVoter({
+    required this.name,
+    required this.optionIndex,
+  });
+
+  factory PollVoter.fromJson(Map<String, dynamic> json) {
+    return PollVoter(
+      name: json['name']?.toString() ?? '',
+      optionIndex: json['option_index'] is int
+          ? json['option_index'] as int
+          : int.tryParse(json['option_index']?.toString() ?? '') ?? -1,
+    );
+  }
+}
+
 class ContentItem {
   final int? id;
   final String section;
@@ -19,6 +38,7 @@ class ContentItem {
   final List<int> pollCounts;
   final int pollTotalVotes;
   final int? pollMyVote;
+  final List<PollVoter> pollVoters;
 
   const ContentItem({
     this.id,
@@ -41,6 +61,7 @@ class ContentItem {
     this.pollCounts = const [],
     this.pollTotalVotes = 0,
     this.pollMyVote,
+    this.pollVoters = const [],
   });
 
   factory ContentItem.fromJson(Map<String, dynamic> json) {
@@ -71,6 +92,12 @@ class ContentItem {
           .toList(),
       pollTotalVotes: json['poll_total_votes'] as int? ?? 0,
       pollMyVote: json['poll_my_vote'] as int?,
+      pollVoters: (json['poll_voters'] as List<dynamic>? ?? const [])
+          .map((value) => PollVoter.fromJson(
+                Map<String, dynamic>.from(value as Map),
+              ))
+          .where((voter) => voter.name.isNotEmpty && voter.optionIndex >= 0)
+          .toList(),
     );
   }
 }
