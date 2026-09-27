@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -59,12 +60,16 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
     AppStore store,
     ContentItem item,
   ) async {
-    if (item.id == null) return;
+    if (item.id == null && item.snapshotId == null) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Eintrag löschen?'),
-        content: Text('„${item.title}“ wird inklusive Bilder gelöscht.'),
+        title: Text(item.isSnapshot ? 'Snapshot löschen?' : 'Eintrag löschen?'),
+        content: Text(
+          item.isSnapshot
+              ? '„${item.title}“ wird aus der Galerie gelöscht.'
+              : '„${item.title}“ wird inklusive Bilder gelöscht.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -149,6 +154,10 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
             imageUrls: [url],
             createdAt: item.createdAt,
             sortOrder: item.sortOrder,
+            snapshotId: item.snapshotId,
+            isSnapshot: item.isSnapshot,
+            canDelete: item.canDelete,
+            expiresAt: item.expiresAt,
           ),
         );
       }
@@ -168,6 +177,97 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _captureSnapshot(BuildContext context, AppStore store) async {
+    try {
+      final photo = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: 88,
+        maxWidth: 1920,
+      );
+      if (photo == null || !context.mounted) return;
+
+      final bytes = await photo.readAsBytes();
+      if (!context.mounted) return;
+
+      int selectedDays = 14;
+      final expiresDays = await showDialog<int>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Snapshot hochladen'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(
+                    bytes,
+                    height: 220,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  value: selectedDays,
+                  decoration: const InputDecoration(
+                    labelText: 'Automatisch löschen nach',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 7, child: Text('7 Tagen')),
+                    DropdownMenuItem(value: 14, child: Text('14 Tagen')),
+                    DropdownMenuItem(value: 30, child: Text('30 Tagen')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => selectedDays = value);
+                    }
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Abbrechen'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(dialogContext).pop(selectedDays),
+                icon: const Icon(Icons.cloud_upload_outlined),
+                label: const Text('Hochladen'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (expiresDays == null || !context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Snapshot wird hochgeladen …')),
+      );
+      await store.uploadGallerySnapshot(
+        bytes: bytes,
+        filename: photo.name,
+        expiresDays: expiresDays,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Snapshot gespeichert – automatische Löschung nach $expiresDays Tagen.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Snapshot konnte nicht gespeichert werden: $error')),
+      );
+    }
   }
 
   @override
@@ -203,6 +303,13 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
           ),
         ],
       ),
+      floatingActionButton: widget.section == 'gallery' && store.canGalleryUpload
+          ? FloatingActionButton.extended(
+              onPressed: () => _captureSnapshot(context, store),
+              icon: const Icon(Icons.camera_alt_rounded),
+              label: const Text('Foto aufnehmen'),
+            )
+          : null,
       body: RefreshIndicator(
         onRefresh: store.refreshFromServer,
         child: items.isEmpty
@@ -238,9 +345,13 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                         onOpenLink: item.linkUrl.isEmpty
                             ? null
                             : () => _openLink(context, item.linkUrl),
-                        onDelete: store.canEditContentSection(widget.section)
-                            ? () => _deleteItem(context, store, item)
-                            : null,
+                        onDelete: item.isSnapshot
+                            ? (item.canDelete
+                                ? () => _deleteItem(context, store, item)
+                                : null)
+                            : store.canEditContentSection(widget.section)
+                                ? () => _deleteItem(context, store, item)
+                                : null,
                       );
                     },
                   ),
