@@ -399,7 +399,16 @@
           <input type="hidden" name="id">
           <label>Name</label><input name="name" required>
           <label>Funktion</label><input name="role" value="Präsident">
-          <label>Mitglied seit</label><input name="since">
+          <label>Mitglied seit</label><input name="since" placeholder="z. B. 2012">
+          <label>Geburtsdatum</label><input name="birth_date" type="date">
+          <label>Status</label>
+          <select name="status">
+            <option value="Aktiv">Aktiv</option>
+            <option value="Ehrenmitglied">Ehrenmitglied</option>
+            <option value="Verstorben">Verstorben</option>
+          </select>
+          <label>Gruppe / Ressort</label><input name="member_group" placeholder="z. B. Vorstand, Wagenbau">
+          <label>Kurz-Engagement</label><textarea name="engagement" placeholder="z. B. Wagenbau, Organisation, Musik …"></textarea>
           <label>Partnerin / Partner</label><input name="partner_name">
           <label>Mobil</label><input name="phone_mobile">
           <label>Telefon privat</label><input name="phone_private">
@@ -637,7 +646,7 @@ const resources = {
   news: ["title", "text", "date", "image_url"],
   events: ["event_date", "day", "month", "title", "location", "time"],
   members: [
-    "name", "role", "since", "partner_name",
+    "name", "role", "since", "birth_date", "status", "member_group", "engagement", "partner_name",
     "phone_mobile", "phone_private", "phone_work",
     "email", "address", "occupation", "employer", "employer_url"
   ],
