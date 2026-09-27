@@ -115,6 +115,9 @@ jobs:
           if ! grep -q 'android.permission.USE_BIOMETRIC' "$MANIFEST"; then
             sed -i '/<manifest/a\    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>' "$MANIFEST"
           fi
+          if ! grep -q 'android.permission.POST_NOTIFICATIONS' "$MANIFEST"; then
+            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' "$MANIFEST"
+          fi
           if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
             sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
           fi
@@ -298,39 +301,63 @@ jobs:
           API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+          FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
         run: |
           flutter build apk --release \
             --build-name="$APP_VERSION" \
             --build-number="$APP_BUILD_NUMBER" \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$APP_VERSION" \
-            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER"
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
 
       - name: Build split release APKs
         env:
           API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+          FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
         run: |
           flutter build apk --release --split-per-abi \
             --build-name="$APP_VERSION" \
             --build-number="$APP_BUILD_NUMBER" \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$APP_VERSION" \
-            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER"
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
 
       - name: Build Play Store AAB
         env:
           API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+          FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
         run: |
           flutter build appbundle --release \
             --build-name="$APP_VERSION" \
             --build-number="$APP_BUILD_NUMBER" \
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$APP_VERSION" \
-            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER"
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
 
       - name: Verify permanent signing is configured for distributable builds
         if: github.ref == 'refs/heads/main'
