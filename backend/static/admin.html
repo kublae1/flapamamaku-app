@@ -1268,6 +1268,7 @@ function updateContentFormMode() {
     .classList.toggle("hidden", section !== "polls");
   document.getElementById("content-images-wrap")
     .classList.toggle("hidden", section === "documents");
+  form.elements.image_files.multiple = section !== "gallery";
   if (section !== "documents") {
     form.elements.document_file.value = "";
     document.getElementById("document-current").textContent = "";
