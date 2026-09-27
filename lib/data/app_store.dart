@@ -104,7 +104,6 @@ class AppStore extends ChangeNotifier {
   bool canEditContentSection(String section) {
     switch (section) {
       case 'hero':
-      case 'motto':
       case 'sujet':
       case 'archive':
       case 'photos':
