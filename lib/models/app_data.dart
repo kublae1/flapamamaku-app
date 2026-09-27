@@ -108,6 +108,7 @@ class NewsItem {
   final String title;
   final String text;
   final String createdAt;
+  final int sortOrder;
   final String imageAsset;
   final String imageUrl;
 
@@ -117,6 +118,7 @@ class NewsItem {
     this.text, {
     this.id,
     required this.createdAt,
+    this.sortOrder = 0,
     this.imageAsset = '',
     this.imageUrl = '',
   });
@@ -128,6 +130,7 @@ class NewsItem {
       json['text']?.toString() ?? '',
       id: json['id'] as int?,
       createdAt: json['created_at']?.toString() ?? '',
+      sortOrder: json['sort_order'] as int? ?? 0,
       imageUrl: json['image_url']?.toString() ?? '',
     );
   }
