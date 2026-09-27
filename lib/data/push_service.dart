@@ -11,8 +11,11 @@ class PushService {
 
   final ApiService api;
   StreamSubscription<String>? _tokenSubscription;
+  StreamSubscription<RemoteMessage>? _openedSubscription;
   String? _registeredToken;
+  String? _pendingRoute;
   bool _initialized = false;
+  void Function(String route)? onRoute;
 
   static const _apiKey = String.fromEnvironment('FIREBASE_API_KEY');
   static const _appId = String.fromEnvironment('FIREBASE_APP_ID');
@@ -55,6 +58,20 @@ class PushService {
       if (token == null || token.isEmpty) return false;
       await _register(token);
 
+      final initialMessage = await messaging.getInitialMessage();
+      final initialRoute = initialMessage?.data['route']?.toString() ?? '';
+      if (initialRoute.isNotEmpty) {
+        _dispatchRoute(initialRoute);
+      }
+
+      await _openedSubscription?.cancel();
+      _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen((message) {
+        final route = message.data['route']?.toString() ?? '';
+        if (route.isNotEmpty) {
+          _dispatchRoute(route);
+        }
+      });
+
       await _tokenSubscription?.cancel();
       _tokenSubscription = messaging.onTokenRefresh.listen((newToken) async {
         try {
@@ -65,6 +82,21 @@ class PushService {
     } catch (_) {
       return false;
     }
+  }
+
+  void _dispatchRoute(String route) {
+    final handler = onRoute;
+    if (handler != null) {
+      handler(route);
+    } else {
+      _pendingRoute = route;
+    }
+  }
+
+  String? takePendingRoute() {
+    final route = _pendingRoute;
+    _pendingRoute = null;
+    return route;
   }
 
   Future<void> _register(String token) async {
@@ -78,6 +110,8 @@ class PushService {
   Future<void> disable() async {
     await _tokenSubscription?.cancel();
     _tokenSubscription = null;
+    await _openedSubscription?.cancel();
+    _openedSubscription = null;
 
     final token = _registeredToken;
     _registeredToken = null;
@@ -91,5 +125,7 @@ class PushService {
   Future<void> dispose() async {
     await _tokenSubscription?.cancel();
     _tokenSubscription = null;
+    await _openedSubscription?.cancel();
+    _openedSubscription = null;
   }
 }
