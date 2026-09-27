@@ -1,9 +1,12 @@
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -11,6 +14,8 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import service_account
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +25,10 @@ SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
 API_VERSION = "0.8.18"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv(
+    "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_JSON",
+    "",
+).strip()
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
@@ -313,6 +322,20 @@ def init_db() -> None:
 
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS push_deliveries (
+                notification_id INTEGER NOT NULL,
+                token_id INTEGER NOT NULL,
+                sent_at TEXT,
+                last_error TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(notification_id, token_id),
+                FOREIGN KEY(notification_id) REFERENCES push_notifications(id),
+                FOREIGN KEY(token_id) REFERENCES push_tokens(id)
+            )
+            """
+        )
+
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 member_id INTEGER,
@@ -468,10 +491,211 @@ async def _snapshot_cleanup_loop() -> None:
             db.commit()
 
 
+def _firebase_access() -> tuple[str, str] | None:
+    if not FIREBASE_SERVICE_ACCOUNT_JSON:
+        return None
+    try:
+        info = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
+        credentials = service_account.Credentials.from_service_account_info(
+            info,
+            scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+        )
+        credentials.refresh(GoogleAuthRequest())
+        project_id = str(info.get("project_id") or "").strip()
+        if not credentials.token or not project_id:
+            return None
+        return credentials.token, project_id
+    except Exception:
+        return None
+
+
+def _send_fcm_message(
+    *,
+    access_token: str,
+    project_id: str,
+    device_token: str,
+    title: str,
+    body: str,
+    kind: str,
+    route: str,
+) -> tuple[bool, bool, str]:
+    payload = {
+        "message": {
+            "token": device_token,
+            "notification": {
+                "title": title,
+                "body": body,
+            },
+            "data": {
+                "kind": kind,
+                "route": route,
+            },
+            "android": {
+                "priority": "high",
+            },
+            "apns": {
+                "headers": {
+                    "apns-priority": "10",
+                },
+            },
+        },
+    }
+    request = urllib.request.Request(
+        f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response.read()
+        return True, False, ""
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        invalid = exc.code in {400, 404} and (
+            "UNREGISTERED" in detail
+            or "registration-token-not-registered" in detail
+        )
+        return False, invalid, f"HTTP {exc.code}: {detail}"
+    except Exception as exc:
+        return False, False, str(exc)[:1000]
+
+
+def _deliver_pending_push() -> None:
+    firebase = _firebase_access()
+    if firebase is None:
+        return
+    access_token, project_id = firebase
+    now = datetime.now(timezone.utc).isoformat()
+
+    with connect() as db:
+        notifications = db.execute(
+            """
+            SELECT *
+            FROM push_notifications
+            WHERE sent_at IS NULL
+            ORDER BY id ASC
+            LIMIT 10
+            """
+        ).fetchall()
+
+        for notification in notifications:
+            tokens = db.execute(
+                """
+                SELECT *
+                FROM push_tokens
+                WHERE enabled = 1
+                ORDER BY id ASC
+                """
+            ).fetchall()
+            if not tokens:
+                continue
+
+            had_transient_error = False
+            for token in tokens:
+                delivered = db.execute(
+                    """
+                    SELECT sent_at
+                    FROM push_deliveries
+                    WHERE notification_id = ? AND token_id = ?
+                    """,
+                    (notification["id"], token["id"]),
+                ).fetchone()
+                if delivered is not None and delivered["sent_at"]:
+                    continue
+
+                ok, invalid, error = _send_fcm_message(
+                    access_token=access_token,
+                    project_id=project_id,
+                    device_token=token["token"],
+                    title=notification["title"],
+                    body=notification["body"],
+                    kind=notification["kind"],
+                    route=notification["route"],
+                )
+
+                if invalid:
+                    db.execute("DELETE FROM push_tokens WHERE id = ?", (token["id"],))
+                    db.execute(
+                        """
+                        DELETE FROM push_deliveries
+                        WHERE notification_id = ? AND token_id = ?
+                        """,
+                        (notification["id"], token["id"]),
+                    )
+                    continue
+
+                db.execute(
+                    """
+                    INSERT INTO push_deliveries (
+                        notification_id, token_id, sent_at, last_error
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(notification_id, token_id) DO UPDATE SET
+                        sent_at = excluded.sent_at,
+                        last_error = excluded.last_error
+                    """,
+                    (
+                        notification["id"],
+                        token["id"],
+                        now if ok else None,
+                        error,
+                    ),
+                )
+                if not ok:
+                    had_transient_error = True
+
+            remaining = db.execute(
+                """
+                SELECT COUNT(*)
+                FROM push_tokens pt
+                WHERE pt.enabled = 1
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM push_deliveries pd
+                      WHERE pd.notification_id = ?
+                        AND pd.token_id = pt.id
+                        AND pd.sent_at IS NOT NULL
+                  )
+                """,
+                (notification["id"],),
+            ).fetchone()[0]
+
+            if remaining == 0 and not had_transient_error:
+                db.execute(
+                    """
+                    UPDATE push_notifications
+                    SET sent_at = ?, last_error = ''
+                    WHERE id = ?
+                    """,
+                    (now, notification["id"]),
+                )
+            elif had_transient_error:
+                db.execute(
+                    """
+                    UPDATE push_notifications
+                    SET last_error = 'Mindestens eine Zustellung wird erneut versucht'
+                    WHERE id = ?
+                    """,
+                    (notification["id"],),
+                )
+        db.commit()
+
+
+async def _push_delivery_loop() -> None:
+    while True:
+        await asyncio.sleep(15)
+        if FIREBASE_SERVICE_ACCOUNT_JSON:
+            await asyncio.to_thread(_deliver_pending_push)
+
+
 @app.on_event("startup")
 async def startup() -> None:
     init_db()
     asyncio.create_task(_snapshot_cleanup_loop())
+    asyncio.create_task(_push_delivery_loop())
 
 
 def _hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
@@ -1190,7 +1414,7 @@ def push_status(
     return {
         "registered_devices": count,
         "queued_notifications": queued,
-        "delivery_configured": False,
+        "delivery_configured": bool(FIREBASE_SERVICE_ACCOUNT_JSON),
     }
 
 
