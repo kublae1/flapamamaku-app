@@ -28,6 +28,7 @@ class _HomeShellState extends State<HomeShell> {
       icon: Icons.photo_library_outlined,
       individualImages: true,
     ),
+    SizedBox.shrink(),
     MoreScreen(),
   ];
 
