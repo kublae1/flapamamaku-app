@@ -152,6 +152,29 @@ class EventItem {
   }
 }
 
+class MemberFilterItem {
+  final int id;
+  final String label;
+  final bool active;
+  final int sortOrder;
+
+  const MemberFilterItem({
+    required this.id,
+    required this.label,
+    required this.active,
+    required this.sortOrder,
+  });
+
+  factory MemberFilterItem.fromJson(Map<String, dynamic> json) {
+    return MemberFilterItem(
+      id: json['id'] as int? ?? 0,
+      label: json['label']?.toString() ?? '',
+      active: json['active'] == true,
+      sortOrder: json['sort_order'] as int? ?? 0,
+    );
+  }
+}
+
 class MemberItem {
   final int? id;
   final String name;
@@ -162,6 +185,7 @@ class MemberItem {
   final String memberGroup;
   final String engagement;
   final int sortOrder;
+  final List<int> filterIds;
   final String partnerName;
   final String phoneMobile;
   final String phonePrivate;
@@ -183,6 +207,7 @@ class MemberItem {
     this.memberGroup = '',
     this.engagement = '',
     this.sortOrder = 0,
+    this.filterIds = const [],
     this.partnerName = '',
     this.phoneMobile = '',
     this.phonePrivate = '',
@@ -207,6 +232,10 @@ class MemberItem {
       memberGroup: json['member_group']?.toString() ?? '',
       engagement: json['engagement']?.toString() ?? '',
       sortOrder: json['sort_order'] as int? ?? 0,
+      filterIds: (json['filter_ids'] as List<dynamic>? ?? const [])
+          .map((value) => value is int ? value : int.tryParse(value.toString()) ?? 0)
+          .where((value) => value > 0)
+          .toList(),
       partnerName: json['partner_name']?.toString() ?? '',
       phoneMobile:
           json['phone_mobile']?.toString().isNotEmpty == true
