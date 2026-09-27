@@ -2506,11 +2506,10 @@ async def upload_news_image(
     if image.content_type not in allowed_types:
         raise HTTPException(status_code=415, detail="Unsupported image type")
 
-    data = await image.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
+    data, optimized_mime = _optimize_image(
+        await image.read(),
+        image.content_type or "",
+    )
 
     with connect() as db:
         cursor = db.execute(
@@ -2519,7 +2518,7 @@ async def upload_news_image(
             SET image_data = ?, image_mime = ?, image_url = ''
             WHERE id = ?
             """,
-            (data, image.content_type, row_id),
+            (data, optimized_mime, row_id),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
