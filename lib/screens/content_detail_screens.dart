@@ -378,6 +378,33 @@ class MemberDetailScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _openFlapChat(BuildContext context) async {
+    final store = AppStoreScope.of(context);
+    final link = store
+        .contentFor('whatsapp')
+        .map((item) => item.linkUrl.trim())
+        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+
+    if (link.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('FLAPAMAMAKU Chat-Link ist noch nicht hinterlegt.'),
+        ),
+      );
+      return;
+    }
+
+    final uri = Uri.tryParse(link);
+    if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'http')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('FLAPAMAMAKU Chat-Link ist ungültig.')),
+      );
+      return;
+    }
+
+    await _launch(context, uri);
+  }
+
   Future<void> _maps(BuildContext context) async {
     if (member.address.isEmpty) return;
     await _launch(
@@ -498,6 +525,12 @@ class MemberDetailScreen extends StatelessWidget {
                       label: 'Nachricht',
                       enabled: member.phoneMobile.isNotEmpty,
                       onTap: () => _message(context),
+                    ),
+                    _MemberQuickAction(
+                      icon: Icons.forum_outlined,
+                      label: 'FLAPAMAMAKU Chat',
+                      enabled: true,
+                      onTap: () => _openFlapChat(context),
                     ),
                   ],
                 ),
@@ -627,7 +660,7 @@ class _MemberQuickAction extends StatelessWidget {
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(14),
       child: SizedBox(
-        width: 92,
+        width: 78,
         height: 68,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -642,7 +675,7 @@ class _MemberQuickAction extends StatelessWidget {
               label,
               style: TextStyle(
                 color: enabled ? Colors.white70 : Colors.white24,
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: FontWeight.w700,
               ),
             ),
