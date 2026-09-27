@@ -157,6 +157,11 @@ class MemberItem {
   final String name;
   final String role;
   final String since;
+  final String birthDate;
+  final String status;
+  final String memberGroup;
+  final String engagement;
+  final int sortOrder;
   final String partnerName;
   final String phoneMobile;
   final String phonePrivate;
@@ -173,6 +178,11 @@ class MemberItem {
     this.role,
     this.since, {
     this.id,
+    this.birthDate = '',
+    this.status = 'Aktiv',
+    this.memberGroup = '',
+    this.engagement = '',
+    this.sortOrder = 0,
     this.partnerName = '',
     this.phoneMobile = '',
     this.phonePrivate = '',
@@ -192,6 +202,11 @@ class MemberItem {
       json['role']?.toString() ?? 'Präsident',
       json['since']?.toString() ?? '',
       id: json['id'] as int?,
+      birthDate: json['birth_date']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'Aktiv',
+      memberGroup: json['member_group']?.toString() ?? '',
+      engagement: json['engagement']?.toString() ?? '',
+      sortOrder: json['sort_order'] as int? ?? 0,
       partnerName: json['partner_name']?.toString() ?? '',
       phoneMobile:
           json['phone_mobile']?.toString().isNotEmpty == true
