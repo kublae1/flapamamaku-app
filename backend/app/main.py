@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -22,13 +23,25 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.19"
+API_VERSION = "0.8.20"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv(
     "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_JSON",
     "",
 ).strip()
+if not FIREBASE_SERVICE_ACCOUNT_JSON:
+    firebase_b64 = os.getenv(
+        "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_B64",
+        "",
+    ).strip()
+    if firebase_b64:
+        try:
+            FIREBASE_SERVICE_ACCOUNT_JSON = base64.b64decode(
+                firebase_b64
+            ).decode("utf-8")
+        except Exception:
+            FIREBASE_SERVICE_ACCOUNT_JSON = ""
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
