@@ -209,6 +209,49 @@ class ApiService {
     _ensureSuccess(response);
   }
 
+  Future<ContentItem> uploadGallerySnapshot({
+    required Uint8List bytes,
+    required String filename,
+    required int expiresDays,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      _uri('/api/gallery/snapshots?expires_days=$expiresDays'),
+    );
+    request.headers.addAll(authHeaders);
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'image',
+        bytes,
+        filename: filename.isEmpty ? 'snapshot.jpg' : filename,
+      ),
+    );
+    final streamed = await request.send().timeout(const Duration(seconds: 30));
+    final response = await http.Response.fromStream(streamed);
+    _ensureSuccess(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final imageUrls = (json['image_urls'] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .map((value) => value.startsWith('/') ? '$baseUrl$value' : value)
+        .toList();
+    json['image_urls'] = imageUrls;
+    final imageUrl = json['image_url']?.toString() ?? '';
+    if (imageUrl.startsWith('/')) {
+      json['image_url'] = '$baseUrl$imageUrl';
+    }
+    return ContentItem.fromJson(json);
+  }
+
+  Future<void> deleteGallerySnapshot(int snapshotId) async {
+    final response = await http
+        .delete(
+          _uri('/api/gallery/snapshots/$snapshotId'),
+          headers: authHeaders,
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
   Future<NewsItem> saveNews(NewsItem item) async {
     final body = jsonEncode({
       'title': item.title,
