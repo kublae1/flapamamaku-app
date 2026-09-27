@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_data.dart';
 import 'api_service.dart';
+import 'push_service.dart';
 
 enum UserRole {
   admin,
@@ -21,6 +22,7 @@ class AppStore extends ChangeNotifier {
         events = List<EventItem>.from(eventItems),
         members = List<MemberItem>.from(initialMembers),
         content = <ContentItem>[] {
+    pushService = PushService(this.api);
     _sortNews();
     _sortEvents();
     _loadAppearance();
@@ -40,6 +42,7 @@ class AppStore extends ChangeNotifier {
   }
 
   final ApiService api;
+  late final PushService pushService;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final LocalAuthentication _localAuth = LocalAuthentication();
   final List<NewsItem> news;
@@ -61,6 +64,8 @@ class AppStore extends ChangeNotifier {
   bool biometricAvailable = false;
   bool biometricUnlockPending = false;
   bool isBiometricAuthenticating = false;
+  bool pushEnabled = false;
+  bool pushAvailable = false;
   Map<String, dynamic>? currentUser;
   String? authError;
   int themeColorValue = 0xFF8A101B;
@@ -131,6 +136,8 @@ class AppStore extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     biometricEnabled =
         prefs.getBool('flapamamaku_biometric_enabled') ?? false;
+    pushEnabled = prefs.getBool('flapamamaku_push_enabled') ?? false;
+    pushAvailable = pushService.isConfigured;
 
     try {
       biometricAvailable =
@@ -164,6 +171,9 @@ class AppStore extends ChangeNotifier {
       biometricUnlockPending = false;
       authError = null;
       await refreshFromServer();
+      if (pushEnabled) {
+        await pushService.enable();
+      }
     } catch (_) {
       api.setToken(null);
       currentUser = null;
@@ -252,6 +262,39 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> setPushEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!enabled) {
+      await pushService.disable();
+      pushEnabled = false;
+      await prefs.setBool('flapamamaku_push_enabled', false);
+      notifyListeners();
+      return true;
+    }
+
+    pushAvailable = pushService.isConfigured;
+    if (!pushAvailable) {
+      authError = 'Push-Dienst ist noch nicht vollständig eingerichtet.';
+      notifyListeners();
+      return false;
+    }
+
+    final ok = await pushService.enable();
+    if (!ok) {
+      authError =
+          'Push-Benachrichtigungen konnten nicht aktiviert werden. Bitte Berechtigung prüfen.';
+      notifyListeners();
+      return false;
+    }
+
+    pushEnabled = true;
+    authError = null;
+    await prefs.setBool('flapamamaku_push_enabled', true);
+    notifyListeners();
+    return true;
+  }
+
   Future<bool> setBiometricEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -317,6 +360,9 @@ class AppStore extends ChangeNotifier {
       );
       isAuthenticated = true;
       await refreshFromServer();
+      if (pushEnabled) {
+        await pushService.enable();
+      }
       return true;
     } catch (error) {
       authError = 'Benutzername oder Passwort falsch.';
@@ -331,6 +377,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await pushService.disable();
     try {
       await api.logout();
     } catch (_) {
