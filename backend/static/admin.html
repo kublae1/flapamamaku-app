@@ -361,7 +361,10 @@
     <section id="news" class="panel active">
       <div class="grid">
         <form class="card" id="news-form">
-          <h2>News</h2>
+          <div class="preview-heading">
+            <h2>News</h2>
+            <button type="button" id="news-new-button">+ Neue News</button>
+          </div>
           <input type="hidden" name="id">
           <label>Titel</label><input name="title" required>
           <label>Text</label><textarea name="text" required></textarea>
@@ -855,11 +858,33 @@ async function moveOrderedResource(resource, items, fromIndex, toIndex) {
   }
 }
 
+function resetNewsForm() {
+  const form = document.getElementById("news-form");
+  form.reset();
+  form.elements.id.value = "";
+  form.elements.image_url.value = "";
+  form.elements.image_file.value = "";
+  form.elements.date.value = new Date().toLocaleDateString("de-CH");
+}
+
+document.getElementById("news-new-button").addEventListener("click", () => {
+  resetNewsForm();
+  document.getElementById("news-form").scrollIntoView({behavior:"smooth"});
+  document.getElementById("news-form").elements.title.focus();
+});
+
 function edit(resource, item) {
   const form = document.getElementById(`${resource}-form`);
   form.elements.id.value = item.id;
   resources[resource].forEach(key => {
-    if (form.elements[key]) form.elements[key].value = item[key] || "";
+    if (!form.elements[key]) return;
+    if (resource === "news" && key === "image_url") {
+      const value = item[key] || "";
+      form.elements[key].value =
+        value.startsWith("/api/news/") ? "" : value;
+      return;
+    }
+    form.elements[key].value = item[key] || "";
   });
 
   if (resource === "members") {
@@ -1143,8 +1168,12 @@ Object.keys(resources).forEach(resource => {
         await api(`/api/news/${saved.id}/image`, {method:"POST", body:upload});
       }
     }
-    form.reset();
-    form.elements.id.value = "";
+    if (resource === "news") {
+      resetNewsForm();
+    } else {
+      form.reset();
+      form.elements.id.value = "";
+    }
     if (resource === "members") {
       form.elements.role.value = "Präsident";
       form.elements.status.value = "Aktiv";
@@ -1162,7 +1191,6 @@ Object.keys(resources).forEach(resource => {
         });
       }
     }
-    if (resource === "news") form.elements.date.value = new Date().toLocaleDateString("de-CH");
     await load(resource);
     if (resource === "members") {
       await loadMemberFilters();
@@ -1771,8 +1799,7 @@ async function startAdmin() {
   };
 
   if (currentUser.can_news) {
-    document.querySelector("#news-form [name=date]").value =
-      new Date().toLocaleDateString("de-CH");
+    resetNewsForm();
     await loadSafely("News", () => load("news"));
   }
   if (currentUser.can_events) {
