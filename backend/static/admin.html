@@ -759,7 +759,7 @@ async function load(resource) {
   const items = await api(`/api/${resource}`);
   const list = document.getElementById(`${resource}-list`);
   list.innerHTML = "";
-  items.forEach(item => {
+  items.forEach((item, index) => {
     const div = document.createElement("div");
     div.className = "entry";
     div.innerHTML = `
@@ -776,11 +776,35 @@ async function load(resource) {
         <button type="button" class="edit">Bearbeiten</button>
         <button type="button" class="delete">Löschen</button>
       </div>`;
+    const up = div.querySelector(".move-up");
+    const down = div.querySelector(".move-down");
+    if (resource === "members") {
+      up.disabled = index === 0;
+      down.disabled = index === items.length - 1;
+      up.onclick = () => moveMember(items, index, index - 1);
+      down.onclick = () => moveMember(items, index, index + 1);
+    } else {
+      up.classList.add("hidden");
+      down.classList.add("hidden");
+    }
     div.querySelector(".edit").onclick = () => edit(resource, item);
     div.querySelector(".delete").onclick = () => remove(resource, item.id);
     list.appendChild(div);
   });
   return items;
+}
+
+async function moveMember(items, fromIndex, toIndex) {
+  if (toIndex < 0 || toIndex >= items.length) return;
+  const reordered = [...items];
+  const [moved] = reordered.splice(fromIndex, 1);
+  reordered.splice(toIndex, 0, moved);
+  await api("/api/members/order", {
+    method: "PUT",
+    body: JSON.stringify({item_ids: reordered.map(item => item.id)}),
+  });
+  await load("members");
+  await loadMembersForSelects();
 }
 
 function edit(resource, item) {
