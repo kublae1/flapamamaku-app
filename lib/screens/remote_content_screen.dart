@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -183,12 +184,47 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
     try {
       final photo = await ImagePicker().pickImage(
         source: ImageSource.camera,
-        imageQuality: 88,
-        maxWidth: 1920,
+        imageQuality: 82,
+        maxWidth: 1600,
       );
       if (photo == null || !context.mounted) return;
 
-      final bytes = await photo.readAsBytes();
+      var bytes = await photo.readAsBytes();
+
+      const maxBytes = 2 * 1024 * 1024;
+      if (bytes.length > maxBytes) {
+        for (final quality in [75, 68, 60, 52, 45]) {
+          bytes = await FlutterImageCompress.compressWithList(
+            bytes,
+            minWidth: 1280,
+            quality: quality,
+            format: CompressFormat.jpeg,
+          );
+          if (bytes.length <= maxBytes) break;
+        }
+      }
+
+      if (bytes.length > maxBytes) {
+        bytes = await FlutterImageCompress.compressWithList(
+          bytes,
+          minWidth: 1024,
+          quality: 42,
+          format: CompressFormat.jpeg,
+        );
+      }
+
+      if (bytes.length > maxBytes) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Foto konnte nicht unter 2 MB verkleinert werden. Bitte nochmals aufnehmen.',
+            ),
+          ),
+        );
+        return;
+      }
+
       if (!context.mounted) return;
 
       int selectedDays = 14;
@@ -251,7 +287,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
       );
       await store.uploadGallerySnapshot(
         bytes: bytes,
-        filename: photo.name,
+        filename: 'snapshot.jpg',
         expiresDays: expiresDays,
       );
       if (!context.mounted) return;
