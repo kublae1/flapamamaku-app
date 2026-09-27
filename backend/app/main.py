@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.25"
+API_VERSION = "0.8.26"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -120,6 +120,7 @@ class MemberPayload(BaseModel):
     status: str = "Aktiv"
     member_group: str = ""
     engagement: str = ""
+    filter_ids: list[int] = []
     partner_name: str = ""
     phone_mobile: str = ""
     phone_private: str = ""
@@ -129,6 +130,11 @@ class MemberPayload(BaseModel):
     occupation: str = ""
     employer: str = ""
     employer_url: str = ""
+
+
+class MemberFilterPayload(BaseModel):
+    label: str = Field(min_length=1, max_length=80)
+    active: bool = True
 
 
 class ContentPayload(BaseModel):
@@ -275,6 +281,29 @@ def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS member_filters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS member_filter_links (
+                member_id INTEGER NOT NULL,
+                filter_id INTEGER NOT NULL,
+                PRIMARY KEY(member_id, filter_id),
+                FOREIGN KEY(member_id) REFERENCES members(id),
+                FOREIGN KEY(filter_id) REFERENCES member_filters(id)
+            )
+            """
+        )
 
         db.execute(
             """
@@ -538,6 +567,17 @@ def init_db() -> None:
                 """,
                 (legacy["id"],),
             )
+
+        if db.execute("SELECT COUNT(*) FROM member_filters").fetchone()[0] == 0:
+            now = datetime.now(timezone.utc).isoformat()
+            for position, label in enumerate(["Aktiv", "Ehrenmitglied", "Vorstand", "Wagenbau", "Verstorben"], start=1):
+                db.execute(
+                    """
+                    INSERT INTO member_filters (label, active, sort_order, created_at)
+                    VALUES (?, 1, ?, ?)
+                    """,
+                    (label, position, now),
+                )
 
         member_columns = _columns(db, "members")
         if "phone" in member_columns:
@@ -912,6 +952,19 @@ def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
     item["photo_url"] = (
         f"/api/members/{item['id']}/photo" if has_photo else ""
     )
+    with connect() as db:
+        item["filter_ids"] = [
+            int(link["filter_id"])
+            for link in db.execute(
+                """
+                SELECT filter_id
+                FROM member_filter_links
+                WHERE member_id = ?
+                ORDER BY filter_id ASC
+                """,
+                (item["id"],),
+            ).fetchall()
+        ]
     return item
 
 
@@ -979,6 +1032,7 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
 def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     table_or_404(resource)
     data = payload.model_dump()
+    member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     data["created_at"] = datetime.now(timezone.utc).isoformat()
     if resource == "members":
         with connect() as db:
@@ -993,6 +1047,12 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     )
     with connect() as db:
         cursor = db.execute(sql, [data[column] for column in columns])
+        if resource == "members":
+            for filter_id in sorted(set(member_filter_ids)):
+                db.execute(
+                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
+                    (cursor.lastrowid, filter_id),
+                )
         db.commit()
         row = db.execute(
             f"SELECT * FROM {resource} WHERE id = ?",
@@ -1008,6 +1068,7 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
 def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]:
     table_or_404(resource)
     data = payload.model_dump()
+    member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     assignments = ", ".join(f"{column} = ?" for column in data)
     with connect() as db:
         cursor = db.execute(
@@ -1016,6 +1077,13 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
+        if resource == "members":
+            db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+            for filter_id in sorted(set(member_filter_ids)):
+                db.execute(
+                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
+                    (row_id, filter_id),
+                )
         db.commit()
         row = db.execute(
             f"SELECT * FROM {resource} WHERE id = ?",
@@ -2488,6 +2556,126 @@ def delete_events(
     delete_row("events", row_id)
 
 
+@app.get("/api/member-filters")
+def get_member_filters(
+    _: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute(
+            """
+            SELECT id, label, active, sort_order
+            FROM member_filters
+            ORDER BY sort_order ASC, label COLLATE NOCASE ASC, id ASC
+            """
+        ).fetchall()
+    return [
+        {
+            "id": int(row["id"]),
+            "label": row["label"],
+            "active": bool(row["active"]),
+            "sort_order": int(row["sort_order"]),
+        }
+        for row in rows
+    ]
+
+
+@app.post("/api/member-filters")
+def post_member_filter(
+    payload: MemberFilterPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> dict[str, Any]:
+    with connect() as db:
+        sort_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM member_filters"
+        ).fetchone()[0]
+        try:
+            cursor = db.execute(
+                """
+                INSERT INTO member_filters (label, active, sort_order, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    payload.label.strip(),
+                    1 if payload.active else 0,
+                    sort_order,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            db.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="Filter existiert bereits")
+        row = db.execute(
+            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+    return {
+        "id": int(row["id"]),
+        "label": row["label"],
+        "active": bool(row["active"]),
+        "sort_order": int(row["sort_order"]),
+    }
+
+
+@app.put("/api/member-filters/order")
+def reorder_member_filters(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        ids = {int(row["id"]) for row in db.execute("SELECT id FROM member_filters")}
+        if set(payload.item_ids) != ids:
+            raise HTTPException(status_code=422, detail="Filterreihenfolge ist unvollständig")
+        for position, filter_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE member_filters SET sort_order = ? WHERE id = ?",
+                (position, filter_id),
+            )
+        db.commit()
+    return get_member_filters(_)
+
+
+@app.put("/api/member-filters/{filter_id}")
+def put_member_filter(
+    filter_id: int,
+    payload: MemberFilterPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> dict[str, Any]:
+    with connect() as db:
+        try:
+            cursor = db.execute(
+                "UPDATE member_filters SET label = ?, active = ? WHERE id = ?",
+                (payload.label.strip(), 1 if payload.active else 0, filter_id),
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Filter nicht gefunden")
+            db.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="Filter existiert bereits")
+        row = db.execute(
+            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
+            (filter_id,),
+        ).fetchone()
+    return {
+        "id": int(row["id"]),
+        "label": row["label"],
+        "active": bool(row["active"]),
+        "sort_order": int(row["sort_order"]),
+    }
+
+
+@app.delete("/api/member-filters/{filter_id}", status_code=204)
+def delete_member_filter(
+    filter_id: int,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> None:
+    with connect() as db:
+        db.execute("DELETE FROM member_filter_links WHERE filter_id = ?", (filter_id,))
+        cursor = db.execute("DELETE FROM member_filters WHERE id = ?", (filter_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Filter nicht gefunden")
+        db.commit()
+
+
 @app.get("/api/members")
 def get_members(
     _: dict[str, Any] = Depends(current_user),
@@ -2681,4 +2869,7 @@ def delete_members(
     row_id: int,
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> None:
+    with connect() as db:
+        db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+        db.commit()
     delete_row("members", row_id)
