@@ -351,7 +351,7 @@
     <nav>
       <button class="active" data-panel="news" data-permission="can_news">News</button>
       <button data-panel="events" data-permission="can_events">Termine</button>
-      <button data-panel="members" data-permission="can_members">Mitglieder</button>
+      <button data-panel="members" id="members-nav">Mitglieder</button>
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
       <button data-panel="content" id="gallery-nav">Galerie</button>
       <button data-panel="content" id="content-nav">Fotoalben & Inhalte</button>
@@ -651,6 +651,11 @@ function applyPermissions() {
   document.querySelectorAll("[data-permission]").forEach(button => {
     button.classList.toggle("hidden", !currentUser?.[button.dataset.permission]);
   });
+  document.getElementById("members-nav")
+    .classList.toggle(
+      "hidden",
+      !(currentUser?.can_members || currentUser?.can_manage_users),
+    );
   const canManageContent = Object.values(contentPermissions)
     .some(permission => currentUser?.[permission]);
   document.getElementById("content-nav")
@@ -749,7 +754,6 @@ async function load(resource) {
         <button type="button" class="move-up">↑</button>
         <button type="button" class="move-down">↓</button>
         <button type="button" class="edit">Bearbeiten</button>
-        <button type="button" class="revoke-sessions">Sitzungen beenden</button>
         <button type="button" class="delete">Löschen</button>
       </div>`;
     div.querySelector(".edit").onclick = () => edit(resource, item);
@@ -1457,19 +1461,33 @@ async function startAdmin() {
   document.getElementById("status").textContent =
     `Angemeldet: ${currentUser.member_name || currentUser.username} · API v${apiVersion || "?"}`;
 
+  const loadSafely = async (name, action) => {
+    try {
+      await action();
+    } catch (error) {
+      console.error(`Admin-Bereich ${name} konnte nicht geladen werden:`, error);
+    }
+  };
+
   if (currentUser.can_news) {
     document.querySelector("#news-form [name=date]").value =
       new Date().toLocaleDateString("de-CH");
-    await load("news");
+    await loadSafely("News", () => load("news"));
   }
-  if (currentUser.can_events) await load("events");
-  if (currentUser.can_manage_users) await loadUsers();
-  if (Object.values(contentPermissions).some(permission => currentUser?.[permission])) {
-    await loadContent();
+  if (currentUser.can_events) {
+    await loadSafely("Termine", () => load("events"));
+  }
+  if (currentUser.can_manage_users) {
+    await loadSafely("Benutzer", () => loadUsers());
   }
   if (currentUser.can_members || currentUser.can_manage_users) {
-    await load("members");
-    await loadMembersForSelects();
+    await loadSafely("Mitglieder", async () => {
+      await load("members");
+      await loadMembersForSelects();
+    });
+  }
+  if (Object.values(contentPermissions).some(permission => currentUser?.[permission])) {
+    await loadSafely("Inhalte", () => loadContent());
   }
 }
 
