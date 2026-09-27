@@ -46,11 +46,11 @@ class _FlapImageViewerScreenState extends State<FlapImageViewerScreen> {
   }
 
   Future<void> _shareCurrent() async {
-    if (sharing || widget.widget.imageUrl.isEmpty) return;
+    if (sharing || widget.imageUrl.isEmpty) return;
     setState(() => sharing = true);
     try {
       final store = AppStoreScope.of(context);
-      final downloaded = await store.api.downloadImage(widget.widget.imageUrl);
+      final downloaded = await store.api.downloadImage(widget.imageUrl);
       final extension = _extension(downloaded.mimeType);
       final directory = await getTemporaryDirectory();
       final file = File(
