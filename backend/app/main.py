@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.18"
+API_VERSION = "0.8.19"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv(
@@ -1276,13 +1276,22 @@ async def post_gallery_snapshot(
         raise HTTPException(status_code=403, detail="Keine Berechtigung für Galerie-Snapshots")
     if expires_days not in {7, 14, 30}:
         raise HTTPException(status_code=422, detail="Ablaufzeit muss 7, 14 oder 30 Tage sein")
-    if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
-        raise HTTPException(status_code=415, detail="Unsupported image type")
     data = await image.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty image")
     if len(data) > 12 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Image too large")
+
+    mime = image.content_type or ""
+    if mime not in {"image/jpeg", "image/png", "image/webp"}:
+        if data.startswith(b"\xff\xd8\xff"):
+            mime = "image/jpeg"
+        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+            mime = "image/png"
+        elif len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            mime = "image/webp"
+        else:
+            raise HTTPException(status_code=415, detail="Unsupported image type")
 
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=expires_days)
@@ -1297,7 +1306,7 @@ async def post_gallery_snapshot(
             (
                 user["id"],
                 data,
-                image.content_type or "image/jpeg",
+                mime,
                 now.isoformat(),
                 expires.isoformat(),
             ),
