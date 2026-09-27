@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../data/app_store.dart';
 import 'start_screen.dart';
 import 'news_screen.dart';
@@ -49,11 +50,43 @@ class _HomeShellState extends State<HomeShell> {
       '/news' => 1,
       '/events' => 2,
       '/gallery' => 3,
-      '/more' => 4,
+      '/more' => 5,
       _ => 0,
     };
     if (index != nextIndex) {
       setState(() => index = nextIndex);
+    }
+  }
+
+  Future<void> _openWhatsAppGroup() async {
+    final store = AppStoreScope.of(context);
+    final link = store
+        .contentFor('whatsapp')
+        .map((item) => item.linkUrl.trim())
+        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+
+    if (link.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('WhatsApp-Einladungslink ist noch nicht hinterlegt.'),
+        ),
+      );
+      return;
+    }
+
+    final uri = Uri.tryParse(link);
+    if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'http')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('WhatsApp-Gruppenlink ist ungültig.')),
+      );
+      return;
+    }
+
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('WhatsApp konnte nicht geöffnet werden.')),
+      );
     }
   }
 
@@ -64,7 +97,13 @@ class _HomeShellState extends State<HomeShell> {
       bottomNavigationBar: NavigationBar(
         height: 74,
         selectedIndex: index,
-        onDestinationSelected: (value) => setState(() => index = value),
+        onDestinationSelected: (value) {
+          if (value == 4) {
+            _openWhatsAppGroup();
+            return;
+          }
+          setState(() => index = value);
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
@@ -85,6 +124,11 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.photo_outlined),
             selectedIcon: Icon(Icons.photo_rounded),
             label: 'Galerie',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.chat_outlined),
+            selectedIcon: Icon(Icons.chat_rounded),
+            label: 'WhatsApp',
           ),
           NavigationDestination(
             icon: Icon(Icons.more_horiz),
