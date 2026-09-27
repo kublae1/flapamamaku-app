@@ -440,6 +440,7 @@
               <label><input type="checkbox" name="account_can_members"> Mitglieder verwalten</label>
               <label><input type="checkbox" name="account_can_documents"> Dokumente verwalten</label>
               <label><input type="checkbox" name="account_can_photos"> Galerie/Fotoalben verwalten</label>
+              <label><input type="checkbox" name="account_can_gallery_upload"> Galerie-Snapshots aufnehmen</label>
               <label><input type="checkbox" name="account_can_polls"> Umfragen verwalten</label>
               <label><input type="checkbox" name="account_can_links"> Links verwalten</label>
               <label><input type="checkbox" name="account_can_admin_page"> PC-Adminseite benutzen</label>
@@ -481,6 +482,7 @@
             <label><input type="checkbox" name="can_members"> Mitglieder verwalten</label>
             <label><input type="checkbox" name="can_documents"> Dokumente verwalten</label>
             <label><input type="checkbox" name="can_photos"> Galerie/Fotoalben verwalten</label>
+            <label><input type="checkbox" name="can_gallery_upload"> Galerie-Snapshots aufnehmen</label>
             <label><input type="checkbox" name="can_polls"> Umfragen verwalten</label>
             <label><input type="checkbox" name="can_links"> Links verwalten</label>
             <label><input type="checkbox" name="can_admin_page"> PC-Adminseite benutzen</label>
@@ -580,7 +582,7 @@ let userAccounts = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
-  "can_polls","can_links","can_admin_page","can_manage_users"
+  "can_gallery_upload","can_polls","can_links","can_admin_page","can_manage_users"
 ];
 
 const contentPermissions = {
@@ -806,7 +808,7 @@ async function loadUsers() {
       .filter(key => user[key])
       .map(key => ({
         can_news:"News",can_events:"Termine",can_members:"Mitglieder",
-        can_documents:"Dokumente",can_photos:"Fotos",can_polls:"Umfragen",
+        can_documents:"Dokumente",can_photos:"Fotos",can_gallery_upload:"Snapshots",can_polls:"Umfragen",
         can_links:"Links",
         can_admin_page:"PC-Admin",can_manage_users:"Benutzerrechte"
       })[key]).join(", ");
