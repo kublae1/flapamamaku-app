@@ -2251,8 +2251,13 @@ async def upload_content_images(
         if existing is None:
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(existing["section"], user)
+        if existing["section"] == "gallery" and len(prepared) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="Galerie-Einträge dürfen genau ein Bild enthalten",
+            )
         now = datetime.now(timezone.utc).isoformat()
-        if existing["section"] == "sujet":
+        if existing["section"] in {"sujet", "gallery"}:
             db.execute(
                 "DELETE FROM content_images WHERE content_id = ?",
                 (row_id,),
