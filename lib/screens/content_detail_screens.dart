@@ -45,13 +45,13 @@ class NewsDetailScreen extends StatelessWidget {
                             item.imageUrl,
                             headers: store.api.authHeaders,
                             width: double.infinity,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             errorBuilder: (_, __, ___) => const _ImageError(),
                           )
                         : Image.asset(
                             item.imageAsset,
                             width: double.infinity,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                           ),
                   ),
                   const Positioned(
@@ -659,7 +659,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                             member.photoUrl,
                             headers: headers,
                             width: double.infinity,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             errorBuilder: (_, __, ___) => const _ImageError(),
                           )
                         : Container(
