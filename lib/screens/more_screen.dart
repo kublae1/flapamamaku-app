@@ -61,13 +61,24 @@ class MoreScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const MembersScreen()),
               ),
             ),
-            if (whatsappLink.isNotEmpty)
-              _MockupMenuCard(
-                icon: Icons.chat_rounded,
-                title: 'WhatsApp-Gruppe',
-                subtitle: 'FLAPAMAMAKU-Gruppenchat direkt in WhatsApp öffnen',
-                onTap: () => _openWhatsAppGroup(context, whatsappLink),
-              ),
+            _MockupMenuCard(
+              icon: Icons.chat_rounded,
+              title: 'WhatsApp-Gruppe',
+              subtitle: whatsappLink.isEmpty
+                  ? 'Gruppenlink ist noch nicht hinterlegt'
+                  : 'FLAPAMAMAKU-Gruppenchat direkt in WhatsApp öffnen',
+              onTap: () {
+                if (whatsappLink.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Im Docker-Admin ist noch kein WhatsApp-Gruppenlink hinterlegt.'),
+                    ),
+                  );
+                  return;
+                }
+                _openWhatsAppGroup(context, whatsappLink);
+              },
+            ),
             if (store.canAdminister)
               _MockupMenuCard(
                 icon: Icons.admin_panel_settings_rounded,
