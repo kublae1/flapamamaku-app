@@ -749,6 +749,7 @@ async function load(resource) {
         <button type="button" class="move-up">↑</button>
         <button type="button" class="move-down">↓</button>
         <button type="button" class="edit">Bearbeiten</button>
+        <button type="button" class="revoke-sessions">Sitzungen beenden</button>
         <button type="button" class="delete">Löschen</button>
       </div>`;
     div.querySelector(".edit").onclick = () => edit(resource, item);
@@ -829,6 +830,7 @@ async function loadUsers() {
         <button type="button" class="delete">Löschen</button>
       </div>`;
     div.querySelector(".edit").onclick = () => editUser(user);
+    div.querySelector(".revoke-sessions").onclick = () => revokeUserSessions(user);
     div.querySelector(".delete").onclick = () => removeUser(user.id);
     list.appendChild(div);
   });
@@ -843,6 +845,13 @@ function editUser(user) {
   form.elements.active.checked = !!user.active;
   permissionFields.forEach(key => form.elements[key].checked = !!user[key]);
   form.scrollIntoView({behavior: "smooth"});
+}
+
+async function revokeUserSessions(user) {
+  const label = user.member_name || user.username;
+  if (!confirm(`Alle aktiven App-Sitzungen von ${label} wirklich beenden?`)) return;
+  await api(`/api/users/${user.id}/sessions`, {method:"DELETE"});
+  alert("Alle Sitzungen dieses Benutzers wurden beendet.");
 }
 
 async function removeUser(id) {
