@@ -510,6 +510,7 @@
             <option value="photos">Fotoalben</option>
             <option value="polls">Umfragen</option>
             <option value="links">Links</option>
+            <option value="whatsapp">WhatsApp-Gruppe</option>
           </select>
           <label>Titel</label><input name="title" required>
           <label>Text / Beschreibung</label><textarea name="text"></textarea>
@@ -555,6 +556,7 @@
             <option value="photos">Fotoalben</option>
             <option value="polls">Umfragen</option>
             <option value="links">Links</option>
+            <option value="whatsapp">WhatsApp-Gruppe</option>
           </select>
           <label>Sortierung</label>
           <select id="content-sort">
@@ -595,6 +597,7 @@ const contentPermissions = {
   photos: "can_photos",
   polls: "can_polls",
   links: "can_links",
+  whatsapp: "can_links",
 };
 
 const contentLabels = {
@@ -607,6 +610,7 @@ const contentLabels = {
   photos: "Fotoalben",
   polls: "Umfragen",
   links: "Links",
+  whatsapp: "WhatsApp-Gruppe",
 };
 
 const resources = {
@@ -986,6 +990,7 @@ const contentImageRecommendations = {
   documents: "<strong>Optionales Vorschaubild:</strong> 1200 × 900 px (4:3).",
   polls: "<strong>Optionales Bild:</strong> 1200 × 900 px (4:3).",
   links: "<strong>Empfohlen für Logo/Linkbild:</strong> 1000 × 1000 px (1:1, quadratisch).",
+  whatsapp: "<strong>WhatsApp-Gruppenlink:</strong> Einladungslink in das Feld Link eintragen. Kein Bild nötig.",
 };
 
 function updateContentImageRecommendation() {
