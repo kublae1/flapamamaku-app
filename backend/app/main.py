@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.27"
+API_VERSION = "0.8.28"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -1184,15 +1184,38 @@ def _serialize_content(
                 ).fetchone()
                 if vote is not None:
                     my_vote = int(vote["option_index"])
+            voter_rows = db.execute(
+                """
+                SELECT
+                    pv.option_index,
+                    COALESCE(NULLIF(TRIM(m.name), ''), u.username) AS voter_name
+                FROM poll_votes pv
+                JOIN users u ON u.id = pv.user_id
+                LEFT JOIN members m ON m.id = u.member_id
+                WHERE pv.poll_id = ?
+                ORDER BY voter_name COLLATE NOCASE ASC, u.id ASC
+                """,
+                (item["id"],),
+            ).fetchall()
+
             item["poll_options"] = options
             item["poll_counts"] = counts
             item["poll_total_votes"] = sum(counts)
             item["poll_my_vote"] = my_vote
+            item["poll_voters"] = [
+                {
+                    "name": str(voter["voter_name"] or "").strip(),
+                    "option_index": int(voter["option_index"]),
+                }
+                for voter in voter_rows
+                if str(voter["voter_name"] or "").strip()
+            ]
         else:
             item["poll_options"] = []
             item["poll_counts"] = []
             item["poll_total_votes"] = 0
             item["poll_my_vote"] = None
+            item["poll_voters"] = []
     images = [
         {
             "id": image_row["id"],
