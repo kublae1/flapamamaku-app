@@ -8,6 +8,10 @@ class ContentItem {
   final List<String> imageUrls;
   final String createdAt;
   final int sortOrder;
+  final int? snapshotId;
+  final bool isSnapshot;
+  final bool canDelete;
+  final String expiresAt;
 
   const ContentItem({
     this.id,
@@ -19,6 +23,10 @@ class ContentItem {
     this.imageUrls = const [],
     this.createdAt = '',
     this.sortOrder = 0,
+    this.snapshotId,
+    this.isSnapshot = false,
+    this.canDelete = false,
+    this.expiresAt = '',
   });
 
   factory ContentItem.fromJson(Map<String, dynamic> json) {
@@ -34,6 +42,10 @@ class ContentItem {
           .toList(),
       createdAt: json['created_at']?.toString() ?? '',
       sortOrder: json['sort_order'] as int? ?? 0,
+      snapshotId: json['snapshot_id'] as int?,
+      isSnapshot: json['is_snapshot'] == true,
+      canDelete: json['can_delete'] == true,
+      expiresAt: json['expires_at']?.toString() ?? '',
     );
   }
 }
