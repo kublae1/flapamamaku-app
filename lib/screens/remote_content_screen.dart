@@ -477,11 +477,22 @@ class _LinkList extends StatelessWidget {
     this.onDelete,
   });
 
-  String _logo(ContentItem item) {
+  String _uploadedLogo(ContentItem item) {
     for (final value in item.imageUrls) {
       if (value.trim().isNotEmpty) return value.trim();
     }
     return item.imageUrl.trim();
+  }
+
+  String _favicon(ContentItem item) {
+    final raw = item.linkUrl.trim();
+    if (raw.isEmpty) return '';
+    final normalized = raw.startsWith('http://') || raw.startsWith('https://')
+        ? raw
+        : 'https://$raw';
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || uri.host.isEmpty) return '';
+    return uri.replace(path: '/favicon.ico', query: null, fragment: null).toString();
   }
 
   @override
@@ -493,7 +504,9 @@ class _LinkList extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (_, index) {
         final item = items[index];
-        final logo = _logo(item);
+        final uploadedLogo = _uploadedLogo(item);
+        final favicon = _favicon(item);
+        final logo = uploadedLogo.isNotEmpty ? uploadedLogo : favicon;
         final canOpen = item.linkUrl.trim().isNotEmpty;
 
         return Material(
@@ -524,7 +537,7 @@ class _LinkList extends StatelessWidget {
                             padding: const EdgeInsets.all(6),
                             child: Image.network(
                               logo,
-                              headers: headers,
+                              headers: uploadedLogo.isNotEmpty ? headers : null,
                               fit: BoxFit.contain,
                               errorBuilder: (_, __, ___) => const Icon(
                                 Icons.link_rounded,
