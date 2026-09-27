@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.26"
+API_VERSION = "0.8.27"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -130,6 +130,19 @@ class MemberPayload(BaseModel):
     occupation: str = ""
     employer: str = ""
     employer_url: str = ""
+
+
+class MemberSelfUpdatePayload(BaseModel):
+    partner_name: str = ""
+    phone_mobile: str = ""
+    phone_private: str = ""
+    phone_work: str = ""
+    email: str = ""
+    address: str = ""
+    occupation: str = ""
+    employer: str = ""
+    employer_url: str = ""
+    engagement: str = ""
 
 
 class MemberFilterPayload(BaseModel):
@@ -2673,6 +2686,91 @@ def delete_member_filter(
         cursor = db.execute("DELETE FROM member_filters WHERE id = ?", (filter_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Filter nicht gefunden")
+        db.commit()
+
+
+@app.put("/api/members/me")
+def put_my_member(
+    payload: MemberSelfUpdatePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    member_id = user.get("member_id")
+    if member_id is None:
+        raise HTTPException(status_code=400, detail="Benutzer ist keinem Mitglied zugeordnet")
+
+    data = payload.model_dump()
+    assignments = ", ".join(f"{column} = ?" for column in data)
+    with connect() as db:
+        cursor = db.execute(
+            f"UPDATE members SET {assignments} WHERE id = ?",
+            [*data.values(), member_id],
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ?",
+            (member_id,),
+        ).fetchone()
+    return _serialize_member(row)
+
+
+@app.post("/api/members/me/photo")
+async def upload_my_member_photo(
+    photo: UploadFile = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    member_id = user.get("member_id")
+    if member_id is None:
+        raise HTTPException(status_code=400, detail="Benutzer ist keinem Mitglied zugeordnet")
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp"}
+    if photo.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+
+    data = await photo.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE members
+            SET photo_data = ?, photo_mime = ?
+            WHERE id = ?
+            """,
+            (data, photo.content_type, member_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ?",
+            (member_id,),
+        ).fetchone()
+    return _serialize_member(row)
+
+
+@app.delete("/api/members/me/photo", status_code=204)
+def delete_my_member_photo(
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    member_id = user.get("member_id")
+    if member_id is None:
+        raise HTTPException(status_code=400, detail="Benutzer ist keinem Mitglied zugeordnet")
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE members
+            SET photo_data = NULL, photo_mime = ''
+            WHERE id = ?
+            """,
+            (member_id,),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
         db.commit()
 
 
