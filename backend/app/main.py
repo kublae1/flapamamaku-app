@@ -231,6 +231,7 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             occupation TEXT NOT NULL DEFAULT '',
             employer TEXT NOT NULL DEFAULT '',
             employer_url TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
             photo_data BLOB,
             photo_mime TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
@@ -431,6 +432,14 @@ def init_db() -> None:
         _ensure_column(db, "members", "occupation", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "sort_order", "INTEGER NOT NULL DEFAULT 0")
+        db.execute(
+            """
+            UPDATE members
+            SET sort_order = id
+            WHERE sort_order = 0
+            """
+        )
         _ensure_column(db, "members", "photo_data", "BLOB")
         _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "sort_order", "INTEGER NOT NULL DEFAULT 0")
@@ -959,6 +968,11 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     table_or_404(resource)
     data = payload.model_dump()
     data["created_at"] = datetime.now(timezone.utc).isoformat()
+    if resource == "members":
+        with connect() as db:
+            data["sort_order"] = db.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM members"
+            ).fetchone()[0]
     columns = list(data.keys())
     placeholders = ", ".join("?" for _ in columns)
     sql = (
@@ -2466,6 +2480,46 @@ def delete_events(
 def get_members(
     _: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
+    return list_rows("members")
+
+
+@app.put("/api/members/order")
+def reorder_members(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        rows = db.execute(
+            f"""
+            SELECT id
+            FROM members
+            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
+            """,
+            payload.item_ids,
+        ).fetchall()
+
+        if len(rows) != len(set(payload.item_ids)):
+            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
+
+        current_ids = {
+            row["id"] for row in db.execute("SELECT id FROM members").fetchall()
+        }
+        if set(payload.item_ids) != current_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Mitgliederreihenfolge ist unvollständig",
+            )
+
+        for position, member_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE members SET sort_order = ? WHERE id = ?",
+                (position, member_id),
+            )
+        db.commit()
+
     return list_rows("members")
 
 
