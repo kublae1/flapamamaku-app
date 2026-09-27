@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-SESSION_DAYS = 30
-API_VERSION = "0.8.16"
+SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
+API_VERSION = "0.8.17"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 
@@ -490,19 +490,16 @@ def current_user(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     token = _extract_token(authorization)
-    now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
-        db.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         row = db.execute(
             """
             SELECT u.*
             FROM sessions s
             JOIN users u ON u.id = s.user_id
-            WHERE s.token_hash = ? AND s.expires_at > ? AND u.active = 1
+            WHERE s.token_hash = ? AND u.active = 1
             """,
-            (_token_hash(token), now),
+            (_token_hash(token),),
         ).fetchone()
-        db.commit()
     if row is None:
         raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
     return _serialize_user(row)
@@ -818,7 +815,7 @@ def login(payload: LoginPayload) -> dict[str, Any]:
 
         token = secrets.token_urlsafe(48)
         now_dt = datetime.now(timezone.utc)
-        expires = now_dt + timedelta(days=SESSION_DAYS)
+        expires = SESSION_EXPIRES_AT
         db.execute(
             """
             INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
@@ -827,7 +824,7 @@ def login(payload: LoginPayload) -> dict[str, Any]:
             (
                 _token_hash(token),
                 row["id"],
-                expires.isoformat(),
+                expires,
                 now_dt.isoformat(),
             ),
         )
@@ -835,7 +832,7 @@ def login(payload: LoginPayload) -> dict[str, Any]:
 
     return {
         "token": token,
-        "expires_at": expires.isoformat(),
+        "expires_at": expires,
         "user": _user_profile(row["id"]),
     }
 
@@ -924,6 +921,7 @@ def put_user(
         assignments.append(f"{key} = ?")
         values.append(int(data[key]))
 
+    password_changed = bool(payload.password)
     if payload.password:
         if len(payload.password) < 6:
             raise HTTPException(status_code=422, detail="Passwort muss mindestens 6 Zeichen haben")
@@ -946,10 +944,25 @@ def put_user(
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+            if password_changed:
+                db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
             db.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Benutzername bereits vorhanden")
     return _user_profile(user_id)
+
+
+@app.delete("/api/users/{user_id}/sessions", status_code=204)
+def revoke_user_sessions(
+    user_id: int,
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> None:
+    with connect() as db:
+        user = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user is None:
+            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        db.commit()
 
 
 @app.delete("/api/users/{user_id}", status_code=204)
