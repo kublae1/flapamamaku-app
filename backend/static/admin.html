@@ -497,7 +497,10 @@
     <section id="content" class="panel">
       <div class="grid">
         <form class="card" id="content-form">
-          <h2 id="content-editor-title">App-Inhalte bearbeiten</h2>
+          <div class="preview-heading">
+            <h2 id="content-editor-title">App-Inhalte bearbeiten</h2>
+            <button type="button" id="content-new-button">+ Neuer Eintrag</button>
+          </div>
           <input type="hidden" name="id">
           <label>Bereich</label>
           <select name="section" required>
@@ -1332,6 +1335,34 @@ async function renderExistingImages(item) {
 }
 
 
+function resetContentForm({keepSection = true} = {}) {
+  const form = document.getElementById("content-form");
+  const section = keepSection ? form.elements.section.value : "hero";
+  form.reset();
+  form.elements.id.value = "";
+  form.elements.section.value = section;
+  form.elements.replace_images.checked = true;
+  form.elements.poll_options.value = "";
+  form.elements.document_file.value = "";
+  form.elements.image_files.value = "";
+  document.getElementById("document-current").textContent = "";
+  editingContentItem = null;
+  clearExistingImageObjectUrls();
+  document.getElementById("existing-images").innerHTML = "";
+  document.getElementById("existing-images").classList.add("hidden");
+  setPreviewImageObjectUrl("");
+  updateContentImageRecommendation();
+  updateContentFormMode();
+  updateContentPreview();
+}
+
+document.getElementById("content-new-button").addEventListener("click", () => {
+  resetContentForm({keepSection: true});
+  document.getElementById("content-form").scrollIntoView({behavior:"smooth"});
+  document.getElementById("content-form").elements.title.focus();
+});
+
+
 function editContent(item) {
   const form = document.getElementById("content-form");
   form.elements.id.value = item.id;
@@ -1357,7 +1388,14 @@ async function removeContent(id) {
   await loadContent();
 }
 
-document.getElementById("content-filter").addEventListener("change", loadContent);
+document.getElementById("content-filter").addEventListener("change", async event => {
+  const value = event.currentTarget.value;
+  if (value) {
+    document.getElementById("content-form").elements.section.value = value;
+    resetContentForm({keepSection: true});
+  }
+  await loadContent();
+});
 document.getElementById("content-sort").addEventListener("change", loadContent);
 
 document.getElementById("gallery-nav").addEventListener("click", async () => {
@@ -1374,6 +1412,7 @@ document.getElementById("content-nav").addEventListener("click", async () => {
   if (document.getElementById("content-filter").value === "gallery") {
     document.getElementById("content-filter").value = "";
   }
+  resetContentForm({keepSection: true});
   await loadContent();
 });
 updateContentImageRecommendation();
@@ -1445,16 +1484,7 @@ document.getElementById("content-form").addEventListener("submit", async event =
     });
   }
 
-  form.reset();
-  form.elements.id.value = "";
-  document.getElementById("document-current").textContent = "";
-  updateContentFormMode();
-  setPreviewImageObjectUrl("");
-  editingContentItem = null;
-  clearExistingImageObjectUrls();
-  document.getElementById("existing-images").innerHTML = "";
-  document.getElementById("existing-images").classList.add("hidden");
-  updateContentPreview();
+  resetContentForm({keepSection: true});
   await loadContent();
 });
 
