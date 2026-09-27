@@ -324,7 +324,7 @@ class _MemberCard extends StatelessWidget {
                       ? Image.network(
                           member.photoUrl,
                           headers: headers,
-                          fit: BoxFit.cover,
+                          fit: BoxFit.contain,
                           errorBuilder: (_, __, ___) => _Initial(member.name),
                         )
                       : _Initial(member.name),
