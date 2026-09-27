@@ -211,7 +211,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int>(
-                  value: selectedDays,
+                  initialValue: selectedDays,
                   decoration: const InputDecoration(
                     labelText: 'Automatisch löschen nach',
                     border: OutlineInputBorder(),
