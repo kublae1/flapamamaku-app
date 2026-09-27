@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -23,9 +24,10 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.20"
+API_VERSION = "0.8.21"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
+logger = logging.getLogger("flapamamaku.push")
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv(
     "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_JSON",
     "",
@@ -516,10 +518,47 @@ def _firebase_access() -> tuple[str, str] | None:
         credentials.refresh(GoogleAuthRequest())
         project_id = str(info.get("project_id") or "").strip()
         if not credentials.token or not project_id:
+            logger.error("Firebase credentials incomplete: token/project_id missing")
             return None
         return credentials.token, project_id
-    except Exception:
+    except Exception as exc:
+        logger.error("Firebase authentication failed: %s", exc)
         return None
+
+
+def _firebase_diagnostic() -> dict[str, Any]:
+    configured = bool(FIREBASE_SERVICE_ACCOUNT_JSON)
+    if not configured:
+        return {
+            "delivery_configured": False,
+            "firebase_auth_ready": False,
+            "firebase_project_id": "",
+            "firebase_error": "Firebase service account is not configured",
+        }
+    try:
+        info = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
+        project_id = str(info.get("project_id") or "").strip()
+        client_email = str(info.get("client_email") or "").strip()
+        credentials = service_account.Credentials.from_service_account_info(
+            info,
+            scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+        )
+        credentials.refresh(GoogleAuthRequest())
+        return {
+            "delivery_configured": True,
+            "firebase_auth_ready": bool(credentials.token and project_id),
+            "firebase_project_id": project_id,
+            "firebase_client_email": client_email,
+            "firebase_error": "",
+        }
+    except Exception as exc:
+        return {
+            "delivery_configured": True,
+            "firebase_auth_ready": False,
+            "firebase_project_id": "",
+            "firebase_client_email": "",
+            "firebase_error": str(exc)[:500],
+        }
 
 
 def _send_fcm_message(
@@ -659,6 +698,12 @@ def _deliver_pending_push() -> None:
                 )
                 if not ok:
                     had_transient_error = True
+                    logger.error(
+                        "FCM delivery failed for notification %s token %s: %s",
+                        notification["id"],
+                        token["id"],
+                        error,
+                    )
 
             remaining = db.execute(
                 """
@@ -1430,13 +1475,32 @@ def push_status(
             "SELECT COUNT(*) FROM push_tokens WHERE user_id = ? AND enabled = 1",
             (user["id"],),
         ).fetchone()[0]
+        total_devices = db.execute(
+            "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1",
+        ).fetchone()[0]
         queued = db.execute(
             "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL",
         ).fetchone()[0]
+        last_delivery_error = db.execute(
+            """
+            SELECT last_error
+            FROM push_deliveries
+            WHERE last_error IS NOT NULL AND last_error <> ''
+            ORDER BY rowid DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    diagnostic = _firebase_diagnostic()
     return {
         "registered_devices": count,
+        "registered_devices_total": total_devices,
         "queued_notifications": queued,
-        "delivery_configured": bool(FIREBASE_SERVICE_ACCOUNT_JSON),
+        "last_delivery_error": (
+            last_delivery_error["last_error"][:500]
+            if last_delivery_error is not None
+            else ""
+        ),
+        **diagnostic,
     }
 
 
