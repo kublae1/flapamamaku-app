@@ -114,6 +114,7 @@ class AppStore extends ChangeNotifier {
       case 'polls':
         return canPolls;
       case 'links':
+      case 'whatsapp':
         return canLinks;
       default:
         return false;
