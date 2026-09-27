@@ -824,11 +824,11 @@ async function load(resource) {
       </div>`;
     const up = div.querySelector(".move-up");
     const down = div.querySelector(".move-down");
-    if (resource === "members") {
+    if (resource === "members" || resource === "news") {
       up.disabled = index === 0;
       down.disabled = index === items.length - 1;
-      up.onclick = () => moveMember(items, index, index - 1);
-      down.onclick = () => moveMember(items, index, index + 1);
+      up.onclick = () => moveOrderedResource(resource, items, index, index - 1);
+      down.onclick = () => moveOrderedResource(resource, items, index, index + 1);
     } else {
       up.classList.add("hidden");
       down.classList.add("hidden");
@@ -840,17 +840,19 @@ async function load(resource) {
   return items;
 }
 
-async function moveMember(items, fromIndex, toIndex) {
+async function moveOrderedResource(resource, items, fromIndex, toIndex) {
   if (toIndex < 0 || toIndex >= items.length) return;
   const reordered = [...items];
   const [moved] = reordered.splice(fromIndex, 1);
   reordered.splice(toIndex, 0, moved);
-  await api("/api/members/order", {
+  await api(`/api/${resource}/order`, {
     method: "PUT",
     body: JSON.stringify({item_ids: reordered.map(item => item.id)}),
   });
-  await load("members");
-  await loadMembersForSelects();
+  await load(resource);
+  if (resource === "members") {
+    await loadMembersForSelects();
+  }
 }
 
 function edit(resource, item) {
