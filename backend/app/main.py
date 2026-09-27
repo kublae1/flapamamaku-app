@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.28"
+API_VERSION = "0.8.29"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -218,6 +218,7 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             image_url TEXT NOT NULL DEFAULT '',
             image_data BLOB,
             image_mime TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         )
         """,
@@ -475,6 +476,16 @@ def init_db() -> None:
 
         _ensure_column(db, "news", "image_data", "BLOB")
         _ensure_column(db, "news", "image_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "news", "sort_order", "INTEGER NOT NULL DEFAULT 0")
+        news_order_rows = db.execute(
+            "SELECT id, sort_order FROM news ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+        if news_order_rows and all(int(row["sort_order"] or 0) == 0 for row in news_order_rows):
+            for position, row in enumerate(news_order_rows, start=1):
+                db.execute(
+                    "UPDATE news SET sort_order = ? WHERE id = ?",
+                    (position, row["id"]),
+                )
         _ensure_column(db, "events", "event_date", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_mobile", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_private", "TEXT NOT NULL DEFAULT ''")
@@ -1018,7 +1029,7 @@ def _queue_push_notification(
 def list_rows(resource: str) -> list[dict[str, Any]]:
     table_or_404(resource)
     if resource == "news":
-        order = "created_at DESC, id DESC"
+        order = "sort_order ASC, created_at DESC, id DESC"
     elif resource == "events":
         order = (
             "CASE WHEN event_date = '' THEN '9999-12-31' ELSE event_date END ASC, "
@@ -1046,10 +1057,10 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     data = payload.model_dump()
     member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     data["created_at"] = datetime.now(timezone.utc).isoformat()
-    if resource == "members":
+    if resource in {"members", "news"}:
         with connect() as db:
             data["sort_order"] = db.execute(
-                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM members"
+                f"SELECT COALESCE(MAX(sort_order), 0) + 1 FROM {resource}"
             ).fetchone()[0]
     columns = list(data.keys())
     placeholders = ", ".join("?" for _ in columns)
@@ -2342,6 +2353,33 @@ def delete_content_image(
             (row_id,),
         )
         db.commit()
+
+
+@app.put("/api/news/order")
+def reorder_news(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_news")),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        current_ids = {
+            int(row["id"]) for row in db.execute("SELECT id FROM news").fetchall()
+        }
+        if set(payload.item_ids) != current_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="News-Reihenfolge ist unvollständig",
+            )
+        for position, news_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE news SET sort_order = ? WHERE id = ?",
+                (position, news_id),
+            )
+        db.commit()
+
+    return list_rows("news")
 
 
 @app.get("/api/news")
