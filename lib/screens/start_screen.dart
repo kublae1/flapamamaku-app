@@ -102,17 +102,17 @@ class StartScreen extends StatelessWidget {
                         ? Image.network(
                             heroImage,
                             headers: store.api.authHeaders,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             alignment: Alignment.center,
                             errorBuilder: (_, __, ___) => Image.asset(
                               fallbackHero,
-                              fit: BoxFit.cover,
+                              fit: BoxFit.contain,
                               alignment: Alignment.center,
                             ),
                           )
                         : Image.asset(
                             fallbackHero,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             alignment: Alignment.center,
                           ),
                   ),
@@ -194,7 +194,7 @@ class StartScreen extends StatelessWidget {
                                         ? Image.network(
                                             item.imageUrl,
                                             headers: store.api.authHeaders,
-                                            fit: BoxFit.cover,
+                                            fit: BoxFit.contain,
                                             errorBuilder: (_, __, ___) =>
                                                 const ColoredBox(
                                               color: Color(0xFF24272B),
@@ -202,7 +202,7 @@ class StartScreen extends StatelessWidget {
                                           )
                                         : Image.asset(
                                             item.imageAsset,
-                                            fit: BoxFit.cover,
+                                            fit: BoxFit.contain,
                                           ),
                                   ),
                                 Expanded(
