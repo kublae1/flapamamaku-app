@@ -515,8 +515,21 @@
           <label>Titel</label><input name="title" required>
           <label>Text / Beschreibung</label><textarea name="text"></textarea>
           <label>Link (optional)</label><input name="link_url" placeholder="https://...">
-          <label>Bilder (optional)</label>
-          <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+          <div id="poll-options-wrap" class="hidden">
+            <label>Antwortmöglichkeiten</label>
+            <textarea name="poll_options" placeholder="Ja&#10;Nein&#10;Enthaltung"></textarea>
+            <p class="meta">Eine Antwort pro Zeile. Beispiele: Ja / Nein / Enthaltung oder eigene Antworten.</p>
+          </div>
+          <div id="document-upload-wrap" class="hidden">
+            <label>PDF-Dokument</label>
+            <input name="document_file" type="file" accept="application/pdf,.pdf">
+            <p class="meta">Nur PDF · maximal 20 MB. Eine neue PDF ersetzt das vorhandene Dokument.</p>
+            <div id="document-current" class="meta"></div>
+          </div>
+          <div id="content-images-wrap">
+            <label>Bilder (optional)</label>
+            <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+          </div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
             <input name="replace_images" type="checkbox" checked>
             Vorhandene Bilder beim Hochladen ersetzen
@@ -1000,8 +1013,8 @@ const contentImageRecommendations = {
   archive: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · ideal für vergangene Sujets.",
   gallery: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · pro Eintrag ein Bild.",
   photos: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · innerhalb eines Albums möglichst einheitliches Format.",
-  documents: "<strong>Optionales Vorschaubild:</strong> 1200 × 900 px (4:3).",
-  polls: "<strong>Optionales Bild:</strong> 1200 × 900 px (4:3).",
+  documents: "<strong>PDF:</strong> Dokument direkt hochladen · maximal 20 MB.",
+  polls: "<strong>Umfrage:</strong> Antwortmöglichkeiten eine pro Zeile erfassen.",
   links: "<strong>Empfohlen für Logo/Linkbild:</strong> 1000 × 1000 px (1:1, quadratisch).",
   whatsapp: "<strong>WhatsApp-Gruppenlink:</strong> Einladungslink in das Feld Link eintragen. Kein Bild nötig.",
 };
@@ -1011,6 +1024,21 @@ function updateContentImageRecommendation() {
   const section = form.elements.section.value;
   const hint = document.getElementById("content-image-size-hint");
   hint.innerHTML = contentImageRecommendations[section] || "";
+}
+
+function updateContentFormMode() {
+  const form = document.getElementById("content-form");
+  const section = form.elements.section.value;
+  document.getElementById("document-upload-wrap")
+    .classList.toggle("hidden", section !== "documents");
+  document.getElementById("poll-options-wrap")
+    .classList.toggle("hidden", section !== "polls");
+  document.getElementById("content-images-wrap")
+    .classList.toggle("hidden", section === "documents");
+  if (section !== "documents") {
+    form.elements.document_file.value = "";
+    document.getElementById("document-current").textContent = "";
+  }
 }
 
 function updateContentPreview() {
@@ -1037,6 +1065,7 @@ function updatePreviewFromSelectedFile() {
     setPreviewImageObjectUrl("");
   }
   updateContentImageRecommendation();
+updateContentFormMode();
 updateContentPreview();
 }
 
@@ -1044,7 +1073,10 @@ updateContentPreview();
   document.getElementById("content-form").elements[name]
     .addEventListener(name === "section" ? "change" : "input", () => {
       updateContentPreview();
-      if (name === "section") updateContentImageRecommendation();
+      if (name === "section") {
+        updateContentImageRecommendation();
+        updateContentFormMode();
+      }
     });
 });
 document.getElementById("content-form").elements.image_files
@@ -1303,7 +1335,12 @@ function editContent(item) {
   form.elements.title.value = item.title || "";
   form.elements.text.value = item.text || "";
   form.elements.link_url.value = item.link_url || "";
+  form.elements.poll_options.value = (item.poll_options || []).join("\n");
+  form.elements.document_file.value = "";
+  document.getElementById("document-current").textContent =
+    item.document_name ? `Aktuell: ${item.document_name}` : "";
   form.elements.image_files.value = "";
+  updateContentFormMode();
   updateContentPreview();
   loadPreviewRemoteImage(item.image_urls?.[0] || item.image_url || "");
   renderExistingImages(item);
@@ -1355,8 +1392,24 @@ document.getElementById("content-form").addEventListener("submit", async event =
       title: form.elements.title.value.trim(),
       text: form.elements.text.value.trim(),
       link_url: form.elements.link_url.value.trim(),
+      poll_options: section === "polls"
+        ? form.elements.poll_options.value
+            .split(/\r?\n/)
+            .map(value => value.trim())
+            .filter(Boolean)
+        : [],
     }),
   });
+
+  const documentFile = form.elements.document_file.files[0];
+  if (section === "documents" && documentFile) {
+    const upload = new FormData();
+    upload.append("document", documentFile);
+    await api(`/api/content/${saved.id}/document`, {
+      method:"POST",
+      body:upload,
+    });
+  }
 
   const files = [...form.elements.image_files.files];
   if (files.length) {
@@ -1373,6 +1426,8 @@ document.getElementById("content-form").addEventListener("submit", async event =
 
   form.reset();
   form.elements.id.value = "";
+  document.getElementById("document-current").textContent = "";
+  updateContentFormMode();
   setPreviewImageObjectUrl("");
   editingContentItem = null;
   clearExistingImageObjectUrls();
