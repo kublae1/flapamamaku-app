@@ -209,6 +209,31 @@ class ApiService {
     _ensureSuccess(response);
   }
 
+  Future<void> registerPushToken({
+    required String token,
+    required String platform,
+  }) async {
+    final response = await http
+        .post(
+          _uri('/api/push/register'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'token': token, 'platform': platform}),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
+  Future<void> unregisterPushToken(String token) async {
+    final response = await http
+        .delete(
+          _uri('/api/push/register'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'token': token}),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
   Future<ContentItem> uploadGallerySnapshot({
     required Uint8List bytes,
     required String filename,
