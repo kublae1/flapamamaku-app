@@ -582,7 +582,7 @@
             <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
           </div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
-            <input name="replace_images" type="checkbox" checked>
+            <input name="replace_images" type="checkbox">
             Vorhandene Bilder beim Hochladen ersetzen
           </label>
           <div id="existing-images" class="existing-images hidden"></div>
@@ -1242,7 +1242,7 @@ const contentImageRecommendations = {
   sujet: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · passt zur vollbreiten Sujet-Anzeige.",
   archive: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · ideal für vergangene Sujets.",
   gallery: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · pro Eintrag ein Bild.",
-  photos: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · innerhalb eines Albums möglichst einheitliches Format.",
+  photos: "<strong>Empfohlen:</strong> 1600 × 1200 px (4:3, Querformat) · zusätzliche Bilder können jederzeit ergänzt werden. Nur mit «Vorhandene Bilder ersetzen» wird das ganze Album ersetzt.",
   documents: "<strong>PDF:</strong> Dokument direkt hochladen · maximal 20 MB.",
   polls: "<strong>Umfrage:</strong> Antwortmöglichkeiten eine pro Zeile erfassen.",
   links: "<strong>Empfohlen für Logo/Linkbild:</strong> 1000 × 1000 px (1:1, quadratisch).",
@@ -1259,6 +1259,9 @@ function updateContentImageRecommendation() {
 function updateContentFormMode() {
   const form = document.getElementById("content-form");
   const section = form.elements.section.value;
+  if (!form.elements.id.value && section === "photos") {
+    form.elements.replace_images.checked = false;
+  }
   document.getElementById("document-upload-wrap")
     .classList.toggle("hidden", section !== "documents");
   document.getElementById("poll-options-wrap")
@@ -1564,7 +1567,7 @@ function resetContentForm({keepSection = true} = {}) {
   form.reset();
   form.elements.id.value = "";
   form.elements.section.value = section;
-  form.elements.replace_images.checked = true;
+  form.elements.replace_images.checked = section === "photos" ? false : true;
   form.elements.poll_options.value = "";
   form.elements.document_file.value = "";
   form.elements.image_files.value = "";
@@ -1598,6 +1601,7 @@ function editContent(item) {
   document.getElementById("document-current").textContent =
     item.document_name ? `Aktuell: ${item.document_name}` : "";
   form.elements.image_files.value = "";
+  form.elements.replace_images.checked = item.section === "photos" ? false : true;
   updateContentFormMode();
   updateContentPreview();
   loadPreviewRemoteImage(item.image_urls?.[0] || item.image_url || "");
