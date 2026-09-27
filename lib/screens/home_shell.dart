@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../data/app_store.dart';
 import 'start_screen.dart';
 import 'news_screen.dart';
 import 'events_screen.dart';
@@ -28,6 +29,32 @@ class _HomeShellState extends State<HomeShell> {
     ),
     MoreScreen(),
   ];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final push = AppStoreScope.of(context).pushService;
+    push.onRoute = _openPushRoute;
+    final pending = push.takePendingRoute();
+    if (pending != null && pending.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openPushRoute(pending);
+      });
+    }
+  }
+
+  void _openPushRoute(String route) {
+    if (!mounted) return;
+    final nextIndex = switch (route) {
+      '/news' => 1,
+      '/events' => 2,
+      '/gallery' => 3,
+      _ => 0,
+    };
+    if (index != nextIndex) {
+      setState(() => index = nextIndex);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
