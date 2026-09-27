@@ -635,6 +635,7 @@ CONTENT_PERMISSIONS = {
     "photos": "can_photos",
     "polls": "can_polls",
     "links": "can_links",
+    "whatsapp": "can_links",
     "contact": "can_contact",
     "about": "can_about",
 }
