@@ -396,11 +396,26 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
           ),
         ],
       ),
-      floatingActionButton: widget.section == 'gallery' && store.canGalleryUpload
-          ? FloatingActionButton.extended(
-              onPressed: () => _captureSnapshot(context, store),
-              icon: const Icon(Icons.camera_alt_rounded),
-              label: const Text('Foto aufnehmen'),
+      bottomNavigationBar: widget.section == 'gallery' && store.canGalleryUpload
+          ? SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(54),
+                    backgroundColor: FlapBrand.burgundy,
+                    foregroundColor: Colors.white,
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  onPressed: () => _captureSnapshot(context, store),
+                  icon: const Icon(Icons.camera_alt_rounded),
+                  label: const Text('Foto aufnehmen'),
+                ),
+              ),
             )
           : null,
       body: RefreshIndicator(
