@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -85,6 +86,8 @@ class AppStore extends ChangeNotifier {
   bool get canMembers => currentUser?['can_members'] == true;
   bool get canDocuments => currentUser?['can_documents'] == true;
   bool get canPhotos => currentUser?['can_photos'] == true;
+  bool get canGalleryUpload =>
+      currentUser?['can_gallery_upload'] == true || canPhotos;
   bool get canPolls => currentUser?['can_polls'] == true;
   bool get canLinks => currentUser?['can_links'] == true;
   bool get canContact => currentUser?['can_contact'] == true;
@@ -425,9 +428,39 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> deleteContentItem(ContentItem item) async {
+    if (item.isSnapshot && item.snapshotId != null) {
+      try {
+        await api.deleteGallerySnapshot(item.snapshotId!);
+        await refreshFromServer();
+      } catch (error) {
+        syncError = error.toString();
+        notifyListeners();
+        rethrow;
+      }
+      return;
+    }
     if (item.id == null) return;
     try {
       await api.deleteContent(item.id!);
+      await refreshFromServer();
+    } catch (error) {
+      syncError = error.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> uploadGallerySnapshot({
+    required Uint8List bytes,
+    required String filename,
+    required int expiresDays,
+  }) async {
+    try {
+      await api.uploadGallerySnapshot(
+        bytes: bytes,
+        filename: filename,
+        expiresDays: expiresDays,
+      );
       await refreshFromServer();
     } catch (error) {
       syncError = error.toString();
