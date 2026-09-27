@@ -371,6 +371,13 @@ class MemberDetailScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _message(BuildContext context) async {
+    final number = member.phoneMobile.trim();
+    if (number.isNotEmpty) {
+      await _launch(context, Uri(scheme: 'sms', path: number));
+    }
+  }
+
   Future<void> _maps(BuildContext context) async {
     if (member.address.isEmpty) return;
     await _launch(
@@ -411,55 +418,92 @@ class MemberDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
       appBar: AppBar(
-        title: const Text('Mitglied', style: TextStyle(fontWeight: FontWeight.w900)),
+        title: Text(
+          member.name,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
       ),
       body: ListView(
         padding: EdgeInsets.zero,
         children: [
-          if (member.photoUrl.isNotEmpty)
-            GestureDetector(
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => FlapImageViewerScreen(
-                    title: member.name,
-                    imageUrl: member.photoUrl,
-                  ),
-                ),
-              ),
-              child: Stack(
-                children: [
-                  AspectRatio(
+          Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              GestureDetector(
+                onTap: member.photoUrl.isEmpty
+                    ? null
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => FlapImageViewerScreen(
+                              title: member.name,
+                              imageUrl: member.photoUrl,
+                            ),
+                          ),
+                        ),
+                child: Hero(
+                  tag: 'member-photo-${member.id ?? member.name}',
+                  child: AspectRatio(
                     aspectRatio: 4 / 3,
-                    child: Image.network(
-                      member.photoUrl,
-                      headers: headers,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const _ImageError(),
-                    ),
+                    child: member.photoUrl.isNotEmpty
+                        ? Image.network(
+                            member.photoUrl,
+                            headers: headers,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const _ImageError(),
+                          )
+                        : Container(
+                            color: FlapBrand.burgundy,
+                            alignment: Alignment.center,
+                            child: Text(
+                              member.name.isEmpty
+                                  ? '?'
+                                  : member.name.characters.first,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 76,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
                   ),
-                  const Positioned(
-                    right: 14,
-                    bottom: 14,
-                    child: _ZoomBadge(),
-                  ),
-                ],
-              ),
-            )
-          else
-            Container(
-              height: 230,
-              color: FlapBrand.burgundy,
-              alignment: Alignment.center,
-              child: Text(
-                member.name.isEmpty ? '?' : member.name.characters.first,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 76,
-                  fontWeight: FontWeight.w900,
                 ),
               ),
-            ),
+              Container(
+                height: 76,
+                color: const Color(0xCC090A0B),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _MemberQuickAction(
+                      icon: Icons.call_rounded,
+                      label: 'Anrufen',
+                      enabled: member.phoneMobile.isNotEmpty ||
+                          member.phonePrivate.isNotEmpty,
+                      onTap: () => _call(
+                        context,
+                        member.phoneMobile.isNotEmpty
+                            ? member.phoneMobile
+                            : member.phonePrivate,
+                      ),
+                    ),
+                    _MemberQuickAction(
+                      icon: Icons.mail_outline_rounded,
+                      label: 'E-Mail',
+                      enabled: member.email.isNotEmpty,
+                      onTap: () => _mail(context),
+                    ),
+                    _MemberQuickAction(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      label: 'Nachricht',
+                      enabled: member.phoneMobile.isNotEmpty,
+                      onTap: () => _message(context),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 34),
             child: Column(
@@ -559,6 +603,51 @@ class MemberDetailScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MemberQuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _MemberQuickAction({
+    required this.icon,
+    required this.label,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 92,
+        height: 68,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: enabled ? Colors.white : Colors.white24,
+              size: 27,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: enabled ? Colors.white70 : Colors.white24,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
