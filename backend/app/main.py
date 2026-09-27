@@ -986,7 +986,6 @@ CONTENT_PUSH_RULES = {
     "polls": ("poll", "Neue Umfrage", "/more"),
     "photos": ("photo_album", "Neues Fotoalbum", "/more"),
     "gallery": ("gallery", "Neuer Galerie-Inhalt", "/gallery"),
-    "motto": ("motto", "Neues Jahresmotto", "/more"),
     "sujet": ("sujet", "Neues Sujet", "/more"),
     "archive": ("archive", "Neuer Archiv-Inhalt", "/more"),
 }
@@ -1123,7 +1122,6 @@ def delete_row(resource: str, row_id: int) -> None:
 
 CONTENT_PERMISSIONS = {
     "hero": "can_photos",
-    "motto": "can_photos",
     "sujet": "can_photos",
     "archive": "can_photos",
     "gallery": "can_photos",
