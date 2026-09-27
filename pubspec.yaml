@@ -21,6 +21,7 @@ dependencies:
   flutter_image_compress: ^2.4.0
   firebase_core: ^4.1.1
   firebase_messaging: ^16.0.2
+  flutter_local_notifications: ^19.4.2
   path_provider: ^2.1.5
   open_filex: ^4.7.0
 
