@@ -167,6 +167,10 @@ class ApiService {
       if (imageUrl.startsWith('/')) {
         json['image_url'] = '$baseUrl$imageUrl';
       }
+      final documentUrl = json['document_url']?.toString() ?? '';
+      if (documentUrl.startsWith('/')) {
+        json['document_url'] = '$baseUrl$documentUrl';
+      }
       return ContentItem.fromJson(json);
     }).toList();
   }
@@ -177,6 +181,7 @@ class ApiService {
       'title': item.title,
       'text': item.text,
       'link_url': item.linkUrl,
+      'poll_options': item.pollOptions,
     });
     final response = item.id == null
         ? await http
@@ -200,6 +205,31 @@ class ApiService {
     if (imageUrl.startsWith('/')) {
       json['image_url'] = '$baseUrl$imageUrl';
     }
+    final documentUrl = json['document_url']?.toString() ?? '';
+    if (documentUrl.startsWith('/')) {
+      json['document_url'] = '$baseUrl$documentUrl';
+    }
+    return ContentItem.fromJson(json);
+  }
+
+  Future<Uint8List> downloadDocument(String url) async {
+    final response = await http
+        .get(Uri.parse(url), headers: authHeaders)
+        .timeout(const Duration(seconds: 30));
+    _ensureSuccess(response);
+    return response.bodyBytes;
+  }
+
+  Future<ContentItem> votePoll(int pollId, int optionIndex) async {
+    final response = await http
+        .post(
+          _uri('/api/polls/$pollId/vote'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'option_index': optionIndex}),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
     return ContentItem.fromJson(json);
   }
 
