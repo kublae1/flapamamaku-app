@@ -1384,6 +1384,8 @@ async function loadContent() {
       ${item.image_urls?.length ? `<div class="meta">✓ ${item.image_urls.length} Bilder gespeichert</div>` : '<div class="meta">Keine Bilder</div>'}
       ${item.link_url ? `<div class="meta">Link: <a href="${item.link_url}" target="_blank" rel="noopener">${item.link_url}</a></div>` : ""}
       <div class="actions">
+        <button type="button" class="move-up" title="Nach oben">↑</button>
+        <button type="button" class="move-down" title="Nach unten">↓</button>
         <button type="button" class="edit">Bearbeiten</button>
         <button type="button" class="delete">Löschen</button>
       </div>
