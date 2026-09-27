@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
@@ -347,10 +348,23 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   }
 }
 
-class MemberDetailScreen extends StatelessWidget {
+class MemberDetailScreen extends StatefulWidget {
   final MemberItem member;
 
   const MemberDetailScreen({required this.member, super.key});
+
+  @override
+  State<MemberDetailScreen> createState() => _MemberDetailScreenState();
+}
+
+class _MemberDetailScreenState extends State<MemberDetailScreen> {
+  late MemberItem member;
+
+  @override
+  void initState() {
+    super.initState();
+    member = widget.member;
+  }
 
   Future<void> _launch(BuildContext context, Uri uri) async {
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -405,6 +419,167 @@ class MemberDetailScreen extends StatelessWidget {
     await _launch(context, uri);
   }
 
+  Future<void> _editOwnProfile(BuildContext context) async {
+    final store = AppStoreScope.of(context);
+    final partner = TextEditingController(text: member.partnerName);
+    final mobile = TextEditingController(text: member.phoneMobile);
+    final privatePhone = TextEditingController(text: member.phonePrivate);
+    final workPhone = TextEditingController(text: member.phoneWork);
+    final email = TextEditingController(text: member.email);
+    final address = TextEditingController(text: member.address);
+    final occupation = TextEditingController(text: member.occupation);
+    final employer = TextEditingController(text: member.employer);
+    final employerUrl = TextEditingController(text: member.employerUrl);
+    final engagement = TextEditingController(text: member.engagement);
+    XFile? selectedPhoto;
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: FlapBrand.charcoal,
+      builder: (sheetContext) {
+        bool saving = false;
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            Future<void> save() async {
+              if (saving) return;
+              setSheetState(() => saving = true);
+              try {
+                final updated = MemberItem(
+                  member.name,
+                  member.role,
+                  member.since,
+                  id: member.id,
+                  birthDate: member.birthDate,
+                  status: member.status,
+                  memberGroup: member.memberGroup,
+                  engagement: engagement.text.trim(),
+                  sortOrder: member.sortOrder,
+                  filterIds: member.filterIds,
+                  partnerName: partner.text.trim(),
+                  phoneMobile: mobile.text.trim(),
+                  phonePrivate: privatePhone.text.trim(),
+                  phoneWork: workPhone.text.trim(),
+                  email: email.text.trim(),
+                  address: address.text.trim(),
+                  occupation: occupation.text.trim(),
+                  employer: employer.text.trim(),
+                  employerUrl: employerUrl.text.trim(),
+                  photoUrl: member.photoUrl,
+                );
+                var result = await store.api.updateOwnMember(updated);
+                if (selectedPhoto != null) {
+                  final bytes = await selectedPhoto!.readAsBytes();
+                  result = await store.api.uploadOwnMemberPhoto(
+                    bytes: bytes,
+                    filename: selectedPhoto!.name,
+                  );
+                }
+                await store.refreshFromServer();
+                if (!mounted) return;
+                setState(() => member = result);
+                if (sheetContext.mounted) Navigator.of(sheetContext).pop(true);
+              } catch (_) {
+                if (sheetContext.mounted) {
+                  ScaffoldMessenger.of(sheetContext).showSnackBar(
+                    const SnackBar(content: Text('Daten konnten nicht gespeichert werden.')),
+                  );
+                }
+              } finally {
+                if (sheetContext.mounted) setSheetState(() => saving = false);
+              }
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  18,
+                  18,
+                  18,
+                  18 + MediaQuery.of(sheetContext).viewInsets.bottom,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Meine Daten bearbeiten',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Name, Funktion, Eintritt, Status und Filter werden durch die Administration verwaltet.',
+                        style: TextStyle(color: Colors.white60),
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                final picked = await ImagePicker().pickImage(
+                                  source: ImageSource.gallery,
+                                  imageQuality: 88,
+                                  maxWidth: 1600,
+                                );
+                                if (picked != null) {
+                                  setSheetState(() => selectedPhoto = picked);
+                                }
+                              },
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        label: Text(
+                          selectedPhoto == null
+                              ? 'Profilfoto auswählen'
+                              : 'Foto gewählt: ${selectedPhoto!.name}',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _ProfileEditField(controller: partner, label: 'Partnerin / Partner'),
+                      _ProfileEditField(controller: mobile, label: 'Mobil', keyboardType: TextInputType.phone),
+                      _ProfileEditField(controller: privatePhone, label: 'Telefon privat', keyboardType: TextInputType.phone),
+                      _ProfileEditField(controller: workPhone, label: 'Telefon Arbeit', keyboardType: TextInputType.phone),
+                      _ProfileEditField(controller: email, label: 'E-Mail', keyboardType: TextInputType.emailAddress),
+                      _ProfileEditField(controller: address, label: 'Adresse'),
+                      _ProfileEditField(controller: occupation, label: 'Beruf'),
+                      _ProfileEditField(controller: employer, label: 'Arbeitgeber'),
+                      _ProfileEditField(controller: employerUrl, label: 'Webseite Arbeitgeber', keyboardType: TextInputType.url),
+                      _ProfileEditField(
+                        controller: engagement,
+                        label: 'Kurz-Engagement',
+                        maxLines: 3,
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        onPressed: saving ? null : save,
+                        icon: saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.save_outlined),
+                        label: Text(saving ? 'Speichern …' : 'Speichern'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Deine Mitgliederdaten wurden aktualisiert.')),
+      );
+    }
+  }
+
   Future<void> _maps(BuildContext context) async {
     if (member.address.isEmpty) return;
     await _launch(
@@ -449,6 +624,14 @@ class MemberDetailScreen extends StatelessWidget {
           member.name,
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
+        actions: [
+          if (AppStoreScope.of(context).currentUser?['member_id'] == member.id)
+            IconButton(
+              tooltip: 'Meine Daten bearbeiten',
+              onPressed: () => _editOwnProfile(context),
+              icon: const Icon(Icons.edit_rounded),
+            ),
+        ],
       ),
       body: ListView(
         padding: EdgeInsets.zero,
@@ -629,6 +812,12 @@ class MemberDetailScreen extends StatelessWidget {
                             ? null
                             : () => _openEmployerWebsite(context),
                       ),
+                      const _DarkDivider(),
+                      _DarkInfoTile(
+                        icon: Icons.volunteer_activism_outlined,
+                        title: 'Engagement',
+                        value: _value(member.engagement),
+                      ),
                     ],
                   ),
                 ),
@@ -636,6 +825,41 @@ class MemberDetailScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ProfileEditField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final TextInputType? keyboardType;
+  final int maxLines;
+
+  const _ProfileEditField({
+    required this.controller,
+    required this.label,
+    this.keyboardType,
+    this.maxLines = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        maxLines: maxLines,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          labelText: label,
+          filled: true,
+          fillColor: const Color(0xFF191B1E),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
       ),
     );
   }
