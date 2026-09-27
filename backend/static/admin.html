@@ -1638,10 +1638,13 @@ document.getElementById("gallery-nav").addEventListener("click", async () => {
 
 document.getElementById("content-nav").addEventListener("click", async () => {
   document.getElementById("content-editor-title").textContent = "Fotoalben & Inhalte bearbeiten";
-  if (document.getElementById("content-filter").value === "gallery") {
-    document.getElementById("content-filter").value = "";
-  }
+  document.getElementById("content-filter").value = "photos";
+  document.getElementById("content-sort").value = "manual";
+  document.querySelector("#content-form [name=section]").value = "photos";
   resetContentForm({keepSection: true});
+  updateContentImageRecommendation();
+  updateContentFormMode();
+  updateContentPreview();
   await loadContent();
 });
 updateContentImageRecommendation();
