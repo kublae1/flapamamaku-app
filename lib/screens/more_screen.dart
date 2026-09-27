@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
 import '../theme/flap_brand.dart';
@@ -10,9 +11,32 @@ import 'settings_screen.dart';
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
+  Future<void> _openWhatsAppGroup(
+    BuildContext context,
+    String value,
+  ) async {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'http')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('WhatsApp-Gruppenlink ist ungültig.')),
+      );
+      return;
+    }
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('WhatsApp konnte nicht geöffnet werden.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
+    final whatsappItems = store.contentFor('whatsapp');
+    final whatsappLink = whatsappItems
+        .map((item) => item.linkUrl.trim())
+        .firstWhere((value) => value.isNotEmpty, orElse: () => '');
 
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
@@ -37,6 +61,13 @@ class MoreScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const MembersScreen()),
               ),
             ),
+            if (whatsappLink.isNotEmpty)
+              _MockupMenuCard(
+                icon: Icons.chat_rounded,
+                title: 'WhatsApp-Gruppe',
+                subtitle: 'FLAPAMAMAKU-Gruppenchat direkt in WhatsApp öffnen',
+                onTap: () => _openWhatsAppGroup(context, whatsappLink),
+              ),
             if (store.canAdminister)
               _MockupMenuCard(
                 icon: Icons.admin_panel_settings_rounded,
