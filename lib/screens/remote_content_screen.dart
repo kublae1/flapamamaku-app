@@ -1168,16 +1168,13 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
       final downloaded = await store.api.downloadImage(widget.urls[index]);
       final extension = _extension(downloaded.mimeType);
       final filename = '${_safeName(widget.title)}_${index + 1}.$extension';
+      final directory = await getTemporaryDirectory();
+      final file = File('${directory.path}/$filename');
+      await file.writeAsBytes(downloaded.bytes, flush: true);
       await SharePlus.instance.share(
         ShareParams(
           title: 'Bild speichern oder teilen',
-          files: [
-            XFile.fromData(
-              downloaded.bytes,
-              mimeType: downloaded.mimeType,
-            ),
-          ],
-          fileNameOverrides: [filename],
+          files: [XFile(file.path, mimeType: downloaded.mimeType)],
         ),
       );
     } finally {
@@ -1292,6 +1289,18 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
                       onPressed: () => _changeScale(0.75),
                       color: Colors.white,
                       icon: const Icon(Icons.zoom_in_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Speichern / Teilen',
+                      onPressed: sharing ? null : _shareCurrent,
+                      color: FlapBrand.gold,
+                      icon: sharing
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.ios_share_rounded),
                     ),
                     IconButton(
                       tooltip: 'Nächstes Bild',
