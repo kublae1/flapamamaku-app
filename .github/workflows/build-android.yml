@@ -182,7 +182,7 @@ jobs:
           fi
 
           if ! grep -q 'com.google.firebase.messaging.default_notification_icon' "$MANIFEST"; then
-            sed -i '/<application/a\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@mipmap/ic_launcher" />' "$MANIFEST"
+            sed -i '/<\/application>/i\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@mipmap/ic_launcher" />' "$MANIFEST"
           fi
 
           MAIN_ACTIVITY=$(find android/app/src/main -name MainActivity.kt | head -n 1)
