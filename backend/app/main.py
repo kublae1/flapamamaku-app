@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.21"
+API_VERSION = "0.8.22"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -132,6 +132,11 @@ class ContentPayload(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     text: str = ""
     link_url: str = ""
+    poll_options: list[str] = []
+
+
+class PollVotePayload(BaseModel):
+    option_index: int = Field(ge=0, le=20)
 
 
 class ContentImageOrderPayload(BaseModel):
@@ -274,6 +279,25 @@ def init_db() -> None:
                 image_mime TEXT NOT NULL DEFAULT '',
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        _ensure_column(db, "content_items", "document_data", "BLOB")
+        _ensure_column(db, "content_items", "document_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "content_items", "document_name", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "content_items", "poll_options", "TEXT NOT NULL DEFAULT '[]'")
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS poll_votes (
+                poll_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                option_index INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(poll_id, user_id),
+                FOREIGN KEY(poll_id) REFERENCES content_items(id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
         )
@@ -982,10 +1006,16 @@ CONTENT_PERMISSIONS = {
 }
 
 
-def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
+def _serialize_content(
+    row: sqlite3.Row,
+    user_id: int | None = None,
+) -> dict[str, Any]:
     item = dict(row)
     item.pop("image_data", None)
     item.pop("image_mime", None)
+    has_document = bool(item.pop("document_data", None))
+    document_mime = str(item.pop("document_mime", "") or "")
+    document_name = str(item.get("document_name", "") or "")
     with connect() as db:
         image_rows = db.execute(
             """
@@ -996,6 +1026,44 @@ def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
             """,
             (item["id"],),
         ).fetchall()
+        if item.get("section") == "polls":
+            try:
+                options = json.loads(item.get("poll_options") or "[]")
+            except Exception:
+                options = []
+            if not isinstance(options, list):
+                options = []
+            options = [str(value).strip() for value in options if str(value).strip()]
+            counts = [0 for _ in options]
+            for vote in db.execute(
+                """
+                SELECT option_index, COUNT(*) AS count
+                FROM poll_votes
+                WHERE poll_id = ?
+                GROUP BY option_index
+                """,
+                (item["id"],),
+            ).fetchall():
+                index = int(vote["option_index"])
+                if 0 <= index < len(counts):
+                    counts[index] = int(vote["count"])
+            my_vote = None
+            if user_id is not None:
+                vote = db.execute(
+                    "SELECT option_index FROM poll_votes WHERE poll_id = ? AND user_id = ?",
+                    (item["id"], user_id),
+                ).fetchone()
+                if vote is not None:
+                    my_vote = int(vote["option_index"])
+            item["poll_options"] = options
+            item["poll_counts"] = counts
+            item["poll_total_votes"] = sum(counts)
+            item["poll_my_vote"] = my_vote
+        else:
+            item["poll_options"] = []
+            item["poll_counts"] = []
+            item["poll_total_votes"] = 0
+            item["poll_my_vote"] = None
     images = [
         {
             "id": image_row["id"],
@@ -1009,6 +1077,11 @@ def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
     item["images"] = images
     item["image_urls"] = image_urls
     item["image_url"] = image_urls[0] if image_urls else ""
+    item["document_url"] = (
+        f"/api/content/{item['id']}/document" if has_document else ""
+    )
+    item["document_name"] = document_name
+    item["document_mime"] = document_mime if has_document else ""
     return item
 
 def _cleanup_expired_snapshots(db: sqlite3.Connection) -> None:
@@ -1535,7 +1608,7 @@ def get_content(
             ).fetchall()
         db.commit()
 
-    items = [_serialize_content(row) for row in rows]
+    items = [_serialize_content(row, user["id"]) for row in rows]
     items.extend(_serialize_snapshot(row, user) for row in snapshots)
     return items
 
@@ -1629,14 +1702,18 @@ def post_content(
         cursor = db.execute(
             """
             INSERT INTO content_items (
-                section, title, text, link_url, sort_order, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                section, title, text, link_url, poll_options, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.section,
                 payload.title,
                 payload.text,
                 payload.link_url,
+                json.dumps(
+                    [value.strip() for value in payload.poll_options if value.strip()],
+                    ensure_ascii=False,
+                ) if payload.section == "polls" else "[]",
                 max_order + 1,
                 now,
             ),
@@ -1667,7 +1744,7 @@ def put_content(
         db.execute(
             """
             UPDATE content_items
-            SET section = ?, title = ?, text = ?, link_url = ?
+            SET section = ?, title = ?, text = ?, link_url = ?, poll_options = ?
             WHERE id = ?
             """,
             (
@@ -1675,6 +1752,10 @@ def put_content(
                 payload.title,
                 payload.text,
                 payload.link_url,
+                json.dumps(
+                    [value.strip() for value in payload.poll_options if value.strip()],
+                    ensure_ascii=False,
+                ) if payload.section == "polls" else "[]",
                 row_id,
             ),
         )
@@ -1700,8 +1781,142 @@ def delete_content(
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(row["section"], user)
         db.execute("DELETE FROM content_images WHERE content_id = ?", (row_id,))
+        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (row_id,))
         db.execute("DELETE FROM content_items WHERE id = ?", (row_id,))
         db.commit()
+
+
+@app.post("/api/content/{row_id}/document")
+async def upload_content_document(
+    row_id: int,
+    document: UploadFile = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        if existing["section"] != "documents":
+            raise HTTPException(status_code=422, detail="PDF nur bei Dokumenten erlaubt")
+
+        data = await document.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="Leere PDF-Datei")
+        if len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="PDF ist grösser als 20 MB")
+        mime = (document.content_type or "").lower()
+        filename = (document.filename or "dokument.pdf").strip()
+        is_pdf = mime == "application/pdf" or filename.lower().endswith(".pdf")
+        if not is_pdf or not data.startswith(b"%PDF"):
+            raise HTTPException(status_code=415, detail="Nur PDF-Dateien sind erlaubt")
+
+        db.execute(
+            """
+            UPDATE content_items
+            SET document_data = ?, document_mime = 'application/pdf', document_name = ?
+            WHERE id = ?
+            """,
+            (data, filename, row_id),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+@app.get("/api/content/{row_id}/document")
+def get_content_document(
+    row_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        row = db.execute(
+            """
+            SELECT document_data, document_mime, document_name
+            FROM content_items
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+    if row is None or row["document_data"] is None:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    filename = str(row["document_name"] or "dokument.pdf").replace('"', "")
+    return Response(
+        content=row["document_data"],
+        media_type=row["document_mime"] or "application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
+@app.delete("/api/content/{row_id}/document", status_code=204)
+def delete_content_document(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        db.execute(
+            """
+            UPDATE content_items
+            SET document_data = NULL, document_mime = '', document_name = ''
+            WHERE id = ?
+            """,
+            (row_id,),
+        )
+        db.commit()
+
+
+@app.post("/api/polls/{poll_id}/vote")
+def vote_poll(
+    poll_id: int,
+    payload: PollVotePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        poll = db.execute(
+            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if poll is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        try:
+            options = json.loads(poll["poll_options"] or "[]")
+        except Exception:
+            options = []
+        if payload.option_index >= len(options):
+            raise HTTPException(status_code=422, detail="Antwortoption ungültig")
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(poll_id, user_id) DO UPDATE SET
+                option_index = excluded.option_index,
+                created_at = excluded.created_at
+            """,
+            (poll_id, user["id"], payload.option_index, now),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (poll_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
 
 
 @app.post("/api/content/{row_id}/images")
