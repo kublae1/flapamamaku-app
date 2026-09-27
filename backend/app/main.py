@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import os
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_DAYS = 30
-API_VERSION = "0.8.15"
+API_VERSION = "0.8.16"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 
@@ -61,6 +62,7 @@ PERMISSION_FIELDS = (
     "can_members",
     "can_documents",
     "can_photos",
+    "can_gallery_upload",
     "can_polls",
     "can_links",
     "can_contact",
@@ -135,6 +137,7 @@ class UserPayload(BaseModel):
     can_members: bool = False
     can_documents: bool = False
     can_photos: bool = False
+    can_gallery_upload: bool = False
     can_polls: bool = False
     can_links: bool = False
     can_contact: bool = False
@@ -258,6 +261,20 @@ def init_db() -> None:
 
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS gallery_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                image_data BLOB NOT NULL,
+                image_mime TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 member_id INTEGER,
@@ -316,6 +333,12 @@ def init_db() -> None:
         _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "photo_data", "BLOB")
         _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(
+            db,
+            "users",
+            "can_gallery_upload",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
 
         _ensure_column(
             db,
@@ -396,9 +419,21 @@ def init_db() -> None:
         db.commit()
 
 
+async def _snapshot_cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        with connect() as db:
+            db.execute(
+                "DELETE FROM gallery_snapshots WHERE expires_at <= ?",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            db.commit()
+
+
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     init_db()
+    asyncio.create_task(_snapshot_cleanup_loop())
 
 
 def _hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
@@ -633,6 +668,37 @@ def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
     item["image_urls"] = image_urls
     item["image_url"] = image_urls[0] if image_urls else ""
     return item
+
+def _cleanup_expired_snapshots(db: sqlite3.Connection) -> None:
+    db.execute(
+        "DELETE FROM gallery_snapshots WHERE expires_at <= ?",
+        (datetime.now(timezone.utc).isoformat(),),
+    )
+
+
+def _serialize_snapshot(
+    row: sqlite3.Row,
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    owner_name = row["member_name"] or row["username"]
+    can_delete = row["user_id"] == user["id"] or bool(user.get("can_photos", False))
+    return {
+        "id": None,
+        "snapshot_id": row["id"],
+        "section": "gallery",
+        "title": f"Snapshot von {owner_name}",
+        "text": "",
+        "link_url": "",
+        "sort_order": -1,
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+        "is_snapshot": True,
+        "can_delete": can_delete,
+        "image_url": f"/api/gallery/snapshots/{row['id']}/image",
+        "image_urls": [f"/api/gallery/snapshots/{row['id']}/image"],
+        "images": [],
+    }
+
 
 def _content_permission(section: str) -> str:
     permission = CONTENT_PERMISSIONS.get(section)
@@ -900,10 +966,103 @@ def delete_user(
         db.commit()
 
 
+@app.post("/api/gallery/snapshots")
+async def post_gallery_snapshot(
+    image: UploadFile = File(...),
+    expires_days: int = 14,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not (user.get("can_gallery_upload", False) or user.get("can_photos", False)):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung für Galerie-Snapshots")
+    if expires_days not in {7, 14, 30}:
+        raise HTTPException(status_code=422, detail="Ablaufzeit muss 7, 14 oder 30 Tage sein")
+    if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+    data = await image.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=expires_days)
+    with connect() as db:
+        _cleanup_expired_snapshots(db)
+        cursor = db.execute(
+            """
+            INSERT INTO gallery_snapshots (
+                user_id, image_data, image_mime, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                user["id"],
+                data,
+                image.content_type or "image/jpeg",
+                now.isoformat(),
+                expires.isoformat(),
+            ),
+        )
+        db.commit()
+        row = db.execute(
+            """
+            SELECT gs.*, u.username, m.name AS member_name
+            FROM gallery_snapshots gs
+            JOIN users u ON u.id = gs.user_id
+            LEFT JOIN members m ON m.id = u.member_id
+            WHERE gs.id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+    return _serialize_snapshot(row, user)
+
+
+@app.get("/api/gallery/snapshots/{snapshot_id}/image")
+def get_gallery_snapshot_image(
+    snapshot_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        _cleanup_expired_snapshots(db)
+        row = db.execute(
+            """
+            SELECT image_data, image_mime
+            FROM gallery_snapshots
+            WHERE id = ? AND expires_at > ?
+            """,
+            (snapshot_id, datetime.now(timezone.utc).isoformat()),
+        ).fetchone()
+        db.commit()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Snapshot nicht gefunden oder abgelaufen")
+    return Response(
+        content=row["image_data"],
+        media_type=row["image_mime"] or "image/jpeg",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+@app.delete("/api/gallery/snapshots/{snapshot_id}", status_code=204)
+def delete_gallery_snapshot(
+    snapshot_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        row = db.execute(
+            "SELECT user_id FROM gallery_snapshots WHERE id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Snapshot nicht gefunden")
+        if row["user_id"] != user["id"] and not user.get("can_photos", False):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung")
+        db.execute("DELETE FROM gallery_snapshots WHERE id = ?", (snapshot_id,))
+        db.commit()
+
+
 @app.get("/api/content")
 def get_content(
     section: str | None = None,
-    _: dict[str, Any] = Depends(current_user),
+    user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     sql = "SELECT * FROM content_items"
     values: list[Any] = []
@@ -914,8 +1073,26 @@ def get_content(
     sql += " ORDER BY sort_order ASC, id ASC"
 
     with connect() as db:
+        _cleanup_expired_snapshots(db)
         rows = db.execute(sql, values).fetchall()
-    return [_serialize_content(row) for row in rows]
+        snapshots: list[sqlite3.Row] = []
+        if section is None or section == "gallery":
+            snapshots = db.execute(
+                """
+                SELECT gs.*, u.username, m.name AS member_name
+                FROM gallery_snapshots gs
+                JOIN users u ON u.id = gs.user_id
+                LEFT JOIN members m ON m.id = u.member_id
+                WHERE gs.expires_at > ?
+                ORDER BY gs.created_at DESC, gs.id DESC
+                """,
+                (datetime.now(timezone.utc).isoformat(),),
+            ).fetchall()
+        db.commit()
+
+    items = [_serialize_content(row) for row in rows]
+    items.extend(_serialize_snapshot(row, user) for row in snapshots)
+    return items
 
 
 @app.put("/api/content/order")
