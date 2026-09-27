@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
 
@@ -12,6 +13,9 @@ class PushService {
   final ApiService api;
   StreamSubscription<String>? _tokenSubscription;
   StreamSubscription<RemoteMessage>? _openedSubscription;
+  StreamSubscription<RemoteMessage>? _foregroundSubscription;
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
   String? _registeredToken;
   String? _pendingRoute;
   bool _initialized = false;
@@ -41,6 +45,32 @@ class PushService {
             projectId: _projectId,
           ),
         );
+        const androidSettings =
+            AndroidInitializationSettings('@mipmap/ic_launcher');
+        const initializationSettings = InitializationSettings(
+          android: androidSettings,
+        );
+        await _localNotifications.initialize(
+          initializationSettings,
+          onDidReceiveNotificationResponse: (response) {
+            final route = response.payload ?? '';
+            if (route.isNotEmpty) _dispatchRoute(route);
+          },
+        );
+
+        if (Platform.isAndroid) {
+          const channel = AndroidNotificationChannel(
+            'flapamamaku_push',
+            'FLAPAMAMAKU Benachrichtigungen',
+            description: 'News, Termine und neue Vereinsinhalte',
+            importance: Importance.high,
+          );
+          await _localNotifications
+              .resolvePlatformSpecificImplementation<
+                  AndroidFlutterLocalNotificationsPlugin>()
+              ?.createNotificationChannel(channel);
+        }
+
         _initialized = true;
       }
 
@@ -70,6 +100,33 @@ class PushService {
         if (route.isNotEmpty) {
           _dispatchRoute(route);
         }
+      });
+
+      await _foregroundSubscription?.cancel();
+      _foregroundSubscription = FirebaseMessaging.onMessage.listen((message) async {
+        final title = message.notification?.title ??
+            message.data['title']?.toString() ??
+            'FLAPAMAMAKU';
+        final body = message.notification?.body ??
+            message.data['body']?.toString() ??
+            '';
+        final route = message.data['route']?.toString() ?? '';
+
+        const androidDetails = AndroidNotificationDetails(
+          'flapamamaku_push',
+          'FLAPAMAMAKU Benachrichtigungen',
+          channelDescription: 'News, Termine und neue Vereinsinhalte',
+          importance: Importance.high,
+          priority: Priority.high,
+        );
+        const details = NotificationDetails(android: androidDetails);
+        await _localNotifications.show(
+          message.messageId?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
+          title,
+          body,
+          details,
+          payload: route,
+        );
       });
 
       await _tokenSubscription?.cancel();
@@ -112,6 +169,8 @@ class PushService {
     _tokenSubscription = null;
     await _openedSubscription?.cancel();
     _openedSubscription = null;
+    await _foregroundSubscription?.cancel();
+    _foregroundSubscription = null;
 
     final token = _registeredToken;
     _registeredToken = null;
@@ -127,5 +186,7 @@ class PushService {
     _tokenSubscription = null;
     await _openedSubscription?.cancel();
     _openedSubscription = null;
+    await _foregroundSubscription?.cancel();
+    _foregroundSubscription = null;
   }
 }
