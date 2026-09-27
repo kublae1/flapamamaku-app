@@ -409,6 +409,13 @@
           </select>
           <label>Gruppe / Ressort</label><input name="member_group" placeholder="z. B. Vorstand, Wagenbau">
           <label>Kurz-Engagement</label><textarea name="engagement" placeholder="z. B. Wagenbau, Organisation, Musik …"></textarea>
+
+          <div style="margin-top:16px">
+            <h3>Mitglieder-Filter</h3>
+            <p class="meta">Die aktiven Filter werden in der App angezeigt. Ein Mitglied kann mehreren Filtern zugeordnet werden.</p>
+            <div id="member-filter-checkboxes" class="permission-grid"></div>
+          </div>
+
           <label>Partnerin / Partner</label><input name="partner_name">
           <label>Mobil</label><input name="phone_mobile">
           <label>Telefon privat</label><input name="phone_private">
@@ -459,7 +466,33 @@
 
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
-        <div class="card"><h2>Mitglieder</h2><div id="members-list"></div></div>
+        <div>
+          <div class="card">
+            <h2>Mitglieder</h2>
+            <div id="members-list"></div>
+          </div>
+          <div class="card">
+            <div class="preview-heading">
+              <h2>Mitglieder-Filter</h2>
+              <button type="button" id="member-filter-new">+ Neuer Filter</button>
+            </div>
+            <p class="meta">Diese Filter sind vereinsabhängig und können jederzeit geändert werden. Nur aktive Filter erscheinen in der App.</p>
+            <form id="member-filter-form">
+              <input type="hidden" name="id">
+              <label>Bezeichnung</label>
+              <input name="label" placeholder="z. B. Aktiv, Vorstand, Junioren" required>
+              <label style="display:flex;gap:8px;align-items:center">
+                <input name="active" type="checkbox" checked>
+                In der App anzeigen
+              </label>
+              <div class="actions">
+                <button class="primary" type="submit">Filter speichern</button>
+                <button type="button" id="member-filter-cancel">Abbrechen</button>
+              </div>
+            </form>
+            <div id="member-filter-list" style="margin-top:16px"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -610,6 +643,7 @@ let apiVersion = "";
 let currentUser = null;
 let bootstrapRequired = false;
 let userAccounts = [];
+let memberFilters = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
@@ -721,6 +755,11 @@ function formData(form, resource) {
     }
   }
   resources[resource].forEach(key => data[key] = form.elements[key].value.trim());
+  if (resource === "members") {
+    data.filter_ids = [...document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]:checked')]
+      .map(input => Number(input.value))
+      .filter(Number.isFinite);
+  }
   return data;
 }
 
@@ -823,6 +862,13 @@ function edit(resource, item) {
     if (form.elements[key]) form.elements[key].value = item[key] || "";
   });
 
+  if (resource === "members") {
+    const selected = new Set((item.filter_ids || []).map(Number));
+    document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]').forEach(input => {
+      input.checked = selected.has(Number(input.value));
+    });
+  }
+
   if (resource === "members" && currentUser?.can_manage_users) {
     const account = userAccounts.find(user => Number(user.member_id) === Number(item.id));
     form.elements.account_user_id.value = account?.id || "";
@@ -843,6 +889,116 @@ async function remove(resource, id) {
   await api(`/api/${resource}/${id}`, {method: "DELETE"});
   await load(resource);
 }
+
+function renderMemberFilterCheckboxes() {
+  const box = document.getElementById("member-filter-checkboxes");
+  if (!box) return;
+  const selected = new Set(
+    [...box.querySelectorAll('input[type="checkbox"]:checked')].map(input => Number(input.value))
+  );
+  box.innerHTML = "";
+  memberFilters.filter(filter => filter.active).forEach(filter => {
+    const label = document.createElement("label");
+    label.innerHTML = `<input type="checkbox" value="${filter.id}"> ${filter.label}`;
+    const input = label.querySelector("input");
+    input.checked = selected.has(Number(filter.id));
+    box.appendChild(label);
+  });
+}
+
+async function loadMemberFilters() {
+  memberFilters = await api("/api/member-filters");
+  memberFilters.sort((a, b) =>
+    (a.sort_order || 0) - (b.sort_order || 0) ||
+    (a.label || "").localeCompare(b.label || "", "de", {sensitivity:"base"})
+  );
+  renderMemberFilterCheckboxes();
+
+  const list = document.getElementById("member-filter-list");
+  if (!list) return;
+  list.innerHTML = "";
+  memberFilters.forEach((filter, index) => {
+    const div = document.createElement("div");
+    div.className = "entry";
+    div.innerHTML = `
+      <h3>${filter.label}</h3>
+      <div class="meta">${filter.active ? "Aktiv · wird in der App angezeigt" : "Inaktiv · in der App ausgeblendet"}</div>
+      <div class="actions">
+        <button type="button" class="filter-up">↑</button>
+        <button type="button" class="filter-down">↓</button>
+        <button type="button" class="filter-edit">Bearbeiten</button>
+        <button type="button" class="delete filter-delete">Löschen</button>
+      </div>
+    `;
+    const up = div.querySelector(".filter-up");
+    const down = div.querySelector(".filter-down");
+    up.disabled = index === 0;
+    down.disabled = index === memberFilters.length - 1;
+    up.onclick = () => moveMemberFilter(index, index - 1);
+    down.onclick = () => moveMemberFilter(index, index + 1);
+    div.querySelector(".filter-edit").onclick = () => editMemberFilter(filter);
+    div.querySelector(".filter-delete").onclick = () => deleteMemberFilter(filter);
+    list.appendChild(div);
+  });
+}
+
+function editMemberFilter(filter) {
+  const form = document.getElementById("member-filter-form");
+  form.elements.id.value = filter.id;
+  form.elements.label.value = filter.label || "";
+  form.elements.active.checked = !!filter.active;
+  form.scrollIntoView({behavior:"smooth"});
+}
+
+function resetMemberFilterForm() {
+  const form = document.getElementById("member-filter-form");
+  form.reset();
+  form.elements.id.value = "";
+  form.elements.active.checked = true;
+}
+
+async function moveMemberFilter(fromIndex, toIndex) {
+  if (toIndex < 0 || toIndex >= memberFilters.length) return;
+  const reordered = [...memberFilters];
+  const [moved] = reordered.splice(fromIndex, 1);
+  reordered.splice(toIndex, 0, moved);
+  await api("/api/member-filters/order", {
+    method: "PUT",
+    body: JSON.stringify({item_ids: reordered.map(filter => filter.id)}),
+  });
+  await loadMemberFilters();
+}
+
+async function deleteMemberFilter(filter) {
+  if (!confirm(`Filter „${filter.label}“ wirklich löschen? Die Zuordnung wird bei allen Mitgliedern entfernt.`)) return;
+  await api(`/api/member-filters/${filter.id}`, {method:"DELETE"});
+  resetMemberFilterForm();
+  await loadMemberFilters();
+  await load("members");
+}
+
+document.getElementById("member-filter-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.elements.id.value;
+  const payload = {
+    label: form.elements.label.value.trim(),
+    active: form.elements.active.checked,
+  };
+  await api(id ? `/api/member-filters/${id}` : "/api/member-filters", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(payload),
+  });
+  resetMemberFilterForm();
+  await loadMemberFilters();
+});
+
+document.getElementById("member-filter-new").addEventListener("click", () => {
+  resetMemberFilterForm();
+  document.getElementById("member-filter-form").elements.label.focus();
+});
+document.getElementById("member-filter-cancel").addEventListener("click", resetMemberFilterForm);
+
 
 async function loadMembersForSelects() {
   const members = await api("/api/members");
@@ -991,6 +1147,10 @@ Object.keys(resources).forEach(resource => {
     form.elements.id.value = "";
     if (resource === "members") {
       form.elements.role.value = "Präsident";
+      form.elements.status.value = "Aktiv";
+      document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]').forEach(input => {
+        input.checked = false;
+      });
       if (currentUser?.can_manage_users) {
         form.elements.account_user_id.value = "";
         form.elements.account_username.value = "";
@@ -1004,8 +1164,11 @@ Object.keys(resources).forEach(resource => {
     }
     if (resource === "news") form.elements.date.value = new Date().toLocaleDateString("de-CH");
     await load(resource);
-    if (resource === "members" && currentUser?.can_manage_users) {
-      await loadMembersForSelects();
+    if (resource === "members") {
+      await loadMemberFilters();
+      if (currentUser?.can_manage_users) {
+        await loadMembersForSelects();
+      }
     }
   });
 });
@@ -1621,6 +1784,7 @@ async function startAdmin() {
   }
   if (currentUser.can_members || currentUser.can_manage_users) {
     await loadSafely("Mitglieder", async () => {
+      await loadMemberFilters();
       await load("members");
       await loadMembersForSelects();
     });
