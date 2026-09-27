@@ -299,7 +299,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                     bytes,
                     height: 220,
                     width: double.infinity,
-                    fit: BoxFit.cover,
+                    fit: BoxFit.contain,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -994,7 +994,7 @@ class _VisualAlbumList extends StatelessWidget {
                             urls.first,
                             headers: headers,
                             width: double.infinity,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             errorBuilder: (_, __, ___) => Container(
                               color: const Color(0xFF24272B),
                               alignment: Alignment.center,
