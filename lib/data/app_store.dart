@@ -410,7 +410,17 @@ class AppStore extends ChangeNotifier {
   }
 
   void _sortNews() {
-    news.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    news.sort((a, b) {
+      final aOrder = a.sortOrder;
+      final bOrder = b.sortOrder;
+      if (aOrder > 0 || bOrder > 0) {
+        final normalizedA = aOrder > 0 ? aOrder : 1 << 30;
+        final normalizedB = bOrder > 0 ? bOrder : 1 << 30;
+        final byOrder = normalizedA.compareTo(normalizedB);
+        if (byOrder != 0) return byOrder;
+      }
+      return b.createdAt.compareTo(a.createdAt);
+    });
   }
 
   void _sortEvents() {
