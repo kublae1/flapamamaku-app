@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -52,6 +56,59 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Link konnte nicht geöffnet werden.')),
+      );
+    }
+  }
+
+  Future<void> _openDocument(
+    BuildContext context,
+    AppStore store,
+    ContentItem item,
+  ) async {
+    if (item.documentUrl.isEmpty) return;
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF wird geöffnet …')),
+      );
+      final bytes = await store.api.downloadDocument(item.documentUrl);
+      final directory = await getTemporaryDirectory();
+      final safeName = item.documentName.trim().isEmpty
+          ? 'flapamamaku-dokument.pdf'
+          : item.documentName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+      final file = File('${directory.path}/$safeName');
+      await file.writeAsBytes(bytes, flush: true);
+      final result = await OpenFilex.open(file.path, type: 'application/pdf');
+      if (result.type != ResultType.done && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF konnte nicht geöffnet werden: ${result.message}')),
+        );
+      }
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('PDF konnte nicht geladen werden: $error')),
+      );
+    }
+  }
+
+  Future<void> _votePoll(
+    BuildContext context,
+    AppStore store,
+    ContentItem item,
+    int optionIndex,
+  ) async {
+    if (item.id == null) return;
+    try {
+      await store.api.votePoll(item.id!, optionIndex);
+      await store.refreshFromServer();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Deine Stimme wurde gespeichert.')),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Abstimmung fehlgeschlagen: $error')),
       );
     }
   }
@@ -359,6 +416,17 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                         ? (item) => _deleteItem(context, store, item)
                         : null,
                   )
+                : widget.section == 'documents'
+                ? _DocumentList(
+                    items: items,
+                    onOpen: (item) => _openDocument(context, store, item),
+                  )
+                : widget.section == 'polls'
+                ? _PollList(
+                    items: items,
+                    onVote: (item, optionIndex) =>
+                        _votePoll(context, store, item, optionIndex),
+                  )
                 : widget.archiveStyle
                 ? _VisualAlbumList(
                     items: items,
@@ -519,6 +587,218 @@ class _LinkList extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DocumentList extends StatelessWidget {
+  final List<ContentItem> items;
+  final ValueChanged<ContentItem> onOpen;
+
+  const _DocumentList({required this.items, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, index) {
+        final item = items[index];
+        final hasPdf = item.documentUrl.trim().isNotEmpty;
+        return Material(
+          color: const Color(0xFF191B1E),
+          borderRadius: BorderRadius.circular(18),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: hasPdf ? () => onOpen(item) : null,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: FlapBrand.burgundy,
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: const Icon(
+                      Icons.picture_as_pdf_rounded,
+                      color: Colors.white,
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        if (item.text.trim().isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            item.text.trim(),
+                            style: const TextStyle(color: Colors.white60),
+                          ),
+                        ],
+                        const SizedBox(height: 5),
+                        Text(
+                          hasPdf
+                              ? (item.documentName.isEmpty
+                                  ? 'PDF öffnen'
+                                  : item.documentName)
+                              : 'Noch keine PDF hinterlegt',
+                          style: TextStyle(
+                            color: hasPdf ? FlapBrand.gold : Colors.white38,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (hasPdf)
+                    const Icon(Icons.open_in_new_rounded, color: FlapBrand.gold),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PollList extends StatelessWidget {
+  final List<ContentItem> items;
+  final void Function(ContentItem item, int optionIndex) onVote;
+
+  const _PollList({required this.items, required this.onVote});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 14),
+      itemBuilder: (_, index) {
+        final item = items[index];
+        final total = item.pollTotalVotes;
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF191B1E),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0x18FFFFFF)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.how_to_vote_rounded, color: FlapBrand.gold),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (item.text.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(item.text.trim(), style: const TextStyle(color: Colors.white70)),
+              ],
+              const SizedBox(height: 14),
+              ...List.generate(item.pollOptions.length, (optionIndex) {
+                final count = optionIndex < item.pollCounts.length
+                    ? item.pollCounts[optionIndex]
+                    : 0;
+                final percent = total == 0 ? 0.0 : count / total;
+                final selected = item.pollMyVote == optionIndex;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => onVote(item, optionIndex),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? FlapBrand.burgundy.withValues(alpha: 0.35)
+                            : const Color(0xFF24272B),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selected ? FlapBrand.gold : const Color(0x18FFFFFF),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                selected
+                                    ? Icons.radio_button_checked
+                                    : Icons.radio_button_off,
+                                color: selected ? FlapBrand.gold : Colors.white54,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  item.pollOptions[optionIndex],
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                '$count',
+                                style: const TextStyle(
+                                  color: FlapBrand.gold,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: percent,
+                              minHeight: 6,
+                              backgroundColor: Colors.white12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+              Text(
+                total == 1 ? '1 Stimme' : '$total Stimmen',
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+            ],
           ),
         );
       },
