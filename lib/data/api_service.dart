@@ -127,6 +127,17 @@ class ApiService {
         .toList();
   }
 
+  Future<List<MemberFilterItem>> fetchMemberFilters() async {
+    final response = await http
+        .get(_uri('/api/member-filters'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final values = jsonDecode(response.body) as List<dynamic>;
+    return values
+        .map((value) => MemberFilterItem.fromJson(value as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<List<MemberItem>> fetchMembers() async {
     final response = await http
         .get(_uri('/api/members'), headers: authHeaders)
@@ -411,6 +422,11 @@ class ApiService {
       'name': item.name,
       'role': item.role,
       'since': item.since,
+      'birth_date': item.birthDate,
+      'status': item.status,
+      'member_group': item.memberGroup,
+      'engagement': item.engagement,
+      'filter_ids': item.filterIds,
       'partner_name': item.partnerName,
       'phone_mobile': item.phoneMobile,
       'phone_private': item.phonePrivate,
