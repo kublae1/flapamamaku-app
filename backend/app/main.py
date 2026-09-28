@@ -32,9 +32,9 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.35"
+API_VERSION = "0.8.36"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -406,6 +406,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
     migrations: list[tuple[int, str]] = [
         (1, "baseline-v0.8.33"),
         (2, "app-config-foundation"),
+        (3, "app-config-logo"),
     ]
     applied = {
         int(row["version"])
@@ -532,6 +533,8 @@ def init_db() -> None:
             """,
             (datetime.now(timezone.utc).isoformat(),),
         )
+        _ensure_column(db, "app_config", "logo_data", "BLOB")
+        _ensure_column(db, "app_config", "logo_mime", "TEXT NOT NULL DEFAULT ''")
 
         db.execute(
             """
@@ -1600,11 +1603,11 @@ def _require_content_permission(
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
 
 
-def _app_config() -> dict[str, str]:
+def _app_config() -> dict[str, Any]:
     with connect() as db:
         row = db.execute(
             """
-            SELECT app_name, app_subtitle, primary_color
+            SELECT app_name, app_subtitle, primary_color, logo_data
             FROM app_config
             WHERE id = 1
             """
@@ -1614,11 +1617,13 @@ def _app_config() -> dict[str, str]:
             "app_name": "FLAPAMAMAKU",
             "app_subtitle": "Fasnachtsgruppe Luzern",
             "primary_color": "#8A101B",
+            "logo_url": "",
         }
     return {
         "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
         "app_subtitle": str(row["app_subtitle"] or ""),
         "primary_color": str(row["primary_color"] or "#8A101B"),
+        "logo_url": "/api/app-config/logo" if row["logo_data"] else "",
     }
 
 
@@ -1642,7 +1647,7 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/api/app-config")
-def get_app_config() -> dict[str, str]:
+def get_app_config() -> dict[str, Any]:
     return _app_config()
 
 
@@ -1650,7 +1655,7 @@ def get_app_config() -> dict[str, str]:
 def put_app_config(
     payload: AppConfigPayload,
     _: dict[str, Any] = Depends(require("can_manage_users")),
-) -> dict[str, str]:
+) -> dict[str, Any]:
     values = payload.model_dump()
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
@@ -1674,6 +1679,61 @@ def put_app_config(
         )
         db.commit()
     return _app_config()
+
+
+@app.get("/api/app-config/logo")
+def get_app_logo() -> Response:
+    with connect() as db:
+        row = db.execute(
+            "SELECT logo_data, logo_mime FROM app_config WHERE id = 1"
+        ).fetchone()
+    if row is None or not row["logo_data"]:
+        raise HTTPException(status_code=404, detail="Logo nicht vorhanden")
+    return Response(
+        content=row["logo_data"],
+        media_type=row["logo_mime"] or "image/webp",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.post("/api/app-config/logo")
+async def upload_app_logo(
+    logo: UploadFile = File(...),
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    raw = await logo.read()
+    optimized, mime = _optimize_image(raw, logo.content_type or "")
+    with connect() as db:
+        db.execute(
+            """
+            UPDATE app_config
+            SET logo_data = ?, logo_mime = ?, updated_at = ?
+            WHERE id = 1
+            """,
+            (
+                optimized,
+                mime,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        db.commit()
+    return _app_config()
+
+
+@app.delete("/api/app-config/logo", status_code=204)
+def delete_app_logo(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> None:
+    with connect() as db:
+        db.execute(
+            """
+            UPDATE app_config
+            SET logo_data = NULL, logo_mime = '', updated_at = ?
+            WHERE id = 1
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        db.commit()
 
 
 @app.get("/admin")
