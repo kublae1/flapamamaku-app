@@ -26,13 +26,17 @@ from PIL import Image, ImageOps, ImageSequence
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.30"
+API_VERSION = "0.8.31"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv(
     "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_JSON",
     "",
+).strip()
+PUSH_ICON_URL = os.getenv(
+    "FLAPAMAMAKU_PUSH_ICON_URL",
+    "https://flapamamaku.kublaecloud.synology.me/flapamamaku-icon.png",
 ).strip()
 if not FIREBASE_SERVICE_ACCOUNT_JSON:
     firebase_b64 = os.getenv(
@@ -775,6 +779,7 @@ def _send_fcm_message(
             "notification": {
                 "title": title,
                 "body": body,
+                **({"image": PUSH_ICON_URL} if PUSH_ICON_URL else {}),
             },
             "data": {
                 "kind": kind,
@@ -782,6 +787,10 @@ def _send_fcm_message(
             },
             "android": {
                 "priority": "high",
+                "notification": {
+                    "icon": "ic_launcher",
+                    **({"image": PUSH_ICON_URL} if PUSH_ICON_URL else {}),
+                },
             },
             "apns": {
                 "headers": {
