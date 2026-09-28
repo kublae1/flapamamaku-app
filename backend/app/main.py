@@ -32,9 +32,9 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.36"
+API_VERSION = "0.8.37"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -177,6 +177,11 @@ class AppConfigPayload(BaseModel):
     app_name: str = Field(default="FLAPAMAMAKU", min_length=1, max_length=80)
     app_subtitle: str = Field(default="Fasnachtsgruppe Luzern", max_length=120)
     primary_color: str = Field(default="#8A101B", pattern=r"^#[0-9A-Fa-f]{6}$")
+    club_description: str = Field(default="", max_length=4000)
+    website_url: str = Field(default="", max_length=500)
+    contact_email: str = Field(default="", max_length=320)
+    contact_phone: str = Field(default="", max_length=80)
+    club_address: str = Field(default="", max_length=500)
 
 
 class PollVotePayload(BaseModel):
@@ -407,6 +412,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (1, "baseline-v0.8.33"),
         (2, "app-config-foundation"),
         (3, "app-config-logo"),
+        (4, "app-config-club-details"),
     ]
     applied = {
         int(row["version"])
@@ -535,6 +541,11 @@ def init_db() -> None:
         )
         _ensure_column(db, "app_config", "logo_data", "BLOB")
         _ensure_column(db, "app_config", "logo_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "club_description", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "website_url", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "contact_email", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "contact_phone", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "club_address", "TEXT NOT NULL DEFAULT ''")
 
         db.execute(
             """
@@ -1607,7 +1618,16 @@ def _app_config() -> dict[str, Any]:
     with connect() as db:
         row = db.execute(
             """
-            SELECT app_name, app_subtitle, primary_color, logo_data
+            SELECT
+                app_name,
+                app_subtitle,
+                primary_color,
+                logo_data,
+                club_description,
+                website_url,
+                contact_email,
+                contact_phone,
+                club_address
             FROM app_config
             WHERE id = 1
             """
@@ -1618,12 +1638,22 @@ def _app_config() -> dict[str, Any]:
             "app_subtitle": "Fasnachtsgruppe Luzern",
             "primary_color": "#8A101B",
             "logo_url": "",
+            "club_description": "",
+            "website_url": "",
+            "contact_email": "",
+            "contact_phone": "",
+            "club_address": "",
         }
     return {
         "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
         "app_subtitle": str(row["app_subtitle"] or ""),
         "primary_color": str(row["primary_color"] or "#8A101B"),
         "logo_url": "/api/app-config/logo" if row["logo_data"] else "",
+        "club_description": str(row["club_description"] or ""),
+        "website_url": str(row["website_url"] or ""),
+        "contact_email": str(row["contact_email"] or ""),
+        "contact_phone": str(row["contact_phone"] or ""),
+        "club_address": str(row["club_address"] or ""),
     }
 
 
@@ -1662,18 +1692,37 @@ def put_app_config(
         db.execute(
             """
             INSERT INTO app_config (
-                id, app_name, app_subtitle, primary_color, updated_at
-            ) VALUES (1, ?, ?, ?, ?)
+                id,
+                app_name,
+                app_subtitle,
+                primary_color,
+                club_description,
+                website_url,
+                contact_email,
+                contact_phone,
+                club_address,
+                updated_at
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 app_name = excluded.app_name,
                 app_subtitle = excluded.app_subtitle,
                 primary_color = excluded.primary_color,
+                club_description = excluded.club_description,
+                website_url = excluded.website_url,
+                contact_email = excluded.contact_email,
+                contact_phone = excluded.contact_phone,
+                club_address = excluded.club_address,
                 updated_at = excluded.updated_at
             """,
             (
                 values["app_name"].strip(),
                 values["app_subtitle"].strip(),
                 values["primary_color"].upper(),
+                values["club_description"].strip(),
+                values["website_url"].strip(),
+                values["contact_email"].strip(),
+                values["contact_phone"].strip(),
+                values["club_address"].strip(),
                 now,
             ),
         )
