@@ -193,6 +193,7 @@ class ApiService {
       'text': item.text,
       'link_url': item.linkUrl,
       'poll_options': item.pollOptions,
+      'poll_allow_suggestions': item.pollAllowSuggestions,
     });
     final response = item.id == null
         ? await http
