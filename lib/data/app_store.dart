@@ -73,6 +73,7 @@ class AppStore extends ChangeNotifier {
   int themeColorValue = 0xFF8A101B;
   String appName = 'FLAPAMAMAKU';
   String appSubtitle = 'Fasnachtsgruppe Luzern';
+  String appLogoUrl = '';
 
   Color get themeColor => Color(themeColorValue);
 
@@ -96,9 +97,11 @@ class AppStore extends ChangeNotifier {
       final nextName = config['app_name']?.toString().trim() ?? '';
       final nextSubtitle = config['app_subtitle']?.toString().trim() ?? '';
       final colorText = config['primary_color']?.toString().trim() ?? '';
+      final nextLogoUrl = config['logo_url']?.toString().trim() ?? '';
 
       if (nextName.isNotEmpty) appName = nextName;
       appSubtitle = nextSubtitle;
+      appLogoUrl = nextLogoUrl;
 
       final match = RegExp(r'^#([0-9A-Fa-f]{6})\$').firstMatch(colorText);
       if (match != null) {
