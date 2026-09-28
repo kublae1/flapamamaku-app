@@ -53,23 +53,27 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Image.asset('assets/FLAPAMAMAKU App-Icon.png'),
                   ),
                   const SizedBox(height: 18),
-                  const Text(
-                    'FLAPAMAMAKU',
-                    style: TextStyle(
+                  Text(
+                    store.appName,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
                       color: Color(0xFFE41F26),
                       fontSize: 28,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 1.2,
                     ),
                   ),
-                  const SizedBox(height: 5),
-                  const Text(
-                    'Fasnachtsgruppe Luzern',
-                    style: TextStyle(
-                      color: FlapBrand.gold,
-                      fontWeight: FontWeight.w700,
+                  if (store.appSubtitle.isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      store.appSubtitle,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: FlapBrand.gold,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
+                  ],
                   const SizedBox(height: 30),
                   Container(
                     padding: const EdgeInsets.all(20),
