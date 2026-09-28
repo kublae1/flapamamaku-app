@@ -120,8 +120,14 @@ void main() {
     await tester.tap(find.text('Mehr'));
     await tester.pumpAndSettle();
     expect(find.text('Mitglieder'), findsOneWidget);
-    expect(find.text('Einstellungen'), findsOneWidget);
     expect(find.text('Administration'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Einstellungen'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Einstellungen'), findsOneWidget);
     expect(find.text('E2E Umfrage'), findsNothing);
 
     await tester.tap(find.text(store.labelPolls));
