@@ -742,9 +742,17 @@
           <input name="app_subtitle" maxlength="120">
           <label>Hauptfarbe</label>
           <input name="primary_color" type="color" value="#8A101B">
+          <label>Vereinslogo</label>
+          <input name="logo_file" type="file" accept="image/jpeg,image/png,image/webp">
+          <div id="app-logo-preview" class="hidden" style="margin-top:12px">
+            <img id="app-logo-image" alt="Vereinslogo" style="max-width:150px;max-height:150px;object-fit:contain;border-radius:18px;background:white;padding:8px">
+            <div class="actions">
+              <button type="button" id="app-logo-delete" class="delete">Logo entfernen</button>
+            </div>
+          </div>
           <p class="meta">
-            Diese Angaben werden zentral im Backend gespeichert. Logo und App-Icon bleiben
-            vorerst unverändert, damit der bestehende FLAPAMAMAKU-Build stabil bleibt.
+            Name, Untertitel, Hauptfarbe und Logo werden zentral gespeichert. Das installierte
+            Android-/iOS-App-Icon bleibt weiterhin buildabhängig.
           </p>
           <p><button class="primary" type="submit">Branding speichern</button></p>
         </form>
@@ -1970,6 +1978,15 @@ async function loadAppConfig() {
       /^#[0-9A-Fa-f]{6}$/.test(config.primary_color || "")
         ? config.primary_color
         : "#8A101B";
+    const preview = document.getElementById("app-logo-preview");
+    const image = document.getElementById("app-logo-image");
+    if (config.logo_url) {
+      image.src = config.logo_url + "?v=" + Date.now();
+      preview.classList.remove("hidden");
+    } else {
+      image.removeAttribute("src");
+      preview.classList.add("hidden");
+    }
   } catch (error) {
     console.error(error);
   }
@@ -2041,6 +2058,16 @@ document.getElementById("app-config-form").addEventListener("submit", async even
         primary_color: form.elements.primary_color.value.toUpperCase(),
       }),
     });
+    const logoFile = form.elements.logo_file.files[0];
+    if (logoFile) {
+      const upload = new FormData();
+      upload.append("logo", logoFile);
+      await api("/api/app-config/logo", {
+        method: "POST",
+        body: upload,
+      });
+      form.elements.logo_file.value = "";
+    }
     await loadAppConfig();
     alert("Branding wurde gespeichert.");
   } catch (error) {
@@ -2048,6 +2075,18 @@ document.getElementById("app-config-form").addEventListener("submit", async even
     console.error(error);
   } finally {
     button.disabled = false;
+  }
+});
+
+document.getElementById("app-logo-delete").addEventListener("click", async () => {
+  if (!confirm("Vereinslogo wirklich entfernen?")) return;
+  try {
+    await api("/api/app-config/logo", {method: "DELETE"});
+    document.getElementById("app-config-form").elements.logo_file.value = "";
+    await loadAppConfig();
+  } catch (error) {
+    alert("Logo konnte nicht entfernt werden.");
+    console.error(error);
   }
 });
 
