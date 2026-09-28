@@ -60,11 +60,13 @@ class StartScreen extends StatelessWidget {
                     ),
                     icon: const Icon(Icons.menu_rounded, size: 28),
                   ),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'FLAPAMAMAKU',
+                      store.appName,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
                         color: Color(0xFFE41F26),
                         fontSize: 25,
                         fontWeight: FontWeight.w900,
