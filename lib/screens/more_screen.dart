@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/app_store.dart';
 import '../theme/flap_brand.dart';
 import 'admin_screen.dart';
+import 'club_info_screen.dart';
 import 'members_screen.dart';
 import 'remote_content_screen.dart';
 import 'settings_screen.dart';
@@ -62,11 +63,21 @@ class MoreScreen extends StatelessWidget {
               ),
             ),
             _MockupMenuCard(
+              icon: Icons.info_outline_rounded,
+              title: 'Verein & Kontakt',
+              subtitle: store.appSubtitle.isEmpty
+                  ? 'Informationen und Kontaktdaten'
+                  : store.appSubtitle,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ClubInfoScreen()),
+              ),
+            ),
+            _MockupMenuCard(
               icon: Icons.chat_rounded,
               title: 'WhatsApp-Gruppe beitreten',
               subtitle: whatsappLink.isEmpty
                   ? 'Einladungslink ist noch nicht hinterlegt'
-                  : 'Direkt zur FLAPAMAMAKU-Gruppe in WhatsApp',
+                  : 'Direkt zur ${store.appName}-Gruppe in WhatsApp',
               onTap: () {
                 if (whatsappLink.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
