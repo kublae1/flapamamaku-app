@@ -7,7 +7,8 @@ class OfflineNetworkImage extends StatelessWidget {
   final BoxFit? fit;
   final double? width;
   final double? height;
-  final AlignmentGeometry alignment;
+  final Alignment alignment;
+  final FilterQuality filterQuality;
   final Widget Function(BuildContext, Object, StackTrace?)? errorBuilder;
 
   const OfflineNetworkImage(
@@ -17,6 +18,7 @@ class OfflineNetworkImage extends StatelessWidget {
     this.width,
     this.height,
     this.alignment = Alignment.center,
+    this.filterQuality = FilterQuality.low,
     this.errorBuilder,
     super.key,
   });
@@ -30,6 +32,7 @@ class OfflineNetworkImage extends StatelessWidget {
       width: width,
       height: height,
       alignment: alignment,
+      filterQuality: filterQuality,
       useOldImageOnUrlChange: true,
       fadeInDuration: Duration.zero,
       fadeOutDuration: Duration.zero,
