@@ -160,8 +160,21 @@ jobs:
               raise SystemExit("Android Gradle file not found")
           PY
 
-      - name: Configure Android permissions and biometrics
+      - name: Configure Android permissions, biometrics and notification icon
         run: |
+          mkdir -p android/app/src/main/res/drawable
+          cat > android/app/src/main/res/drawable/ic_stat_flapamamaku.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M5,4 L19,4 L19,7 L9,7 L9,10 L17,10 L17,13 L9,13 L9,20 L5,20 Z"/>
+          </vector>
+          EOF
+
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"
@@ -182,7 +195,7 @@ jobs:
           fi
 
           if ! grep -q 'com.google.firebase.messaging.default_notification_icon' "$MANIFEST"; then
-            sed -i '/<\/application>/i\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@mipmap/ic_launcher" />' "$MANIFEST"
+            sed -i '/<\/application>/i\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_flapamamaku" />' "$MANIFEST"
           fi
 
           MAIN_ACTIVITY=$(find android/app/src/main -name MainActivity.kt | head -n 1)
