@@ -47,7 +47,7 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
                 if (store.serverConfigured && store.biometricUnlockPending) {
                   return const BiometricLockScreen();
                 }
-                if (store.serverConfigured && !store.isAuthenticated) {
+                if (!store.serverConfigured || !store.isAuthenticated) {
                   return const LoginScreen();
                 }
                 return const HomeShell();
