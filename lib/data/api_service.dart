@@ -211,12 +211,9 @@ class ApiService {
     }).toList();
   }
 
-  Future<List<ContentItem>> fetchContent({String? section}) async {
-    final suffix = section == null || section.isEmpty
-        ? ''
-        : '?section=${Uri.encodeQueryComponent(section)}';
+  Future<List<ContentItem>> fetchPolls() async {
     final response = await http
-        .get(_uri('/api/content$suffix'), headers: authHeaders)
+        .get(_uri('/api/polls'), headers: authHeaders)
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final values = jsonDecode(response.body) as List<dynamic>;
@@ -226,6 +223,61 @@ class ApiService {
       );
       return ContentItem.fromJson(json);
     }).toList();
+  }
+
+  Future<ContentItem> savePoll(ContentItem item) async {
+    final body = jsonEncode({
+      'title': item.title,
+      'text': item.text,
+      'options': item.pollOptions,
+      'allow_suggestions': item.pollAllowSuggestions,
+    });
+    final response = item.id == null
+        ? await http
+            .post(_uri('/api/polls'), headers: _jsonHeaders, body: body)
+            .timeout(const Duration(seconds: 8))
+        : await http
+            .put(
+              _uri('/api/polls/' + item.id.toString()),
+              headers: _jsonHeaders,
+              body: body,
+            )
+            .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final json = _prepareContentJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+    return ContentItem.fromJson(json);
+  }
+
+  Future<void> deletePoll(int pollId) async {
+    final response = await http
+        .delete(_uri('/api/polls/' + pollId.toString()), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
+  Future<List<ContentItem>> fetchContent({String? section}) async {
+    if (section == 'polls') {
+      return fetchPolls();
+    }
+    final suffix = section == null || section.isEmpty
+        ? ''
+        : '?section=${Uri.encodeQueryComponent(section)}';
+    final response = await http
+        .get(_uri('/api/content$suffix'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final values = jsonDecode(response.body) as List<dynamic>;
+    return values
+        .map((value) {
+          final json = _prepareContentJson(
+            Map<String, dynamic>.from(value as Map<String, dynamic>),
+          );
+          return ContentItem.fromJson(json);
+        })
+        .where((item) => section != null || item.section != 'polls')
+        .toList();
   }
 
   Future<ContentItem> saveContent(ContentItem item) async {
