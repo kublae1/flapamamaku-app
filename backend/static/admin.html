@@ -568,12 +568,10 @@
             <div class="actions" style="margin-top:8px">
               <button type="button" id="poll-preset-yes-no">Ja / Nein</button>
               <button type="button" id="poll-preset-yes-no-abstain">Ja / Nein / Enthaltung</button>
+              <button type="button" id="poll-toggle-suggestions">Eigener Vorschlag: AUS</button>
             </div>
-            <label style="display:flex;gap:8px;align-items:center;margin-top:12px">
-              <input name="poll_allow_suggestions" type="checkbox">
-              Eigene Vorschläge durch Mitglieder erlauben
-            </label>
-            <p class="meta">Eine Antwort pro Zeile. Mindestens zwei Möglichkeiten. Eigene Vorschläge erscheinen in der App nur, wenn die Option aktiviert ist.</p>
+            <input name="poll_allow_suggestions" type="checkbox" class="hidden">
+            <p class="meta">Eine Antwort pro Zeile. Mindestens zwei Möglichkeiten. Mit „Eigener Vorschlag: EIN“ dürfen Mitglieder in der App eine eigene Antwort erfassen und später bearbeiten.</p>
           </div>
           <div id="document-upload-wrap" class="hidden">
             <label>PDF-Dokument</label>
@@ -1304,6 +1302,7 @@ function updatePreviewFromSelectedFile() {
   updateContentImageRecommendation();
 updateContentFormMode();
 updateContentPreview();
+updatePollSuggestionToggle();
 }
 
 ["section","title","text"].forEach(name => {
@@ -1576,6 +1575,7 @@ function resetContentForm({keepSection = true} = {}) {
   form.elements.replace_images.checked = false;
   form.elements.poll_options.value = "";
   form.elements.poll_allow_suggestions.checked = false;
+  updatePollSuggestionToggle();
   form.elements.document_file.value = "";
   form.elements.image_files.value = "";
   document.getElementById("document-current").textContent = "";
@@ -1605,6 +1605,7 @@ function editContent(item) {
   form.elements.link_url.value = item.link_url || "";
   form.elements.poll_options.value = (item.poll_options || []).join("\n");
   form.elements.poll_allow_suggestions.checked = item.poll_allow_suggestions === true;
+  updatePollSuggestionToggle();
   form.elements.document_file.value = "";
   document.getElementById("document-current").textContent =
     item.document_name ? `Aktuell: ${item.document_name}` : "";
@@ -1665,6 +1666,23 @@ document.getElementById("poll-preset-yes-no").addEventListener("click", () => {
 document.getElementById("poll-preset-yes-no-abstain").addEventListener("click", () => {
   const form = document.getElementById("content-form");
   form.elements.poll_options.value = "Ja\nNein\nEnthaltung";
+});
+
+function updatePollSuggestionToggle() {
+  const form = document.getElementById("content-form");
+  const button = document.getElementById("poll-toggle-suggestions");
+  const enabled = form.elements.poll_allow_suggestions.checked;
+  button.textContent = enabled
+    ? "Eigener Vorschlag: EIN"
+    : "Eigener Vorschlag: AUS";
+  button.classList.toggle("primary", enabled);
+}
+
+document.getElementById("poll-toggle-suggestions").addEventListener("click", () => {
+  const form = document.getElementById("content-form");
+  form.elements.poll_allow_suggestions.checked =
+    !form.elements.poll_allow_suggestions.checked;
+  updatePollSuggestionToggle();
 });
 
 document.getElementById("content-form").addEventListener("submit", async event => {
