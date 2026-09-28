@@ -100,8 +100,15 @@ class AppStore extends ChangeNotifier {
       if (nextName.isNotEmpty) appName = nextName;
       appSubtitle = nextSubtitle;
 
-      final match = RegExp(r'^#([0-9A-Fa-f]{6})
-
+      final match = RegExp(r'^#([0-9A-Fa-f]{6})\$').firstMatch(colorText);
+      if (match != null) {
+        themeColorValue = int.parse('FF' + match.group(1)!, radix: 16);
+      }
+      notifyListeners();
+    } catch (_) {
+      // Keep the built-in FLAPAMAMAKU defaults when the server is unavailable.
+    }
+  }
   bool get canNews => currentUser?['can_news'] == true;
   bool get canEvents => currentUser?['can_events'] == true;
   bool get canMembers => currentUser?['can_members'] == true;
