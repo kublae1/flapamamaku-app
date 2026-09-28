@@ -34,7 +34,7 @@ class StartScreen extends StatelessWidget {
     final hero = _latestContent(store, 'hero');
     final heroImage = _contentImage(hero);
     final heroTitle = hero == null || hero.title.trim().isEmpty
-        ? 'FLAPAMAMAKU'
+        ? store.appName
         : hero.title.trim();
     const fallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
     final latestNews = store.news.take(3).toList();
@@ -66,8 +66,8 @@ class StartScreen extends StatelessWidget {
                       textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFE41F26),
+                      style: TextStyle(
+                        color: store.themeColor,
                         fontSize: 25,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1.1,
