@@ -458,7 +458,7 @@ jobs:
         shell: bash
         run: |
           cd build/app/outputs
-          find flutter-apk bundle/release -type f \\( -name '*.apk' -o -name '*.aab' \\) -print0 \\
+          find flutter-apk bundle/release -type f \( -name '*.apk' -o -name '*.aab' \) -print0 \
             | sort -z \\
             | xargs -0 sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
