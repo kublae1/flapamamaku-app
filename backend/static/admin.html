@@ -1027,6 +1027,17 @@
             werden nach Erreichen der eingestellten Anzahl automatisch entfernt.
           </p>
           <div id="system-backup-list"><p class="meta">Backups werden geladen …</p></div>
+          <hr style="margin:18px 0;border:0;border-top:1px solid rgba(255,255,255,.12)">
+          <h3>Backup wiederherstellen</h3>
+          <p class="meta">
+            Nur vollständige FLAPAMAMAKU-.db-Backups verwenden. Vor der Wiederherstellung
+            wird automatisch eine zusätzliche Sicherheitskopie der aktuellen Datenbank erstellt.
+            Nach erfolgreichem Restore werden alle Sitzungen abgemeldet.
+          </p>
+          <div class="actions" style="align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="file" id="system-restore-file" accept=".db,application/octet-stream">
+            <button type="button" id="system-restore-start" class="delete">Backup wiederherstellen</button>
+          </div>
         </div>
       </div>
     </section>
@@ -2350,6 +2361,25 @@ async function downloadSystemBackup(name) {
   URL.revokeObjectURL(url);
 }
 
+async function restoreSystemBackup(file) {
+  const form = new FormData();
+  form.append("backup_file", file, file.name);
+  const response = await fetch("/api/system/restore", {
+    method: "POST",
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
+    body: form,
+  });
+  if (!response.ok) {
+    let detail = "Wiederherstellung fehlgeschlagen.";
+    try {
+      const payload = await response.json();
+      if (payload?.detail) detail = payload.detail;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
 async function loadAppConfig() {
   if (!currentUser?.can_manage_users) return;
   try {
@@ -2632,6 +2662,43 @@ document.getElementById("system-backup-create").addEventListener("click", async 
     console.error(error);
   } finally {
     button.disabled = false;
+  }
+});
+
+document.getElementById("system-restore-start").addEventListener("click", async () => {
+  const input = document.getElementById("system-restore-file");
+  const button = document.getElementById("system-restore-start");
+  const file = input.files?.[0];
+  if (!file) {
+    alert("Bitte zuerst eine .db-Backupdatei auswählen.");
+    return;
+  }
+  const confirmed = confirm(
+    "ACHTUNG: Die aktuelle Datenbank wird durch dieses Backup ersetzt.\n\n" +
+    "Vorher wird automatisch ein Sicherheitsbackup erstellt. " +
+    "Nach erfolgreicher Wiederherstellung werden alle Benutzer abgemeldet.\n\n" +
+    "Wiederherstellung jetzt starten?"
+  );
+  if (!confirmed) return;
+
+  button.disabled = true;
+  input.disabled = true;
+  try {
+    const result = await restoreSystemBackup(file);
+    alert(
+      "Backup wurde erfolgreich wiederhergestellt.\n" +
+      "Sicherheitsbackup: " + (result.safety_backup?.name || "erstellt") + "\n\n" +
+      "Du wirst jetzt abgemeldet."
+    );
+    token = "";
+    sessionStorage.removeItem("flapamamaku_token");
+    window.location.reload();
+  } catch (error) {
+    alert(error?.message || "Backup konnte nicht wiederhergestellt werden.");
+    console.error(error);
+  } finally {
+    button.disabled = false;
+    input.disabled = false;
   }
 });
 
