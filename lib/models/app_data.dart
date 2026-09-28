@@ -25,6 +25,9 @@ class ContentItem {
   final String linkUrl;
   final String imageUrl;
   final List<String> imageUrls;
+  final List<int> imageIds;
+  final List<int> imageSortOrders;
+  final List<String> imageCreatedAts;
   final String createdAt;
   final int sortOrder;
   final int? snapshotId;
@@ -48,6 +51,9 @@ class ContentItem {
     this.linkUrl = '',
     this.imageUrl = '',
     this.imageUrls = const [],
+    this.imageIds = const [],
+    this.imageSortOrders = const [],
+    this.imageCreatedAts = const [],
     this.createdAt = '',
     this.sortOrder = 0,
     this.snapshotId,
@@ -74,6 +80,19 @@ class ContentItem {
       imageUrl: json['image_url']?.toString() ?? '',
       imageUrls: (json['image_urls'] as List<dynamic>? ?? const [])
           .map((value) => value.toString())
+          .toList(),
+      imageIds: (json['images'] as List<dynamic>? ?? const [])
+          .map((value) => Map<String, dynamic>.from(value as Map))
+          .map((value) => value['id'] is int ? value['id'] as int : int.tryParse(value['id']?.toString() ?? '') ?? 0)
+          .where((value) => value > 0)
+          .toList(),
+      imageSortOrders: (json['images'] as List<dynamic>? ?? const [])
+          .map((value) => Map<String, dynamic>.from(value as Map))
+          .map((value) => value['sort_order'] is int ? value['sort_order'] as int : int.tryParse(value['sort_order']?.toString() ?? '') ?? 0)
+          .toList(),
+      imageCreatedAts: (json['images'] as List<dynamic>? ?? const [])
+          .map((value) => Map<String, dynamic>.from(value as Map))
+          .map((value) => value['created_at']?.toString() ?? '')
           .toList(),
       createdAt: json['created_at']?.toString() ?? '',
       sortOrder: json['sort_order'] as int? ?? 0,
