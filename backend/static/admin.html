@@ -536,6 +536,8 @@
               <label><input type="checkbox" name="account_can_gallery_upload"> Galerie-Snapshots aufnehmen</label>
               <label><input type="checkbox" name="account_can_polls"> Umfragen verwalten</label>
               <label><input type="checkbox" name="account_can_links"> Links verwalten</label>
+              <label><input type="checkbox" name="account_can_contact"> Kontakt verwalten</label>
+              <label><input type="checkbox" name="account_can_about"> Über uns verwalten</label>
               <label><input type="checkbox" name="account_can_admin_page"> PC-Adminseite benutzen</label>
               <label><input type="checkbox" name="account_can_manage_users"> Benutzer/Berechtigungen verwalten</label>
             </div>
@@ -604,6 +606,8 @@
             <label><input type="checkbox" name="can_gallery_upload"> Galerie-Snapshots aufnehmen</label>
             <label><input type="checkbox" name="can_polls"> Umfragen verwalten</label>
             <label><input type="checkbox" name="can_links"> Links verwalten</label>
+            <label><input type="checkbox" name="can_contact"> Kontakt verwalten</label>
+            <label><input type="checkbox" name="can_about"> Über uns verwalten</label>
             <label><input type="checkbox" name="can_admin_page"> PC-Adminseite benutzen</label>
             <label><input type="checkbox" name="can_manage_users"> Benutzer/Berechtigungen verwalten</label>
           </div>
@@ -1016,6 +1020,7 @@ async function load(resource) {
         <button type="button" class="move-up">↑</button>
         <button type="button" class="move-down">↓</button>
         <button type="button" class="edit">Bearbeiten</button>
+        <button type="button" class="revoke-sessions">Sitzungen beenden</button>
         <button type="button" class="delete">Löschen</button>
       </div>`;
     const up = div.querySelector(".move-up");
@@ -1245,7 +1250,7 @@ async function loadUsers() {
       .map(key => ({
         can_news:"News",can_events:"Termine",can_members:"Mitglieder",
         can_documents:"Dokumente",can_photos:"Fotos",can_gallery_upload:"Snapshots",can_polls:"Umfragen",
-        can_links:"Links",
+        can_links:"Links",can_contact:"Kontakt",can_about:"Über uns",
         can_admin_page:"PC-Admin",can_manage_users:"Benutzerrechte"
       })[key]).join(", ");
     const div = document.createElement("div");
@@ -1274,7 +1279,10 @@ function editUser(user) {
   form.elements.username.value = user.username || "";
   form.elements.password.value = "";
   form.elements.active.checked = !!user.active;
-  permissionFields.forEach(key => form.elements[key].checked = !!user[key]);
+  permissionFields.forEach(key => {
+    const field = form.elements[key];
+    if (field) field.checked = !!user[key];
+  });
   form.scrollIntoView({behavior: "smooth"});
 }
 
