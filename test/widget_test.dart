@@ -1,17 +1,31 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flapamamaku_app/main.dart';
+
+import 'package:flapamamaku_app/data/api_service.dart';
+import 'package:flapamamaku_app/data/app_store.dart';
+import 'package:flapamamaku_app/screens/login_screen.dart';
 
 void main() {
-  testWidgets('login and server setup are available without a configured server',
+  testWidgets('login offers club server setup when no server is configured',
       (tester) async {
-    await tester.pumpWidget(const FlapamamakuApp());
+    final store = AppStore(api: ApiService(baseUrl: ''));
+    store.authReady = true;
+    store.isAuthenticated = false;
 
-    for (var i = 0; i < 20 && find.text('Vereinsserver einrichten').evaluate().isEmpty; i++) {
-      await tester.pump(const Duration(milliseconds: 100));
-    }
+    await tester.pumpWidget(
+      AppStoreScope(
+        store: store,
+        child: MaterialApp(
+          home: const LoginScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
 
     expect(find.text('FLAPAMAMAKU'), findsOneWidget);
     expect(find.text('Anmelden'), findsWidgets);
     expect(find.text('Vereinsserver einrichten'), findsOneWidget);
+
+    store.dispose();
   });
 }
