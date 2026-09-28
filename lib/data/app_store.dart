@@ -206,7 +206,7 @@ class AppStore extends ChangeNotifier {
       _sortNews();
       _sortEvents();
       isUsingServer = false;
-      syncError = 'Offline – letzter gespeicherter Stand';
+      syncError = 'Offline – gespeicherte Daten werden angezeigt.';
       lastSuccessfulSync = DateTime.tryParse(
         data['saved_at']?.toString() ?? '',
       );
@@ -352,6 +352,12 @@ class AppStore extends ChangeNotifier {
   bool get serverConfigured => api.isConfigured;
   String get serverUrl => api.baseUrl;
 
+  String userMessageForError(
+    Object error, {
+    String fallback = 'Die Aktion konnte nicht abgeschlossen werden.',
+  }) =>
+      friendlyErrorMessage(error, fallback: fallback);
+
   Future<bool> changeServerUrl(String value) async {
     var candidate = value.trim();
     while (candidate.endsWith('/')) {
@@ -373,10 +379,12 @@ class AppStore extends ChangeNotifier {
     api.configureBaseUrl(candidate);
     try {
       await api.fetchAppConfig();
-    } catch (_) {
+    } catch (error) {
       api.configureBaseUrl(previousUrl);
-      authError =
-          'Der Server ist nicht erreichbar oder keine gültige Vereins-App.';
+      authError = friendlyErrorMessage(
+        error,
+        fallback: 'Der Server ist nicht erreichbar oder keine gültige Vereins-App.',
+      );
       notifyListeners();
       return false;
     }
@@ -649,7 +657,12 @@ class AppStore extends ChangeNotifier {
       }
       return true;
     } catch (error) {
-      authError = 'Benutzername oder Passwort falsch.';
+      authError = error is ApiException && error.statusCode == 401
+          ? 'Benutzername oder Passwort falsch.'
+          : friendlyErrorMessage(
+              error,
+              fallback: 'Anmeldung momentan nicht möglich. Bitte nochmals versuchen.',
+            );
       isAuthenticated = false;
       currentUser = null;
       return false;
@@ -758,7 +771,7 @@ class AppStore extends ChangeNotifier {
       await _saveOfflineCache();
     } catch (error) {
       isUsingServer = false;
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       if (news.isEmpty && events.isEmpty && members.isEmpty && content.isEmpty) {
         await _loadOfflineCache();
       }
@@ -780,7 +793,7 @@ class AppStore extends ChangeNotifier {
         await api.deleteGallerySnapshot(item.snapshotId!);
         await refreshFromServer();
       } catch (error) {
-        syncError = error.toString();
+        syncError = friendlyErrorMessage(error);
         notifyListeners();
         rethrow;
       }
@@ -795,7 +808,7 @@ class AppStore extends ChangeNotifier {
       }
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -814,7 +827,7 @@ class AppStore extends ChangeNotifier {
       );
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -831,7 +844,7 @@ class AppStore extends ChangeNotifier {
       await api.saveNews(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -848,7 +861,7 @@ class AppStore extends ChangeNotifier {
       await api.saveNews(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -865,7 +878,7 @@ class AppStore extends ChangeNotifier {
       await api.deleteNews(item.id!);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -880,7 +893,7 @@ class AppStore extends ChangeNotifier {
       await api.setEventRegistration(event.id!, registered);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -897,7 +910,7 @@ class AppStore extends ChangeNotifier {
       await api.saveEvent(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -914,7 +927,7 @@ class AppStore extends ChangeNotifier {
       await api.saveEvent(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -931,7 +944,7 @@ class AppStore extends ChangeNotifier {
       await api.deleteEvent(item.id!);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -947,7 +960,7 @@ class AppStore extends ChangeNotifier {
       await api.saveMember(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -963,7 +976,7 @@ class AppStore extends ChangeNotifier {
       await api.saveMember(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -980,7 +993,7 @@ class AppStore extends ChangeNotifier {
       await api.deleteMember(item.id!);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }

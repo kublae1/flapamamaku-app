@@ -634,19 +634,89 @@ class ApiService {
   }
 
   void _ensureSuccess(http.Response response) {
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw ApiException(
-        'HTTP ${response.statusCode}: ${response.body}',
-      );
+    if (response.statusCode >= 200 && response.statusCode < 300) return;
+
+    String? detail;
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) {
+        detail = decoded['detail']?.toString().trim();
+      }
+    } catch (_) {
+      // Never expose raw server or HTML error bodies to the app UI.
+    }
+
+    throw ApiException(
+      _messageForStatus(response.statusCode, detail),
+      statusCode: response.statusCode,
+    );
+  }
+
+  String _messageForStatus(int statusCode, String? detail) {
+    switch (statusCode) {
+      case 400:
+        return detail?.isNotEmpty == true
+            ? detail!
+            : 'Die Eingabe konnte nicht verarbeitet werden.';
+      case 401:
+        return 'Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.';
+      case 403:
+        return 'Für diese Aktion fehlt die Berechtigung.';
+      case 404:
+        return 'Der gewünschte Inhalt wurde nicht gefunden.';
+      case 409:
+        return detail?.isNotEmpty == true
+            ? detail!
+            : 'Die Änderung steht im Konflikt mit bereits vorhandenen Daten.';
+      case 413:
+        return 'Die Datei ist zu gross.';
+      case 422:
+        return detail?.isNotEmpty == true
+            ? detail!
+            : 'Bitte die eingegebenen Daten prüfen.';
+      case 429:
+        return 'Zu viele Anfragen. Bitte kurz warten und nochmals versuchen.';
+      default:
+        if (statusCode >= 500) {
+          return 'Der Server hat momentan ein Problem. Bitte später nochmals versuchen.';
+        }
+        return 'Die Anfrage konnte nicht abgeschlossen werden.';
     }
   }
 }
 
 class ApiException implements Exception {
-  const ApiException(this.message);
+  const ApiException(this.message, {this.statusCode});
 
   final String message;
+  final int? statusCode;
 
   @override
   String toString() => message;
+}
+
+String friendlyErrorMessage(
+  Object error, {
+  String fallback = 'Die Aktion konnte nicht abgeschlossen werden.',
+}) {
+  if (error is ApiException) return error.message;
+
+  final text = error.toString().toLowerCase();
+  if (text.contains('timeout') || text.contains('timed out')) {
+    return 'Der Server antwortet nicht. Bitte Verbindung prüfen und nochmals versuchen.';
+  }
+  if (text.contains('socketexception') ||
+      text.contains('clientexception') ||
+      text.contains('failed host lookup') ||
+      text.contains('connection refused') ||
+      text.contains('connection closed') ||
+      text.contains('network is unreachable') ||
+      text.contains('no address associated with hostname')) {
+    return 'Keine Verbindung zum Server. Bitte Internetverbindung prüfen.';
+  }
+  if (error is FormatException || text.contains('formatexception')) {
+    return 'Der Server hat eine ungültige Antwort geliefert.';
+  }
+
+  return fallback;
 }
