@@ -86,6 +86,14 @@ class ApiService {
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
+  Future<Map<String, dynamic>> fetchAppConfig() async {
+    final response = await http
+        .get(_uri('/api/app-config'))
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   Future<DownloadedImage> downloadImage(String url) async {
     final response = await http
         .get(Uri.parse(url), headers: authHeaders)
