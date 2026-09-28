@@ -32,7 +32,7 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.44"
+API_VERSION = "0.8.45"
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 5
@@ -2415,9 +2415,12 @@ def push_status(
     }
 
 
-def _normalize_poll_options(values: list[str]) -> list[str]:
+def _normalize_poll_options(
+    values: list[str],
+    allow_suggestions: bool = False,
+) -> list[str]:
     options = [str(value).strip() for value in values if str(value).strip()]
-    if len(options) < 2:
+    if len(options) < 2 and not allow_suggestions:
         raise HTTPException(
             status_code=422,
             detail="Eine Umfrage benötigt mindestens zwei Antwortmöglichkeiten",
@@ -2442,7 +2445,10 @@ def _create_poll(
 ) -> dict[str, Any]:
     if not user.get("can_polls", False):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
-    options = _normalize_poll_options(payload.options)
+    options = _normalize_poll_options(
+        payload.options,
+        allow_suggestions=payload.allow_suggestions,
+    )
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
         max_order = db.execute(
@@ -2493,7 +2499,10 @@ def _update_poll(
 ) -> dict[str, Any]:
     if not user.get("can_polls", False):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
-    options = _normalize_poll_options(payload.options)
+    options = _normalize_poll_options(
+        payload.options,
+        allow_suggestions=payload.allow_suggestions,
+    )
     with connect() as db:
         existing = db.execute(
             "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
