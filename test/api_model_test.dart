@@ -41,4 +41,43 @@ void main() {
     expect(member.employer, 'Beispiel AG');
     expect(member.address, 'Luzern');
   });
+  test('maps unified content media payload', () {
+    final item = ContentItem.fromJson({
+      'id': 7,
+      'section': 'photos',
+      'title': 'Ausflug',
+      'created_at': '2026-09-28T10:00:00+00:00',
+      'images': [
+        {
+          'id': 21,
+          'url': 'https://example.test/media/21',
+          'sort_order': 2,
+          'created_at': '2026-09-28T10:01:00+00:00',
+          'legacy': false,
+        },
+        {
+          'id': 20,
+          'url': 'https://example.test/media/20',
+          'sort_order': 1,
+          'created_at': '2026-09-28T10:00:30+00:00',
+          'legacy': false,
+        },
+      ],
+      'image_urls': [
+        'https://example.test/media/21',
+        'https://example.test/media/20',
+      ],
+    });
+
+    expect(item.mediaImages.length, 2);
+    expect(item.mediaImages.first.id, 21);
+    expect(item.mediaImages.first.url, 'https://example.test/media/21');
+    expect(item.imageIds, [21, 20]);
+    expect(item.imageSortOrders, [2, 1]);
+    expect(item.imageUrls, [
+      'https://example.test/media/21',
+      'https://example.test/media/20',
+    ]);
+  });
+
 }
