@@ -238,7 +238,7 @@ class ApiService {
             .timeout(const Duration(seconds: 8))
         : await http
             .put(
-              _uri('/api/polls/' + item.id.toString()),
+              _uri('/api/polls/${item.id}'),
               headers: _jsonHeaders,
               body: body,
             )
@@ -252,7 +252,7 @@ class ApiService {
 
   Future<void> deletePoll(int pollId) async {
     final response = await http
-        .delete(_uri('/api/polls/' + pollId.toString()), headers: authHeaders)
+        .delete(_uri('/api/polls/$pollId'), headers: authHeaders)
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
   }
