@@ -30,6 +30,10 @@ BACKUP_INTERVAL_SECONDS = max(
     3600,
     int(os.getenv("FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS", "86400")),
 )
+MAX_BACKUP_UPLOAD_BYTES = max(
+    10 * 1024 * 1024,
+    int(os.getenv("FLAPAMAMAKU_MAX_BACKUP_UPLOAD_BYTES", str(256 * 1024 * 1024))),
+)
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
 API_VERSION = "0.8.48"
@@ -599,6 +603,74 @@ def _ensure_automatic_backup() -> None:
         if age < BACKUP_INTERVAL_SECONDS:
             return
     _create_database_backup("automatic")
+
+
+def _validate_restore_database(path: Path) -> int:
+    try:
+        with sqlite3.connect(path) as db:
+            integrity = db.execute("PRAGMA integrity_check").fetchone()
+            if integrity is None or str(integrity[0]).lower() != "ok":
+                raise RuntimeError("Backup integrity check failed")
+
+            tables = {
+                str(row[0])
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            required = {"users", "members", "sessions", "schema_migrations"}
+            if not required.issubset(tables):
+                raise RuntimeError("Backup does not contain a valid FLAPAMAMAKU database")
+
+            row = db.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+            ).fetchone()
+            schema_version = int(row[0] if row is not None else 0)
+            if schema_version > CURRENT_SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Backup schema {schema_version} is newer than supported schema "
+                    f"{CURRENT_SCHEMA_VERSION}"
+                )
+            return schema_version
+    except sqlite3.Error as exc:
+        raise RuntimeError("Backup is not a readable SQLite database") from exc
+
+
+def _restore_database_backup(source: Path) -> dict[str, Any]:
+    schema_version = _validate_restore_database(source)
+    safety_backup = _create_database_backup("before-restore")
+
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    replacement = DB_PATH.with_name(f".{DB_PATH.name}.restore-{secrets.token_hex(6)}")
+    try:
+        with sqlite3.connect(source) as src, sqlite3.connect(replacement) as dst:
+            src.backup(dst)
+        _validate_restore_database(replacement)
+        os.replace(replacement, DB_PATH)
+        init_db()
+        with connect() as db:
+            db.execute("DELETE FROM sessions")
+            db.commit()
+    except Exception:
+        try:
+            replacement.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    logger.warning(
+        "Database restored from %s; safety backup: %s",
+        source.name,
+        safety_backup.name,
+    )
+    return {
+        "restored": True,
+        "source_name": source.name,
+        "source_schema_version": schema_version,
+        "current_schema_version": _schema_version(),
+        "safety_backup": _backup_info(safety_backup),
+        "sessions_cleared": True,
+    }
 
 
 def init_db() -> None:
@@ -2197,6 +2269,56 @@ def download_backup(
         media_type="application/octet-stream",
         filename=candidate.name,
     )
+
+
+@app.post("/api/system/restore")
+async def restore_backup(
+    backup_file: UploadFile = File(...),
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    filename = Path(backup_file.filename or "").name
+    if not filename.lower().endswith(".db"):
+        raise HTTPException(status_code=400, detail="Bitte eine .db-Backupdatei auswählen")
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = BACKUP_DIR / f".restore-upload-{secrets.token_hex(8)}.db"
+    total = 0
+    try:
+        with temporary.open("wb") as handle:
+            while True:
+                chunk = await backup_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_BACKUP_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Backupdatei ist zu gross",
+                    )
+                handle.write(chunk)
+
+        if total == 0:
+            raise HTTPException(status_code=400, detail="Backupdatei ist leer")
+
+        try:
+            result = await asyncio.to_thread(_restore_database_backup, temporary)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Database restore failed")
+            raise HTTPException(
+                status_code=500,
+                detail="Datenbank konnte nicht wiederhergestellt werden",
+            ) from exc
+
+        result["uploaded_name"] = filename
+        return result
+    finally:
+        await backup_file.close()
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not remove temporary restore upload %s", temporary)
 
 
 @app.get("/api/auth/status")
