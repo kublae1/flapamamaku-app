@@ -162,6 +162,7 @@ class ContentPayload(BaseModel):
     text: str = ""
     link_url: str = ""
     poll_options: list[str] = []
+    poll_allow_suggestions: bool = False
 
 
 class PollVotePayload(BaseModel):
@@ -425,6 +426,12 @@ def init_db() -> None:
         _ensure_column(db, "content_items", "document_mime", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "content_items", "document_name", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "content_items", "poll_options", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(
+            db,
+            "content_items",
+            "poll_allow_suggestions",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
 
         db.execute(
             """
@@ -1334,6 +1341,9 @@ def _serialize_content(
                         my_suggestion_text = str(options[index] or "").strip()
 
             item["poll_options"] = options
+            item["poll_allow_suggestions"] = bool(
+                item.get("poll_allow_suggestions", 0)
+            )
             item["poll_counts"] = counts
             item["poll_total_votes"] = sum(counts)
             item["poll_my_vote"] = my_vote
@@ -1349,6 +1359,7 @@ def _serialize_content(
             ]
         else:
             item["poll_options"] = []
+            item["poll_allow_suggestions"] = False
             item["poll_counts"] = []
             item["poll_total_votes"] = 0
             item["poll_my_vote"] = None
@@ -1990,8 +2001,9 @@ def post_content(
         cursor = db.execute(
             """
             INSERT INTO content_items (
-                section, title, text, link_url, poll_options, sort_order, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                section, title, text, link_url, poll_options,
+                poll_allow_suggestions, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.section,
@@ -2002,6 +2014,8 @@ def post_content(
                     [value.strip() for value in payload.poll_options if value.strip()],
                     ensure_ascii=False,
                 ) if payload.section == "polls" else "[]",
+                int(payload.poll_allow_suggestions)
+                if payload.section == "polls" else 0,
                 max_order + 1,
                 now,
             ),
@@ -2042,7 +2056,8 @@ def put_content(
         db.execute(
             """
             UPDATE content_items
-            SET section = ?, title = ?, text = ?, link_url = ?, poll_options = ?
+            SET section = ?, title = ?, text = ?, link_url = ?,
+                poll_options = ?, poll_allow_suggestions = ?
             WHERE id = ?
             """,
             (
@@ -2054,6 +2069,8 @@ def put_content(
                     [value.strip() for value in payload.poll_options if value.strip()],
                     ensure_ascii=False,
                 ) if payload.section == "polls" else "[]",
+                int(payload.poll_allow_suggestions)
+                if payload.section == "polls" else 0,
                 row_id,
             ),
         )
@@ -2235,6 +2252,11 @@ def suggest_and_vote_poll(
         ).fetchone()
         if poll is None:
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        if not bool(poll["poll_allow_suggestions"]):
+            raise HTTPException(
+                status_code=403,
+                detail="Eigene Vorschläge sind bei dieser Umfrage deaktiviert",
+            )
 
         try:
             options = json.loads(poll["poll_options"] or "[]")
