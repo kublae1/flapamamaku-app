@@ -32,7 +32,7 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.41"
+API_VERSION = "0.8.42"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 5
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
@@ -1534,6 +1534,20 @@ def _serialize_content(
                 """,
                 (item["id"],),
             ).fetchall()
+            suggestion_rows = db.execute(
+                """
+                SELECT
+                    ps.option_index,
+                    ps.suggestion_text,
+                    COALESCE(NULLIF(TRIM(m.name), ''), u.username) AS member_name
+                FROM poll_suggestions ps
+                JOIN users u ON u.id = ps.user_id
+                LEFT JOIN members m ON m.id = u.member_id
+                WHERE ps.poll_id = ?
+                ORDER BY ps.created_at ASC, ps.user_id ASC
+                """,
+                (item["id"],),
+            ).fetchall()
 
             my_suggestion_index = None
             my_suggestion_text = ""
@@ -1569,6 +1583,24 @@ def _serialize_content(
                 for voter in voter_rows
                 if str(voter["voter_name"] or "").strip()
             ]
+            item["poll_suggestions"] = [
+                {
+                    "member_name": str(suggestion["member_name"] or "").strip(),
+                    "text": (
+                        str(options[int(suggestion["option_index"])]).strip()
+                        if 0 <= int(suggestion["option_index"]) < len(options)
+                        else str(suggestion["suggestion_text"] or "").strip()
+                    ),
+                    "option_index": int(suggestion["option_index"]),
+                    "vote_count": (
+                        counts[int(suggestion["option_index"])]
+                        if 0 <= int(suggestion["option_index"]) < len(counts)
+                        else 0
+                    ),
+                }
+                for suggestion in suggestion_rows
+                if str(suggestion["suggestion_text"] or "").strip()
+            ]
         else:
             item["poll_options"] = []
             item["poll_allow_suggestions"] = False
@@ -1578,6 +1610,7 @@ def _serialize_content(
             item["poll_my_suggestion_index"] = None
             item["poll_my_suggestion_text"] = ""
             item["poll_voters"] = []
+            item["poll_suggestions"] = []
     images = [
         {
             "id": image_row["id"],
