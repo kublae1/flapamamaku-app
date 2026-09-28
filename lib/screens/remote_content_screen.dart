@@ -969,15 +969,16 @@ class _PollList extends StatelessWidget {
                       ),
                     ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () => onSuggest(item),
-                    icon: const Icon(Icons.add_comment_outlined, size: 18),
-                    label: Text(
-                      item.pollMySuggestionText.isEmpty
-                          ? 'Eigener Vorschlag'
-                          : 'Eigenen Vorschlag bearbeiten',
+                  if (item.pollAllowSuggestions)
+                    OutlinedButton.icon(
+                      onPressed: () => onSuggest(item),
+                      icon: const Icon(Icons.add_comment_outlined, size: 18),
+                      label: Text(
+                        item.pollMySuggestionText.isEmpty
+                            ? 'Eigener Vorschlag'
+                            : 'Eigenen Vorschlag bearbeiten',
+                      ),
                     ),
-                  ),
                 ],
               ),
               const SizedBox(height: 14),
