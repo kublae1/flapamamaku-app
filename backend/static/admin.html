@@ -731,6 +731,23 @@
 
     <section id="system" class="panel">
       <div class="grid">
+        <form class="card" id="app-config-form">
+          <div class="preview-heading">
+            <h2>Verein & Branding</h2>
+            <span class="meta">Vorbereitung für White Label</span>
+          </div>
+          <label>App-Name</label>
+          <input name="app_name" maxlength="80" required>
+          <label>Untertitel</label>
+          <input name="app_subtitle" maxlength="120">
+          <label>Hauptfarbe</label>
+          <input name="primary_color" type="color" value="#8A101B">
+          <p class="meta">
+            Diese Angaben werden zentral im Backend gespeichert. Logo und App-Icon bleiben
+            vorerst unverändert, damit der bestehende FLAPAMAMAKU-Build stabil bleibt.
+          </p>
+          <p><button class="primary" type="submit">Branding speichern</button></p>
+        </form>
         <div class="card">
           <div class="preview-heading">
             <h2>Systemstatus</h2>
@@ -1942,8 +1959,25 @@ async function downloadSystemBackup(name) {
   URL.revokeObjectURL(url);
 }
 
+async function loadAppConfig() {
+  if (!currentUser?.can_manage_users) return;
+  try {
+    const config = await api("/api/app-config");
+    const form = document.getElementById("app-config-form");
+    form.elements.app_name.value = config.app_name || "FLAPAMAMAKU";
+    form.elements.app_subtitle.value = config.app_subtitle || "";
+    form.elements.primary_color.value =
+      /^#[0-9A-Fa-f]{6}$/.test(config.primary_color || "")
+        ? config.primary_color
+        : "#8A101B";
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 async function loadSystem() {
   if (!currentUser?.can_manage_users) return;
+  await loadAppConfig();
   const statusBox = document.getElementById("system-status");
   const backupList = document.getElementById("system-backup-list");
   try {
@@ -1992,6 +2026,30 @@ async function loadSystem() {
     console.error(error);
   }
 }
+
+document.getElementById("app-config-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await api("/api/app-config", {
+      method: "PUT",
+      body: JSON.stringify({
+        app_name: form.elements.app_name.value.trim(),
+        app_subtitle: form.elements.app_subtitle.value.trim(),
+        primary_color: form.elements.primary_color.value.toUpperCase(),
+      }),
+    });
+    await loadAppConfig();
+    alert("Branding wurde gespeichert.");
+  } catch (error) {
+    alert("Branding konnte nicht gespeichert werden.");
+    console.error(error);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 document.getElementById("system-nav").addEventListener("click", loadSystem);
 document.getElementById("system-refresh").addEventListener("click", loadSystem);
