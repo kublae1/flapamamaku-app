@@ -355,6 +355,7 @@
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
       <button data-panel="content" id="gallery-nav">Galerie</button>
       <button data-panel="content" id="content-nav">Fotoalben & Inhalte</button>
+      <button data-panel="system" id="system-nav" data-permission="can_manage_users">System</button>
       <button id="logout-button">Abmelden</button>
     </nav>
 
@@ -634,6 +635,29 @@
           </select>
           <p class="meta" id="content-summary"></p>
           <div id="content-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="system" class="panel">
+      <div class="grid">
+        <div class="card">
+          <div class="preview-heading">
+            <h2>Systemstatus</h2>
+            <button type="button" id="system-refresh">Aktualisieren</button>
+          </div>
+          <div id="system-status"><p class="meta">Systemdaten werden geladen …</p></div>
+        </div>
+        <div class="card">
+          <div class="preview-heading">
+            <h2>Datenbank-Backups</h2>
+            <button type="button" id="system-backup-create">+ Backup jetzt erstellen</button>
+          </div>
+          <p class="meta">
+            Automatische Sicherung mindestens einmal täglich. Die ältesten Sicherungen
+            werden nach Erreichen der eingestellten Anzahl automatisch entfernt.
+          </p>
+          <div id="system-backup-list"><p class="meta">Backups werden geladen …</p></div>
         </div>
       </div>
     </section>
@@ -1771,6 +1795,102 @@ document.getElementById("users-form").addEventListener("submit", async event => 
       "Prüfe auch, ob der Benutzername bereits verwendet wird."
     );
     console.error(error);
+  }
+});
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+async function downloadSystemBackup(name) {
+  const response = await fetch(`/api/system/backups/${encodeURIComponent(name)}`, {
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
+  });
+  if (!response.ok) throw new Error(await response.text());
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function loadSystem() {
+  if (!currentUser?.can_manage_users) return;
+  const statusBox = document.getElementById("system-status");
+  const backupList = document.getElementById("system-backup-list");
+  try {
+    const [status, backups] = await Promise.all([
+      api("/api/system/status"),
+      api("/api/system/backups"),
+    ]);
+    const latest = status.latest_backup
+      ? `${formatDateTimeCH(status.latest_backup.created_at)} · ${formatBytes(status.latest_backup.size_bytes)}`
+      : "Noch kein Backup vorhanden";
+    statusBox.innerHTML = `
+      <p><strong>API-Version:</strong> ${status.api_version}</p>
+      <p><strong>Datenbank-Schema:</strong> Version ${status.schema_version}</p>
+      <p><strong>Build:</strong> <span class="meta">${status.build_sha}</span></p>
+      <p><strong>Datenbankgrösse:</strong> ${formatBytes(status.database_size_bytes)}</p>
+      <p><strong>Backups:</strong> ${status.backup_count} / Aufbewahrung ${status.backup_retention}</p>
+      <p><strong>Letztes Backup:</strong> ${latest}</p>
+    `;
+
+    backupList.innerHTML = "";
+    if (!backups.length) {
+      backupList.innerHTML = '<p class="meta">Noch keine Sicherung vorhanden.</p>';
+      return;
+    }
+    backups.forEach(backup => {
+      const row = document.createElement("div");
+      row.className = "entry";
+      row.innerHTML = `
+        <h3>${backup.name}</h3>
+        <div class="meta">${formatDateTimeCH(backup.created_at)} · ${formatBytes(backup.size_bytes)}</div>
+        <div class="actions"><button type="button" class="download-backup">Herunterladen</button></div>
+      `;
+      row.querySelector(".download-backup").onclick = async () => {
+        try {
+          await downloadSystemBackup(backup.name);
+        } catch (error) {
+          alert("Backup konnte nicht heruntergeladen werden.");
+          console.error(error);
+        }
+      };
+      backupList.appendChild(row);
+    });
+  } catch (error) {
+    statusBox.innerHTML = '<p class="error">Systemstatus konnte nicht geladen werden.</p>';
+    backupList.innerHTML = '<p class="error">Backups konnten nicht geladen werden.</p>';
+    console.error(error);
+  }
+}
+
+document.getElementById("system-nav").addEventListener("click", loadSystem);
+document.getElementById("system-refresh").addEventListener("click", loadSystem);
+document.getElementById("system-backup-create").addEventListener("click", async () => {
+  const button = document.getElementById("system-backup-create");
+  button.disabled = true;
+  try {
+    await api("/api/system/backups", {method:"POST"});
+    await loadSystem();
+  } catch (error) {
+    alert("Backup konnte nicht erstellt werden.");
+    console.error(error);
+  } finally {
+    button.disabled = false;
   }
 });
 
