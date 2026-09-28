@@ -244,6 +244,29 @@ class ApiService {
     return ContentItem.fromJson(json);
   }
 
+  Future<ContentItem> suggestAndVotePoll(int pollId, String text) async {
+    final response = await http
+        .post(
+          _uri('/api/polls/$pollId/suggest-and-vote'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'text': text.trim()}),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return ContentItem.fromJson(json);
+  }
+
+  Future<void> deleteContentImage(int contentId, int imageId) async {
+    final response = await http
+        .delete(
+          _uri('/api/content/$contentId/images/$imageId'),
+          headers: authHeaders,
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
   Future<void> deleteContent(int id) async {
     final response = await http
         .delete(_uri('/api/content/$id'), headers: authHeaders)
