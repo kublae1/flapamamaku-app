@@ -221,6 +221,26 @@
       font-weight: 550;
       color: #ddd;
     }
+    .role-permission-grid {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .role-permission-grid label {
+      display: block;
+      font-size: 16px;
+      font-weight: 750;
+      line-height: 1.3;
+      color: #f5f1eb;
+    }
+    .role-permission-grid select {
+      display: block;
+      width: 100%;
+      margin-top: 7px;
+      min-height: 48px;
+      padding: 12px 14px;
+      font-size: 16px;
+      font-weight: 650;
+    }
     .hidden { display: none !important; }
     .error { color: #ff8c96; font-weight: 800; }
     hr { border-color: var(--line) !important; }
@@ -530,89 +550,89 @@
             <select name="account_role_key" class="role-select"></select>
             <p class="meta">Standardrechte kommen aus der Rolle. Abweichungen gelten nur für dieses Konto.</p>
             <h3>Abweichungen von der Rolle</h3>
-            <div class="permission-grid">
+            <div class="permission-grid role-permission-grid">
             <label>News verwalten
               <select name="account_can_news">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Termine verwalten
               <select name="account_can_events">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Mitglieder verwalten
               <select name="account_can_members">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Dokumente verwalten
               <select name="account_can_documents">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Galerie/Fotoalben verwalten
               <select name="account_can_photos">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Galerie-Snapshots aufnehmen
               <select name="account_can_gallery_upload">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Umfragen verwalten
               <select name="account_can_polls">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Links verwalten
               <select name="account_can_links">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Kontakt verwalten
               <select name="account_can_contact">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Über uns verwalten
               <select name="account_can_about">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>PC-Adminseite benutzen
               <select name="account_can_admin_page">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Benutzer/Berechtigungen verwalten
               <select name="account_can_manage_users">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             </div>
@@ -675,89 +695,89 @@
           <select name="role_key" class="role-select"></select>
           <p class="meta">Die Rolle liefert die Standardrechte. Einzelne Rechte können darunter gezielt erlaubt oder gesperrt werden.</p>
           <h3>Abweichungen von der Rolle</h3>
-          <div class="permission-grid">
+          <div class="permission-grid role-permission-grid">
             <label>News verwalten
               <select name="can_news">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Termine verwalten
               <select name="can_events">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Mitglieder verwalten
               <select name="can_members">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Dokumente verwalten
               <select name="can_documents">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Galerie/Fotoalben verwalten
               <select name="can_photos">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Galerie-Snapshots aufnehmen
               <select name="can_gallery_upload">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Umfragen verwalten
               <select name="can_polls">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Links verwalten
               <select name="can_links">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Kontakt verwalten
               <select name="can_contact">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Über uns verwalten
               <select name="can_about">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>PC-Adminseite benutzen
               <select name="can_admin_page">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
             <label>Benutzer/Berechtigungen verwalten
               <select name="can_manage_users">
-                <option value="">Von Rolle übernehmen</option>
-                <option value="allow">Zusätzlich erlauben</option>
-                <option value="deny">Explizit sperren</option>
+                <option value="">Rolle</option>
+                <option value="allow">Erlauben</option>
+                <option value="deny">Sperren</option>
               </select>
             </label>
           </div>
