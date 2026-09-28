@@ -2131,6 +2131,13 @@ document.getElementById("logout-button").addEventListener("click", async () => {
   token = "";
   currentUser = null;
   sessionStorage.removeItem("flapamamaku_token");
+
+  const authForm = document.getElementById("auth-form");
+  authForm.reset();
+  authForm.elements.username.value = "";
+  authForm.elements.password.value = "";
+  document.getElementById("auth-error").textContent = "";
+
   showAuth();
 });
 
