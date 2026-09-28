@@ -94,6 +94,14 @@ void main() {
       'poll_voters': [
         {'name': 'Max Muster', 'option_index': 1},
       ],
+      'poll_suggestions': [
+        {
+          'member_name': 'Anna Muster',
+          'text': '20:00',
+          'option_index': 2,
+          'vote_count': 4,
+        },
+      ],
     });
 
     expect(poll.section, 'polls');
@@ -103,6 +111,10 @@ void main() {
     expect(poll.pollTotalVotes, 5);
     expect(poll.pollMyVote, 1);
     expect(poll.pollVoters.single.name, 'Max Muster');
+    expect(poll.pollSuggestions.single.memberName, 'Anna Muster');
+    expect(poll.pollSuggestions.single.text, '20:00');
+    expect(poll.pollSuggestions.single.optionIndex, 2);
+    expect(poll.pollSuggestions.single.voteCount, 4);
   });
 
 }
