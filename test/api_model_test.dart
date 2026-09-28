@@ -80,4 +80,29 @@ void main() {
     ]);
   });
 
+  test('maps poll domain payload', () {
+    final poll = ContentItem.fromJson({
+      'id': 9,
+      'section': 'polls',
+      'title': 'Treffpunkt',
+      'text': 'Wann treffen wir uns?',
+      'poll_options': ['18:00', '19:00'],
+      'poll_allow_suggestions': true,
+      'poll_counts': [2, 3],
+      'poll_total_votes': 5,
+      'poll_my_vote': 1,
+      'poll_voters': [
+        {'name': 'Max Muster', 'option_index': 1},
+      ],
+    });
+
+    expect(poll.section, 'polls');
+    expect(poll.pollOptions, ['18:00', '19:00']);
+    expect(poll.pollAllowSuggestions, isTrue);
+    expect(poll.pollCounts, [2, 3]);
+    expect(poll.pollTotalVotes, 5);
+    expect(poll.pollMyVote, 1);
+    expect(poll.pollVoters.single.name, 'Max Muster');
+  });
+
 }
