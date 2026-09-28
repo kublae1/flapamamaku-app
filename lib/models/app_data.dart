@@ -1,3 +1,33 @@
+class ContentImage {
+  final int? id;
+  final String url;
+  final int sortOrder;
+  final String createdAt;
+  final bool legacy;
+
+  const ContentImage({
+    this.id,
+    required this.url,
+    this.sortOrder = 0,
+    this.createdAt = '',
+    this.legacy = false,
+  });
+
+  factory ContentImage.fromJson(Map<String, dynamic> json) {
+    return ContentImage(
+      id: json['id'] is int
+          ? json['id'] as int
+          : int.tryParse(json['id']?.toString() ?? ''),
+      url: json['url']?.toString() ?? '',
+      sortOrder: json['sort_order'] is int
+          ? json['sort_order'] as int
+          : int.tryParse(json['sort_order']?.toString() ?? '') ?? 0,
+      createdAt: json['created_at']?.toString() ?? '',
+      legacy: json['legacy'] == true,
+    );
+  }
+}
+
 class PollVoter {
   final String name;
   final int optionIndex;
@@ -28,6 +58,7 @@ class ContentItem {
   final List<int> imageIds;
   final List<int> imageSortOrders;
   final List<String> imageCreatedAts;
+  final List<ContentImage> mediaImages;
   final String createdAt;
   final int sortOrder;
   final int? snapshotId;
@@ -57,6 +88,7 @@ class ContentItem {
     this.imageIds = const [],
     this.imageSortOrders = const [],
     this.imageCreatedAts = const [],
+    this.mediaImages = const [],
     this.createdAt = '',
     this.sortOrder = 0,
     this.snapshotId,
@@ -77,6 +109,30 @@ class ContentItem {
   });
 
   factory ContentItem.fromJson(Map<String, dynamic> json) {
+    final structuredImages = (json['images'] as List<dynamic>? ?? const [])
+        .map((value) => ContentImage.fromJson(
+              Map<String, dynamic>.from(value as Map),
+            ))
+        .where((image) => image.url.trim().isNotEmpty)
+        .toList();
+
+    final legacyUrls = (json['image_urls'] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .where((value) => value.trim().isNotEmpty)
+        .toList();
+
+    final mediaImages = structuredImages.isNotEmpty
+        ? structuredImages
+        : List<ContentImage>.generate(
+            legacyUrls.length,
+            (index) => ContentImage(
+              url: legacyUrls[index],
+              sortOrder: index + 1,
+              createdAt: json['created_at']?.toString() ?? '',
+              legacy: true,
+            ),
+          );
+
     return ContentItem(
       id: json['id'] as int?,
       section: json['section']?.toString() ?? '',
@@ -84,22 +140,16 @@ class ContentItem {
       text: json['text']?.toString() ?? '',
       linkUrl: json['link_url']?.toString() ?? '',
       imageUrl: json['image_url']?.toString() ?? '',
-      imageUrls: (json['image_urls'] as List<dynamic>? ?? const [])
-          .map((value) => value.toString())
+      imageUrls: mediaImages.map((image) => image.url).toList(),
+      imageIds: mediaImages
+          .map((image) => image.id)
+          .whereType<int>()
           .toList(),
-      imageIds: (json['images'] as List<dynamic>? ?? const [])
-          .map((value) => Map<String, dynamic>.from(value as Map))
-          .map((value) => value['id'] is int ? value['id'] as int : int.tryParse(value['id']?.toString() ?? '') ?? 0)
-          .where((value) => value > 0)
-          .toList(),
-      imageSortOrders: (json['images'] as List<dynamic>? ?? const [])
-          .map((value) => Map<String, dynamic>.from(value as Map))
-          .map((value) => value['sort_order'] is int ? value['sort_order'] as int : int.tryParse(value['sort_order']?.toString() ?? '') ?? 0)
-          .toList(),
-      imageCreatedAts: (json['images'] as List<dynamic>? ?? const [])
-          .map((value) => Map<String, dynamic>.from(value as Map))
-          .map((value) => value['created_at']?.toString() ?? '')
-          .toList(),
+      imageSortOrders:
+          mediaImages.map((image) => image.sortOrder).toList(),
+      imageCreatedAts:
+          mediaImages.map((image) => image.createdAt).toList(),
+      mediaImages: mediaImages,
       createdAt: json['created_at']?.toString() ?? '',
       sortOrder: json['sort_order'] as int? ?? 0,
       snapshotId: json['snapshot_id'] as int?,
