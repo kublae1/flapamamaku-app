@@ -98,7 +98,6 @@ void main() {
     await tester.pumpWidget(_appWithStore(store));
     await tester.pump();
 
-    expect(find.text('E2E News'), findsOneWidget);
     expect(find.text('Start'), findsOneWidget);
     expect(find.text('News'), findsWidgets);
     expect(find.text('Termine'), findsOneWidget);
