@@ -299,9 +299,11 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
   }
 
   List<String> _images(ContentItem item) {
-    if (item.imageUrls.isNotEmpty) {
-      return item.imageUrls.where((url) => url.trim().isNotEmpty).toList();
-    }
+    final urls = item.mediaImages
+        .map((image) => image.url.trim())
+        .where((url) => url.isNotEmpty)
+        .toList();
+    if (urls.isNotEmpty) return urls;
     if (item.imageUrl.trim().isNotEmpty) return [item.imageUrl];
     return const [];
   }
@@ -309,21 +311,14 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
   List<ContentItem> _individualItems(List<ContentItem> items) {
     final result = <ContentItem>[];
     for (final item in items) {
-      final urls = _images(item);
-      if (urls.isEmpty) {
+      final media = item.mediaImages;
+      if (media.isEmpty) {
         result.add(item);
         continue;
       }
-      for (var index = 0; index < urls.length; index++) {
-        final imageId =
-            index < item.imageIds.length ? item.imageIds[index] : null;
-        final imageOrder = index < item.imageSortOrders.length
-            ? item.imageSortOrders[index]
-            : index + 1;
-        final imageCreatedAt = index < item.imageCreatedAts.length &&
-                item.imageCreatedAts[index].trim().isNotEmpty
-            ? item.imageCreatedAts[index]
-            : item.createdAt;
+
+      for (var index = 0; index < media.length; index++) {
+        final image = media[index];
         result.add(
           ContentItem(
             id: item.id,
@@ -331,13 +326,16 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
             title: item.title,
             text: item.text,
             linkUrl: item.linkUrl,
-            imageUrl: urls[index],
-            imageUrls: [urls[index]],
-            imageIds: imageId == null ? const [] : [imageId],
-            imageSortOrders: [imageOrder],
-            imageCreatedAts: [imageCreatedAt],
-            createdAt: imageCreatedAt,
-            sortOrder: (item.sortOrder * 1000) + imageOrder,
+            imageUrl: image.url,
+            imageUrls: [image.url],
+            imageIds: image.id == null ? const [] : [image.id!],
+            imageSortOrders: [image.sortOrder],
+            imageCreatedAts: [image.createdAt],
+            mediaImages: [image],
+            createdAt: image.createdAt.trim().isNotEmpty
+                ? image.createdAt
+                : item.createdAt,
+            sortOrder: (item.sortOrder * 1000) + image.sortOrder,
             snapshotId: item.snapshotId,
             isSnapshot: item.isSnapshot,
             canDelete: item.canDelete,
@@ -1112,9 +1110,11 @@ class _VisualAlbumList extends StatelessWidget {
   });
 
   List<String> _images(ContentItem item) {
-    if (item.imageUrls.isNotEmpty) {
-      return item.imageUrls.where((url) => url.trim().isNotEmpty).toList();
-    }
+    final urls = item.mediaImages
+        .map((image) => image.url.trim())
+        .where((url) => url.isNotEmpty)
+        .toList();
+    if (urls.isNotEmpty) return urls;
     if (item.imageUrl.trim().isNotEmpty) return [item.imageUrl];
     return const [];
   }
