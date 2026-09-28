@@ -426,8 +426,7 @@
       <button data-panel="events" data-permission="can_events">Termine</button>
       <button data-panel="members" id="members-nav">Mitglieder</button>
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
-      <button data-panel="content" id="gallery-nav">Galerie</button>
-      <button data-panel="content" id="content-nav">Fotoalben & Inhalte</button>
+      <button data-panel="content" id="content-nav">Medien & Inhalte</button>
       <button data-panel="system" id="system-nav" data-permission="can_manage_users">System</button>
       <button id="logout-button">Abmelden</button>
     </nav>
@@ -620,16 +619,16 @@
     <section id="content" class="panel">
       <div class="workspace-title">
         <div>
-          <h2>Inhalte verwalten</h2>
-          <p class="meta">Bereich wählen, Inhalt bearbeiten und die Wirkung direkt in der App-Vorschau kontrollieren.</p>
+          <h2>Medien & Inhalte verwalten</h2>
+          <p class="meta">Galerie und Fotoalben nutzen dieselbe Medienverwaltung: Galerie zeigt Einzelbilder, Fotoalben bündeln mehrere Bilder zu einem Album.</p>
         </div>
       </div>
       <div class="section-switcher" id="content-section-switcher">
         <button type="button" data-section="hero">Startseite</button>
         <button type="button" data-section="sujet">Sujet nächstes Jahr</button>
         <button type="button" data-section="archive">Vergangene Sujet</button>
-        <button type="button" data-section="gallery">Galerie</button>
-        <button type="button" data-section="photos">Fotoalben</button>
+        <button type="button" data-section="gallery">Galerie · Einzelbilder</button>
+        <button type="button" data-section="photos">Fotoalben · Alben</button>
         <button type="button" data-section="documents">Dokumente</button>
         <button type="button" data-section="polls">Umfragen</button>
         <button type="button" data-section="links">Links</button>
@@ -647,9 +646,9 @@
             <option value="hero">Startseite / Hauptbild</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
-            <option value="gallery">Galerie / Einzelbilder</option>
+            <option value="gallery">Galerie · Einzelbilder</option>
             <option value="documents">Dokumente</option>
-            <option value="photos">Fotoalben</option>
+            <option value="photos">Fotoalben · Alben</option>
             <option value="polls">Umfragen</option>
             <option value="links">Links</option>
             <option value="whatsapp">WhatsApp-Gruppe</option>
@@ -676,6 +675,7 @@
           </div>
           <div id="content-images-wrap">
             <label>Bilder (optional)</label>
+            <p class="meta">Für Galerie-Einträge werden die hochgeladenen Bilder einzeln angezeigt. Für Fotoalben bleiben alle Bilder gemeinsam im selben Album.</p>
             <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
           </div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
@@ -712,9 +712,9 @@
             <option value="motto">Jahresmotto</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
-            <option value="gallery">Galerie / Einzelbilder</option>
+            <option value="gallery">Galerie · Einzelbilder</option>
             <option value="documents">Dokumente</option>
-            <option value="photos">Fotoalben</option>
+            <option value="photos">Fotoalben · Alben</option>
             <option value="polls">Umfragen</option>
             <option value="links">Links</option>
             <option value="whatsapp">WhatsApp-Gruppe</option>
