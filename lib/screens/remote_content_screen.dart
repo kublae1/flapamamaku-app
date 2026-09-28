@@ -1009,7 +1009,7 @@ class _PollList extends StatelessWidget {
                   );
                 }),
               ],
-              if (item.pollSuggestions.isNotEmpty) ...[
+              if (item.pollAllowSuggestions) ...[
                 const SizedBox(height: 4),
                 Text(
                   'Vorschläge der Mitglieder (${item.pollSuggestions.length})',
@@ -1020,16 +1020,28 @@ class _PollList extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                ...item.pollSuggestions.map((suggestion) {
-                  return _optionTile(
-                    item: item,
-                    optionIndex: suggestion.optionIndex,
-                    label: suggestion.text,
-                    count: suggestion.voteCount,
-                    total: total,
-                    memberName: suggestion.memberName,
-                  );
-                }),
+                if (item.pollSuggestions.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      'Noch keine Mitgliedervorschläge vorhanden.',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                      ),
+                    ),
+                  )
+                else
+                  ...item.pollSuggestions.map((suggestion) {
+                    return _optionTile(
+                      item: item,
+                      optionIndex: suggestion.optionIndex,
+                      label: suggestion.text,
+                      count: suggestion.voteCount,
+                      total: total,
+                      memberName: suggestion.memberName,
+                    );
+                  }),
               ],
               Row(
                 children: [
