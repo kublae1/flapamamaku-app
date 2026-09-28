@@ -1630,8 +1630,11 @@ document.getElementById("content-sort").addEventListener("change", loadContent);
 document.getElementById("gallery-nav").addEventListener("click", async () => {
   document.getElementById("content-editor-title").textContent = "Galerie bearbeiten";
   document.getElementById("content-filter").value = "gallery";
+  document.getElementById("content-sort").value = "manual";
   document.querySelector("#content-form [name=section]").value = "gallery";
+  resetContentForm({keepSection: true});
   updateContentImageRecommendation();
+  updateContentFormMode();
   updateContentPreview();
   await loadContent();
 });
