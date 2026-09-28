@@ -41,6 +41,8 @@ class ContentItem {
   final List<int> pollCounts;
   final int pollTotalVotes;
   final int? pollMyVote;
+  final int? pollMySuggestionIndex;
+  final String pollMySuggestionText;
   final List<PollVoter> pollVoters;
 
   const ContentItem({
@@ -67,6 +69,8 @@ class ContentItem {
     this.pollCounts = const [],
     this.pollTotalVotes = 0,
     this.pollMyVote,
+    this.pollMySuggestionIndex,
+    this.pollMySuggestionText = '',
     this.pollVoters = const [],
   });
 
@@ -111,6 +115,8 @@ class ContentItem {
           .toList(),
       pollTotalVotes: json['poll_total_votes'] as int? ?? 0,
       pollMyVote: json['poll_my_vote'] as int?,
+      pollMySuggestionIndex: json['poll_my_suggestion_index'] as int?,
+      pollMySuggestionText: json['poll_my_suggestion_text']?.toString() ?? '',
       pollVoters: (json['poll_voters'] as List<dynamic>? ?? const [])
           .map((value) => PollVoter.fromJson(
                 Map<String, dynamic>.from(value as Map),
