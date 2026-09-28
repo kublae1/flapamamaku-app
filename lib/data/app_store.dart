@@ -585,6 +585,7 @@ class AppStore extends ChangeNotifier {
       final remoteMembers = await api.fetchMembers();
       final remoteMemberFilters = await api.fetchMemberFilters();
       final remoteContent = await api.fetchContent();
+      final remotePolls = await api.fetchPolls();
 
       news
         ..clear()
@@ -600,7 +601,8 @@ class AppStore extends ChangeNotifier {
         ..addAll(remoteMemberFilters);
       content
         ..clear()
-        ..addAll(remoteContent);
+        ..addAll(remoteContent)
+        ..addAll(remotePolls);
 
       _sortNews();
       _sortEvents();
@@ -635,7 +637,11 @@ class AppStore extends ChangeNotifier {
     }
     if (item.id == null) return;
     try {
-      await api.deleteContent(item.id!);
+      if (item.section == 'polls') {
+        await api.deletePoll(item.id!);
+      } else {
+        await api.deleteContent(item.id!);
+      }
       await refreshFromServer();
     } catch (error) {
       syncError = error.toString();
