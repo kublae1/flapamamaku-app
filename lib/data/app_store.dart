@@ -102,7 +102,7 @@ class AppStore extends ChangeNotifier {
 
       final match = RegExp(r'^#([0-9A-Fa-f]{6})\$').firstMatch(colorText);
       if (match != null) {
-        themeColorValue = int.parse('FF' + match.group(1)!, radix: 16);
+        themeColorValue = int.parse('FF${match.group(1)!}', radix: 16);
       }
       notifyListeners();
     } catch (_) {
