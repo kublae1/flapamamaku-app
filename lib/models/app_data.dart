@@ -38,6 +38,7 @@ class ContentItem {
   final String documentName;
   final String documentMime;
   final List<String> pollOptions;
+  final bool pollAllowSuggestions;
   final List<int> pollCounts;
   final int pollTotalVotes;
   final int? pollMyVote;
@@ -66,6 +67,7 @@ class ContentItem {
     this.documentName = '',
     this.documentMime = '',
     this.pollOptions = const [],
+    this.pollAllowSuggestions = false,
     this.pollCounts = const [],
     this.pollTotalVotes = 0,
     this.pollMyVote,
@@ -110,6 +112,7 @@ class ContentItem {
       pollOptions: (json['poll_options'] as List<dynamic>? ?? const [])
           .map((value) => value.toString())
           .toList(),
+      pollAllowSuggestions: json['poll_allow_suggestions'] == true,
       pollCounts: (json['poll_counts'] as List<dynamic>? ?? const [])
           .map((value) => value is int ? value : int.tryParse(value.toString()) ?? 0)
           .toList(),
