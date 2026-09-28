@@ -34,7 +34,7 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
           store: store,
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
-            title: 'FLAPAMAMAKU',
+            title: store.appName,
             theme: FlapBrand.theme(store.themeColor),
             home: Builder(
               builder: (context) {
