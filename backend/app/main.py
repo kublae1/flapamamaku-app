@@ -24,9 +24,17 @@ from PIL import Image, ImageOps, ImageSequence
 
 
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
+BACKUP_DIR = Path(os.getenv("FLAPAMAMAKU_BACKUP_DIR", "/data/backups"))
+BACKUP_RETENTION = max(3, int(os.getenv("FLAPAMAMAKU_BACKUP_RETENTION", "14")))
+BACKUP_INTERVAL_SECONDS = max(
+    3600,
+    int(os.getenv("FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS", "86400")),
+)
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.32"
+API_VERSION = "0.8.33"
+BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
+CURRENT_SCHEMA_VERSION = 1
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -378,6 +386,121 @@ def _ensure_column(
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _apply_schema_migrations(db: sqlite3.Connection) -> None:
+    """Record ordered schema migrations after the legacy bootstrap is reconciled."""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    migrations: list[tuple[int, str]] = [
+        (1, "baseline-v0.8.33"),
+    ]
+    applied = {
+        int(row["version"])
+        for row in db.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    for version, name in migrations:
+        if version in applied:
+            continue
+        db.execute(
+            """
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (?, ?, ?)
+            """,
+            (version, name, now),
+        )
+
+
+def _schema_version() -> int:
+    if not DB_PATH.exists():
+        return 0
+    try:
+        with connect() as db:
+            row = db.execute(
+                "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+            ).fetchone()
+            return int(row["version"] if row is not None else 0)
+    except sqlite3.Error:
+        return 0
+
+
+def _backup_files() -> list[Path]:
+    if not BACKUP_DIR.exists():
+        return []
+    return sorted(
+        (
+            path
+            for path in BACKUP_DIR.glob("flapamamaku-*.db")
+            if path.is_file()
+        ),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _backup_info(path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    return {
+        "name": path.name,
+        "size_bytes": stat.st_size,
+        "created_at": datetime.fromtimestamp(
+            stat.st_mtime,
+            tz=timezone.utc,
+        ).isoformat(),
+    }
+
+
+def _prune_backups() -> None:
+    for path in _backup_files()[BACKUP_RETENTION:]:
+        try:
+            path.unlink()
+        except OSError:
+            logger.exception("Could not remove old backup %s", path)
+
+
+def _create_database_backup(reason: str = "automatic") -> Path:
+    if not DB_PATH.exists():
+        raise RuntimeError("Database does not exist")
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    safe_reason = "".join(
+        char for char in reason.lower().strip()
+        if char.isalnum() or char in {"-", "_"}
+    ) or "backup"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = BACKUP_DIR / f"flapamamaku-{timestamp}-{safe_reason}.db"
+
+    with sqlite3.connect(DB_PATH) as source, sqlite3.connect(target) as destination:
+        source.backup(destination)
+
+    with sqlite3.connect(target) as check:
+        result = check.execute("PRAGMA integrity_check").fetchone()
+        if result is None or str(result[0]).lower() != "ok":
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            raise RuntimeError("Backup integrity check failed")
+
+    _prune_backups()
+    logger.info("Database backup created: %s", target)
+    return target
+
+
+def _ensure_automatic_backup() -> None:
+    files = _backup_files()
+    if files:
+        age = datetime.now(timezone.utc).timestamp() - files[0].stat().st_mtime
+        if age < BACKUP_INTERVAL_SECONDS:
+            return
+    _create_database_backup("automatic")
+
+
 def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
@@ -721,6 +844,8 @@ def init_db() -> None:
                 WHERE phone_mobile = '' AND phone <> ''
                 """
             )
+
+        _apply_schema_migrations(db)
         db.commit()
 
 
@@ -733,6 +858,15 @@ async def _snapshot_cleanup_loop() -> None:
                 (datetime.now(timezone.utc).isoformat(),),
             )
             db.commit()
+
+
+async def _backup_loop() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await asyncio.to_thread(_ensure_automatic_backup)
+        except Exception:
+            logger.exception("Automatic database backup failed")
 
 
 def _firebase_access() -> tuple[str, str] | None:
@@ -986,7 +1120,12 @@ async def _push_delivery_loop() -> None:
 @app.on_event("startup")
 async def startup() -> None:
     init_db()
+    try:
+        await asyncio.to_thread(_ensure_automatic_backup)
+    except Exception:
+        logger.exception("Initial automatic database backup failed")
     asyncio.create_task(_snapshot_cleanup_loop())
+    asyncio.create_task(_backup_loop())
     asyncio.create_task(_push_delivery_loop())
 
 
@@ -1444,8 +1583,13 @@ def root() -> dict[str, str]:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "version": API_VERSION}
+def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "version": API_VERSION,
+        "build_sha": BUILD_SHA,
+        "schema_version": _schema_version(),
+    }
 
 
 @app.get("/admin")
@@ -1466,6 +1610,63 @@ def flapamamaku_icon() -> FileResponse:
     return FileResponse(
         STATIC_DIR / "flapamamaku-icon.png",
         media_type="image/png",
+    )
+
+
+@app.get("/api/system/status")
+def system_status(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    backups = _backup_files()
+    return {
+        "api_version": API_VERSION,
+        "build_sha": BUILD_SHA,
+        "schema_version": _schema_version(),
+        "database_path": str(DB_PATH),
+        "database_size_bytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
+        "backup_directory": str(BACKUP_DIR),
+        "backup_retention": BACKUP_RETENTION,
+        "backup_count": len(backups),
+        "latest_backup": _backup_info(backups[0]) if backups else None,
+    }
+
+
+@app.get("/api/system/backups")
+def list_backups(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> list[dict[str, Any]]:
+    return [_backup_info(path) for path in _backup_files()]
+
+
+@app.post("/api/system/backups")
+def create_backup(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    try:
+        path = _create_database_backup("manual")
+    except Exception as exc:
+        logger.exception("Manual database backup failed")
+        raise HTTPException(status_code=500, detail="Backup konnte nicht erstellt werden") from exc
+    return _backup_info(path)
+
+
+@app.get("/api/system/backups/{filename}")
+def download_backup(
+    filename: str,
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> FileResponse:
+    candidate = BACKUP_DIR / Path(filename).name
+    if (
+        candidate.parent != BACKUP_DIR
+        or not candidate.name.startswith("flapamamaku-")
+        or candidate.suffix != ".db"
+        or not candidate.is_file()
+    ):
+        raise HTTPException(status_code=404, detail="Backup nicht gefunden")
+    return FileResponse(
+        candidate,
+        media_type="application/octet-stream",
+        filename=candidate.name,
     )
 
 
