@@ -113,6 +113,110 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
     }
   }
 
+  Future<void> _suggestPollOption(
+    BuildContext context,
+    AppStore store,
+    ContentItem item,
+  ) async {
+    if (item.id == null) return;
+    final controller = TextEditingController();
+    final suggestion = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eigener Vorschlag'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 120,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Vorschlag eingeben',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) =>
+              Navigator.of(dialogContext).pop(value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Vorschlag übernehmen & abstimmen'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (suggestion == null || suggestion.trim().isEmpty || !context.mounted) {
+      return;
+    }
+
+    try {
+      await store.api.suggestAndVotePoll(item.id!, suggestion);
+      await store.refreshFromServer();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vorschlag hinzugefügt und Stimme gespeichert.'),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Vorschlag konnte nicht gespeichert werden: $error')),
+      );
+    }
+  }
+
+  Future<void> _deleteGalleryItem(
+    BuildContext context,
+    AppStore store,
+    ContentItem item,
+  ) async {
+    if (item.isSnapshot) {
+      await _deleteItem(context, store, item);
+      return;
+    }
+
+    if (item.id != null && item.imageIds.length == 1) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Foto löschen?'),
+          content: const Text('Dieses Foto wird dauerhaft aus der Galerie gelöscht.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Löschen'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+
+      try {
+        await store.api.deleteContentImage(item.id!, item.imageIds.first);
+        await store.refreshFromServer();
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Foto konnte nicht gelöscht werden: $error')),
+        );
+      }
+      return;
+    }
+
+    await _deleteItem(context, store, item);
+  }
+
   Future<void> _deleteItem(
     BuildContext context,
     AppStore store,
@@ -200,7 +304,16 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
         result.add(item);
         continue;
       }
-      for (final url in urls) {
+      for (var index = 0; index < urls.length; index++) {
+        final imageId =
+            index < item.imageIds.length ? item.imageIds[index] : null;
+        final imageOrder = index < item.imageSortOrders.length
+            ? item.imageSortOrders[index]
+            : index + 1;
+        final imageCreatedAt = index < item.imageCreatedAts.length &&
+                item.imageCreatedAts[index].trim().isNotEmpty
+            ? item.imageCreatedAts[index]
+            : item.createdAt;
         result.add(
           ContentItem(
             id: item.id,
@@ -208,10 +321,13 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
             title: item.title,
             text: item.text,
             linkUrl: item.linkUrl,
-            imageUrl: url,
-            imageUrls: [url],
-            createdAt: item.createdAt,
-            sortOrder: item.sortOrder,
+            imageUrl: urls[index],
+            imageUrls: [urls[index]],
+            imageIds: imageId == null ? const [] : [imageId],
+            imageSortOrders: [imageOrder],
+            imageCreatedAts: [imageCreatedAt],
+            createdAt: imageCreatedAt,
+            sortOrder: (item.sortOrder * 1000) + imageOrder,
             snapshotId: item.snapshotId,
             isSnapshot: item.isSnapshot,
             canDelete: item.canDelete,
@@ -428,7 +544,9 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                     headers: store.api.authHeaders,
                     onOpen: (item) => _openLink(context, item.linkUrl),
                     onDelete: store.canEditContentSection(widget.section)
-                        ? (item) => _deleteItem(context, store, item)
+                        ? (item) => widget.section == 'gallery'
+                            ? _deleteGalleryItem(context, store, item)
+                            : _deleteItem(context, store, item)
                         : null,
                   )
                 : widget.section == 'documents'
@@ -441,6 +559,8 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                     items: items,
                     onVote: (item, optionIndex) =>
                         _votePoll(context, store, item, optionIndex),
+                    onSuggest: (item) =>
+                        _suggestPollOption(context, store, item),
                   )
                 : widget.archiveStyle
                 ? _VisualAlbumList(
@@ -712,8 +832,13 @@ class _DocumentList extends StatelessWidget {
 class _PollList extends StatelessWidget {
   final List<ContentItem> items;
   final void Function(ContentItem item, int optionIndex) onVote;
+  final ValueChanged<ContentItem> onSuggest;
 
-  const _PollList({required this.items, required this.onVote});
+  const _PollList({
+    required this.items,
+    required this.onVote,
+    required this.onSuggest,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -822,13 +947,24 @@ class _PollList extends StatelessWidget {
                   ),
                 );
               }),
-              Text(
-                total == 1 ? '1 Stimme' : '$total Stimmen',
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      total == 1 ? '1 Stimme' : '$total Stimmen',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => onSuggest(item),
+                    icon: const Icon(Icons.add_comment_outlined, size: 18),
+                    label: const Text('Eigener Vorschlag'),
+                  ),
+                ],
               ),
               const SizedBox(height: 14),
               Container(
