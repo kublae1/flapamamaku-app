@@ -32,7 +32,7 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.40"
+API_VERSION = "0.8.41"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 5
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
@@ -171,6 +171,13 @@ class ContentPayload(BaseModel):
     link_url: str = ""
     poll_options: list[str] = []
     poll_allow_suggestions: bool = False
+
+
+class PollPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    text: str = ""
+    options: list[str]
+    allow_suggestions: bool = False
 
 
 class AppConfigPayload(BaseModel):
@@ -2372,6 +2379,179 @@ def push_status(
         ),
         **diagnostic,
     }
+
+
+def _normalize_poll_options(values: list[str]) -> list[str]:
+    options = [str(value).strip() for value in values if str(value).strip()]
+    if len(options) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="Eine Umfrage benötigt mindestens zwei Antwortmöglichkeiten",
+        )
+    if len(options) > 21:
+        raise HTTPException(
+            status_code=422,
+            detail="Maximal 21 Antwortoptionen möglich",
+        )
+    normalized = [value.casefold() for value in options]
+    if len(set(normalized)) != len(normalized):
+        raise HTTPException(
+            status_code=422,
+            detail="Antwortmöglichkeiten dürfen nicht doppelt vorkommen",
+        )
+    return options
+
+
+def _create_poll(
+    payload: PollPayload,
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    if not user.get("can_polls", False):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    options = _normalize_poll_options(payload.options)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        max_order = db.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM content_items
+            WHERE section = 'polls'
+            """
+        ).fetchone()[0]
+        cursor = db.execute(
+            """
+            INSERT INTO content_items (
+                section, title, text, link_url, poll_options,
+                poll_allow_suggestions, sort_order, created_at
+            ) VALUES ('polls', ?, ?, '', ?, ?, ?, ?)
+            """,
+            (
+                payload.title,
+                payload.text,
+                json.dumps(options, ensure_ascii=False),
+                int(payload.allow_suggestions),
+                max_order + 1,
+                now,
+            ),
+        )
+        rule = CONTENT_PUSH_RULES.get("polls")
+        if rule is not None:
+            kind, prefix, route = rule
+            _queue_push_notification(
+                db,
+                kind=kind,
+                title=f"{prefix}: {payload.title}",
+                body=payload.text,
+                route=route,
+            )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+def _update_poll(
+    poll_id: int,
+    payload: PollPayload,
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    if not user.get("can_polls", False):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    options = _normalize_poll_options(payload.options)
+    with connect() as db:
+        existing = db.execute(
+            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        db.execute(
+            """
+            UPDATE content_items
+            SET title = ?, text = ?, link_url = '',
+                poll_options = ?, poll_allow_suggestions = ?
+            WHERE id = ? AND section = 'polls'
+            """,
+            (
+                payload.title,
+                payload.text,
+                json.dumps(options, ensure_ascii=False),
+                int(payload.allow_suggestions),
+                poll_id,
+            ),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (poll_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+def _delete_poll(
+    poll_id: int,
+    user: dict[str, Any],
+) -> None:
+    if not user.get("can_polls", False):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    with connect() as db:
+        existing = db.execute(
+            "SELECT id FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (poll_id,))
+        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (poll_id,))
+        db.execute("DELETE FROM content_images WHERE content_id = ?", (poll_id,))
+        db.execute(
+            "DELETE FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        )
+        db.commit()
+
+
+@app.get("/api/polls")
+def get_polls(
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM content_items
+            WHERE section = 'polls'
+            ORDER BY sort_order ASC, id ASC
+            """
+        ).fetchall()
+    return [_serialize_content(row, user["id"]) for row in rows]
+
+
+@app.post("/api/polls")
+def post_poll(
+    payload: PollPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    return _create_poll(payload, user)
+
+
+@app.put("/api/polls/{poll_id}")
+def put_poll(
+    poll_id: int,
+    payload: PollPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    return _update_poll(poll_id, payload, user)
+
+
+@app.delete("/api/polls/{poll_id}", status_code=204)
+def delete_poll(
+    poll_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    _delete_poll(poll_id, user)
 
 
 @app.get("/api/content")
