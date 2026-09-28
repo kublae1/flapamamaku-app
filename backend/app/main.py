@@ -2233,7 +2233,7 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
             INSERT INTO users (
                 member_id, username, password_hash, password_salt, active,
                 {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides, created_at
-            ) VALUES (?, ?, ?, ?, 1, {", ".join("?" for _ in PERMISSION_FIELDS)}, 'admin', '{}', ?)
+            ) VALUES (?, ?, ?, ?, 1, {", ".join("?" for _ in PERMISSION_FIELDS)}, 'admin', '{{}}', ?)
             """,
             [
                 payload.member_id,
