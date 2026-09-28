@@ -3,7 +3,12 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1 ]
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -367,6 +372,17 @@ jobs:
           echo "number=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           echo "Release version: $APP_VERSION+$GITHUB_RUN_NUMBER"
 
+      - name: Verify release tag matches app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          EXPECTED_TAG="v${{ steps.version.outputs.name }}"
+          if [ "${GITHUB_REF_NAME}" != "$EXPECTED_TAG" ]; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not match pubspec version ${EXPECTED_TAG}."
+            exit 1
+          fi
+          echo "Release tag matches app version: ${GITHUB_REF_NAME}"
+
       - name: Build universal release APK
         env:
           API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
@@ -431,12 +447,21 @@ jobs:
             --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
 
       - name: Verify permanent signing is configured for distributable builds
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         run: |
           if [ "${{ steps.signing.outputs.configured }}" != "true" ]; then
             echo "::error::Permanent Android release signing is not configured."
             exit 1
           fi
+
+      - name: Create release checksums
+        shell: bash
+        run: |
+          cd build/app/outputs
+          find flutter-apk bundle/release -type f \\( -name '*.apk' -o -name '*.aab' \\) -print0 \\
+            | sort -z \\
+            | xargs -0 sha256sum > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -445,3 +470,18 @@ jobs:
             build/app/outputs/flutter-apk/app-release.apk
             build/app/outputs/flutter-apk/app-*-release.apk
             build/app/outputs/bundle/release/app-release.aab
+            build/app/outputs/SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \\
+            build/app/outputs/flutter-apk/app-release.apk \\
+            build/app/outputs/flutter-apk/app-*-release.apk \\
+            build/app/outputs/bundle/release/app-release.aab \\
+            build/app/outputs/SHA256SUMS.txt \\
+            --title "FLAPAMAMAKU $GITHUB_REF_NAME" \\
+            --generate-notes
