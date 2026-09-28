@@ -458,9 +458,7 @@ jobs:
         shell: bash
         run: |
           cd build/app/outputs
-          find flutter-apk bundle/release -type f \( -name '*.apk' -o -name '*.aab' \) -print0 \
-            | sort -z \\
-            | xargs -0 sha256sum > SHA256SUMS.txt
+          sha256sum flutter-apk/app-release.apk flutter-apk/app-*-release.apk bundle/release/app-release.aab > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
