@@ -752,6 +752,27 @@
           <input name="contact_phone" maxlength="80">
           <label>Vereinsadresse</label>
           <textarea name="club_address" maxlength="500" placeholder="Strasse, PLZ Ort"></textarea>
+          <h3 style="margin-top:22px">Inhaltsmodule</h3>
+          <p class="meta">Bereiche können pro Verein ein- oder ausgeblendet und umbenannt werden.</p>
+
+          <label><input name="show_sujet" type="checkbox" checked> Bereich anzeigen</label>
+          <input name="label_sujet" maxlength="80" value="Sujet nächstes Jahr">
+
+          <label><input name="show_archive" type="checkbox" checked> Bereich anzeigen</label>
+          <input name="label_archive" maxlength="80" value="Vergangene Sujet">
+
+          <label><input name="show_photos" type="checkbox" checked> Bereich anzeigen</label>
+          <input name="label_photos" maxlength="80" value="Fotoalben">
+
+          <label><input name="show_documents" type="checkbox" checked> Bereich anzeigen</label>
+          <input name="label_documents" maxlength="80" value="Dokumente">
+
+          <label><input name="show_polls" type="checkbox" checked> Bereich anzeigen</label>
+          <input name="label_polls" maxlength="80" value="Umfragen">
+
+          <label><input name="show_links" type="checkbox" checked> Bereich anzeigen</label>
+          <input name="label_links" maxlength="80" value="Links">
+
           <label>Vereinslogo</label>
           <input name="logo_file" type="file" accept="image/jpeg,image/png,image/webp">
           <div id="app-logo-preview" class="hidden" style="margin-top:12px">
@@ -1989,6 +2010,10 @@ async function loadAppConfig() {
     form.elements.contact_email.value = config.contact_email || "";
     form.elements.contact_phone.value = config.contact_phone || "";
     form.elements.club_address.value = config.club_address || "";
+    for (const key of ["sujet","archive","photos","documents","polls","links"]) {
+      form.elements[`show_${key}`].checked = config[`show_${key}`] !== false;
+      form.elements[`label_${key}`].value = config[`label_${key}`] || "";
+    }
     form.elements.primary_color.value =
       /^#[0-9A-Fa-f]{6}$/.test(config.primary_color || "")
         ? config.primary_color
@@ -2076,6 +2101,18 @@ document.getElementById("app-config-form").addEventListener("submit", async even
         contact_email: form.elements.contact_email.value.trim(),
         contact_phone: form.elements.contact_phone.value.trim(),
         club_address: form.elements.club_address.value.trim(),
+        show_sujet: form.elements.show_sujet.checked,
+        label_sujet: form.elements.label_sujet.value.trim(),
+        show_archive: form.elements.show_archive.checked,
+        label_archive: form.elements.label_archive.value.trim(),
+        show_photos: form.elements.show_photos.checked,
+        label_photos: form.elements.label_photos.value.trim(),
+        show_documents: form.elements.show_documents.checked,
+        label_documents: form.elements.label_documents.value.trim(),
+        show_polls: form.elements.show_polls.checked,
+        label_polls: form.elements.label_polls.value.trim(),
+        show_links: form.elements.show_links.checked,
+        label_links: form.elements.label_links.value.trim(),
       }),
     });
     const logoFile = form.elements.logo_file.files[0];
