@@ -5,7 +5,7 @@ void main() {
   testWidgets('login and server setup are available without a configured server',
       (tester) async {
     await tester.pumpWidget(const FlapamamakuApp());
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('FLAPAMAMAKU'), findsOneWidget);
     expect(find.text('Anmelden'), findsWidgets);
