@@ -26,7 +26,7 @@ from PIL import Image, ImageOps, ImageSequence
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.31"
+API_VERSION = "0.8.32"
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
