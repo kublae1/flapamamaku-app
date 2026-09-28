@@ -848,6 +848,93 @@ class _PollList extends StatelessWidget {
     required this.onSuggest,
   });
 
+  Widget _optionTile({
+    required ContentItem item,
+    required int optionIndex,
+    required String label,
+    required int count,
+    required int total,
+    String? memberName,
+  }) {
+    final percent = total == 0 ? 0.0 : count / total;
+    final selected = item.pollMyVote == optionIndex;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => onVote(item, optionIndex),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected
+                ? FlapBrand.burgundy.withValues(alpha: 0.35)
+                : const Color(0xFF24272B),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? FlapBrand.gold : const Color(0x18FFFFFF),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: selected ? FlapBrand.gold : Colors.white54,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$count',
+                    style: const TextStyle(
+                      color: FlapBrand.gold,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+              if (memberName != null && memberName.trim().isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Padding(
+                  padding: const EdgeInsets.only(left: 34),
+                  child: Text(
+                    'Vorschlag von ${memberName.trim()}',
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: percent,
+                  minHeight: 6,
+                  backgroundColor: Colors.white12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
@@ -858,6 +945,13 @@ class _PollList extends StatelessWidget {
       itemBuilder: (_, index) {
         final item = items[index];
         final total = item.pollTotalVotes;
+        final suggestionIndices =
+            item.pollSuggestions.map((value) => value.optionIndex).toSet();
+        final regularIndices = List<int>.generate(
+          item.pollOptions.length,
+          (optionIndex) => optionIndex,
+        ).where((optionIndex) => !suggestionIndices.contains(optionIndex));
+
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -886,75 +980,57 @@ class _PollList extends StatelessWidget {
               ),
               if (item.text.trim().isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(item.text.trim(), style: const TextStyle(color: Colors.white70)),
+                Text(
+                  item.text.trim(),
+                  style: const TextStyle(color: Colors.white70),
+                ),
               ],
               const SizedBox(height: 14),
-              ...List.generate(item.pollOptions.length, (optionIndex) {
-                final count = optionIndex < item.pollCounts.length
-                    ? item.pollCounts[optionIndex]
-                    : 0;
-                final percent = total == 0 ? 0.0 : count / total;
-                final selected = item.pollMyVote == optionIndex;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => onVote(item, optionIndex),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? FlapBrand.burgundy.withValues(alpha: 0.35)
-                            : const Color(0xFF24272B),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: selected ? FlapBrand.gold : const Color(0x18FFFFFF),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                selected
-                                    ? Icons.radio_button_checked
-                                    : Icons.radio_button_off,
-                                color: selected ? FlapBrand.gold : Colors.white54,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  item.pollOptions[optionIndex],
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                '$count',
-                                style: const TextStyle(
-                                  color: FlapBrand.gold,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: percent,
-                              minHeight: 6,
-                              backgroundColor: Colors.white12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+              if (regularIndices.isNotEmpty) ...[
+                const Text(
+                  'Antwortmöglichkeiten',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
                   ),
-                );
-              }),
+                ),
+                const SizedBox(height: 8),
+                ...regularIndices.map((optionIndex) {
+                  final count = optionIndex < item.pollCounts.length
+                      ? item.pollCounts[optionIndex]
+                      : 0;
+                  return _optionTile(
+                    item: item,
+                    optionIndex: optionIndex,
+                    label: item.pollOptions[optionIndex],
+                    count: count,
+                    total: total,
+                  );
+                }),
+              ],
+              if (item.pollSuggestions.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Vorschläge der Mitglieder (${item.pollSuggestions.length})',
+                  style: const TextStyle(
+                    color: FlapBrand.gold,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...item.pollSuggestions.map((suggestion) {
+                  return _optionTile(
+                    item: item,
+                    optionIndex: suggestion.optionIndex,
+                    label: suggestion.text,
+                    count: suggestion.voteCount,
+                    total: total,
+                    memberName: suggestion.memberName,
+                  );
+                }),
+              ],
               Row(
                 children: [
                   Expanded(
