@@ -32,7 +32,7 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.38"
+API_VERSION = "0.8.39"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 5
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
@@ -1884,7 +1884,14 @@ def delete_app_logo(
 
 @app.get("/admin")
 def admin() -> FileResponse:
-    return FileResponse(STATIC_DIR / "admin.html")
+    return FileResponse(
+        STATIC_DIR / "admin.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
