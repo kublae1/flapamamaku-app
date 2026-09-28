@@ -34,6 +34,10 @@ FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv(
     "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_JSON",
     "",
 ).strip()
+PUSH_ICON_URL = os.getenv(
+    "FLAPAMAMAKU_PUSH_ICON_URL",
+    "https://flapamamaku.kublaecloud.synology.me/flapamamaku-icon.png",
+).strip()
 if not FIREBASE_SERVICE_ACCOUNT_JSON:
     firebase_b64 = os.getenv(
         "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_B64",
@@ -162,6 +166,10 @@ class ContentPayload(BaseModel):
 
 class PollVotePayload(BaseModel):
     option_index: int = Field(ge=0, le=20)
+
+
+class PollSuggestionPayload(BaseModel):
+    text: str = Field(min_length=1, max_length=120)
 
 
 class ContentImageOrderPayload(BaseModel):
@@ -775,6 +783,7 @@ def _send_fcm_message(
             "notification": {
                 "title": title,
                 "body": body,
+                **({"image": PUSH_ICON_URL} if PUSH_ICON_URL else {}),
             },
             "data": {
                 "kind": kind,
@@ -782,6 +791,10 @@ def _send_fcm_message(
             },
             "android": {
                 "priority": "high",
+                "notification": {
+                    "icon": "ic_launcher",
+                    **({"image": PUSH_ICON_URL} if PUSH_ICON_URL else {}),
+                },
             },
             "apns": {
                 "headers": {
@@ -1237,7 +1250,7 @@ def _serialize_content(
     with connect() as db:
         image_rows = db.execute(
             """
-            SELECT id, sort_order
+            SELECT id, sort_order, created_at
             FROM content_images
             WHERE content_id = ?
             ORDER BY sort_order ASC, id ASC
@@ -1311,6 +1324,7 @@ def _serialize_content(
             "url": f"/api/content/{item['id']}/images/{image_row['id']}",
             "legacy": False,
             "sort_order": image_row["sort_order"],
+            "created_at": image_row["created_at"],
         }
         for image_row in image_rows
     ]
@@ -2157,6 +2171,74 @@ def vote_poll(
                 created_at = excluded.created_at
             """,
             (poll_id, user["id"], payload.option_index, now),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (poll_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+@app.post("/api/polls/{poll_id}/suggest-and-vote")
+def suggest_and_vote_poll(
+    poll_id: int,
+    payload: PollSuggestionPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    suggestion = payload.text.strip()
+    if not suggestion:
+        raise HTTPException(status_code=422, detail="Vorschlag darf nicht leer sein")
+
+    with connect() as db:
+        poll = db.execute(
+            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if poll is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+
+        try:
+            options = json.loads(poll["poll_options"] or "[]")
+        except Exception:
+            options = []
+        if not isinstance(options, list):
+            options = []
+        options = [str(value).strip() for value in options if str(value).strip()]
+
+        existing_index = next(
+            (
+                index
+                for index, value in enumerate(options)
+                if value.casefold() == suggestion.casefold()
+            ),
+            None,
+        )
+        if existing_index is None:
+            if len(options) >= 21:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Maximal 21 Antwortoptionen möglich",
+                )
+            options.append(suggestion)
+            option_index = len(options) - 1
+            db.execute(
+                "UPDATE content_items SET poll_options = ? WHERE id = ?",
+                (json.dumps(options, ensure_ascii=False), poll_id),
+            )
+        else:
+            option_index = existing_index
+
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(poll_id, user_id) DO UPDATE SET
+                option_index = excluded.option_index,
+                created_at = excluded.created_at
+            """,
+            (poll_id, user["id"], option_index, now),
         )
         db.commit()
         row = db.execute(
