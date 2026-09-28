@@ -32,7 +32,7 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.33"
+API_VERSION = "0.8.34"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 1
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
