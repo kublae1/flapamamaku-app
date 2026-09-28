@@ -50,7 +50,19 @@ class _LoginScreenState extends State<LoginScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(28),
                     ),
-                    child: Image.asset('assets/FLAPAMAMAKU App-Icon.png'),
+                    child: store.appLogoUrl.isNotEmpty
+                        ? Image.network(
+                            store.appLogoUrl,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => Image.asset(
+                              'assets/FLAPAMAMAKU App-Icon.png',
+                              fit: BoxFit.contain,
+                            ),
+                          )
+                        : Image.asset(
+                            'assets/FLAPAMAMAKU App-Icon.png',
+                            fit: BoxFit.contain,
+                          ),
                   ),
                   const SizedBox(height: 18),
                   Text(
