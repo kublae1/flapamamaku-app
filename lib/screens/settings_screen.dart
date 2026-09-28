@@ -98,7 +98,7 @@ class SettingsScreen extends StatelessWidget {
               ),
               value: store.pushEnabled,
               activeThumbColor: Colors.white,
-              activeTrackColor: FlapBrand.burgundy,
+              activeTrackColor: store.themeColor,
               onChanged: store.pushAvailable
                   ? (value) async {
                       final ok = await store.setPushEnabled(value);
