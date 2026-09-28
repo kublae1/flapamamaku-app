@@ -32,9 +32,9 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.37"
+API_VERSION = "0.8.38"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -182,6 +182,18 @@ class AppConfigPayload(BaseModel):
     contact_email: str = Field(default="", max_length=320)
     contact_phone: str = Field(default="", max_length=80)
     club_address: str = Field(default="", max_length=500)
+    show_sujet: bool = True
+    label_sujet: str = Field(default="Sujet nächstes Jahr", min_length=1, max_length=80)
+    show_archive: bool = True
+    label_archive: str = Field(default="Vergangene Sujet", min_length=1, max_length=80)
+    show_photos: bool = True
+    label_photos: str = Field(default="Fotoalben", min_length=1, max_length=80)
+    show_documents: bool = True
+    label_documents: str = Field(default="Dokumente", min_length=1, max_length=80)
+    show_polls: bool = True
+    label_polls: str = Field(default="Umfragen", min_length=1, max_length=80)
+    show_links: bool = True
+    label_links: str = Field(default="Links", min_length=1, max_length=80)
 
 
 class PollVotePayload(BaseModel):
@@ -413,6 +425,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (2, "app-config-foundation"),
         (3, "app-config-logo"),
         (4, "app-config-club-details"),
+        (5, "app-config-modules"),
     ]
     applied = {
         int(row["version"])
@@ -546,6 +559,18 @@ def init_db() -> None:
         _ensure_column(db, "app_config", "contact_email", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "app_config", "contact_phone", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "app_config", "club_address", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "show_sujet", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_sujet", "TEXT NOT NULL DEFAULT 'Sujet nächstes Jahr'")
+        _ensure_column(db, "app_config", "show_archive", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_archive", "TEXT NOT NULL DEFAULT 'Vergangene Sujet'")
+        _ensure_column(db, "app_config", "show_photos", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_photos", "TEXT NOT NULL DEFAULT 'Fotoalben'")
+        _ensure_column(db, "app_config", "show_documents", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_documents", "TEXT NOT NULL DEFAULT 'Dokumente'")
+        _ensure_column(db, "app_config", "show_polls", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_polls", "TEXT NOT NULL DEFAULT 'Umfragen'")
+        _ensure_column(db, "app_config", "show_links", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_links", "TEXT NOT NULL DEFAULT 'Links'")
 
         db.execute(
             """
@@ -1627,7 +1652,19 @@ def _app_config() -> dict[str, Any]:
                 website_url,
                 contact_email,
                 contact_phone,
-                club_address
+                club_address,
+                show_sujet,
+                label_sujet,
+                show_archive,
+                label_archive,
+                show_photos,
+                label_photos,
+                show_documents,
+                label_documents,
+                show_polls,
+                label_polls,
+                show_links,
+                label_links
             FROM app_config
             WHERE id = 1
             """
@@ -1643,6 +1680,18 @@ def _app_config() -> dict[str, Any]:
             "contact_email": "",
             "contact_phone": "",
             "club_address": "",
+            "show_sujet": True,
+            "label_sujet": "Sujet nächstes Jahr",
+            "show_archive": True,
+            "label_archive": "Vergangene Sujet",
+            "show_photos": True,
+            "label_photos": "Fotoalben",
+            "show_documents": True,
+            "label_documents": "Dokumente",
+            "show_polls": True,
+            "label_polls": "Umfragen",
+            "show_links": True,
+            "label_links": "Links",
         }
     return {
         "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
@@ -1654,6 +1703,18 @@ def _app_config() -> dict[str, Any]:
         "contact_email": str(row["contact_email"] or ""),
         "contact_phone": str(row["contact_phone"] or ""),
         "club_address": str(row["club_address"] or ""),
+        "show_sujet": bool(row["show_sujet"]),
+        "label_sujet": str(row["label_sujet"] or "Sujet nächstes Jahr"),
+        "show_archive": bool(row["show_archive"]),
+        "label_archive": str(row["label_archive"] or "Vergangene Sujet"),
+        "show_photos": bool(row["show_photos"]),
+        "label_photos": str(row["label_photos"] or "Fotoalben"),
+        "show_documents": bool(row["show_documents"]),
+        "label_documents": str(row["label_documents"] or "Dokumente"),
+        "show_polls": bool(row["show_polls"]),
+        "label_polls": str(row["label_polls"] or "Umfragen"),
+        "show_links": bool(row["show_links"]),
+        "label_links": str(row["label_links"] or "Links"),
     }
 
 
@@ -1701,8 +1762,20 @@ def put_app_config(
                 contact_email,
                 contact_phone,
                 club_address,
+                show_sujet,
+                label_sujet,
+                show_archive,
+                label_archive,
+                show_photos,
+                label_photos,
+                show_documents,
+                label_documents,
+                show_polls,
+                label_polls,
+                show_links,
+                label_links,
                 updated_at
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 app_name = excluded.app_name,
                 app_subtitle = excluded.app_subtitle,
@@ -1712,6 +1785,18 @@ def put_app_config(
                 contact_email = excluded.contact_email,
                 contact_phone = excluded.contact_phone,
                 club_address = excluded.club_address,
+                show_sujet = excluded.show_sujet,
+                label_sujet = excluded.label_sujet,
+                show_archive = excluded.show_archive,
+                label_archive = excluded.label_archive,
+                show_photos = excluded.show_photos,
+                label_photos = excluded.label_photos,
+                show_documents = excluded.show_documents,
+                label_documents = excluded.label_documents,
+                show_polls = excluded.show_polls,
+                label_polls = excluded.label_polls,
+                show_links = excluded.show_links,
+                label_links = excluded.label_links,
                 updated_at = excluded.updated_at
             """,
             (
@@ -1723,6 +1808,18 @@ def put_app_config(
                 values["contact_email"].strip(),
                 values["contact_phone"].strip(),
                 values["club_address"].strip(),
+                int(values["show_sujet"]),
+                values["label_sujet"].strip(),
+                int(values["show_archive"]),
+                values["label_archive"].strip(),
+                int(values["show_photos"]),
+                values["label_photos"].strip(),
+                int(values["show_documents"]),
+                values["label_documents"].strip(),
+                int(values["show_polls"]),
+                values["label_polls"].strip(),
+                int(values["show_links"]),
+                values["label_links"].strip(),
                 now,
             ),
         )
