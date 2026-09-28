@@ -32,7 +32,7 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.46"
+API_VERSION = "0.8.47"
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 5
@@ -1962,16 +1962,88 @@ def system_status(
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> dict[str, Any]:
     backups = _backup_files()
+    latest_backup = _backup_info(backups[0]) if backups else None
+    latest_backup_age_seconds: int | None = None
+    if backups:
+        latest_backup_age_seconds = max(
+            0,
+            int(datetime.now(timezone.utc).timestamp() - backups[0].stat().st_mtime),
+        )
+
+    database_integrity = "unbekannt"
+    active_users = 0
+    active_sessions = 0
+    members = 0
+    registered_devices = 0
+    queued_push = 0
+    try:
+        with connect() as db:
+            integrity = db.execute("PRAGMA quick_check").fetchone()
+            database_integrity = (
+                str(integrity[0]).lower() if integrity is not None else "unbekannt"
+            )
+            active_users = int(
+                db.execute("SELECT COUNT(*) FROM users WHERE active = 1").fetchone()[0]
+            )
+            active_sessions = int(
+                db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            )
+            members = int(db.execute("SELECT COUNT(*) FROM members").fetchone()[0])
+            registered_devices = int(
+                db.execute(
+                    "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+                ).fetchone()[0]
+            )
+            queued_push = int(
+                db.execute(
+                    "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+                ).fetchone()[0]
+            )
+    except sqlite3.Error:
+        database_integrity = "fehler"
+
+    storage_total = 0
+    storage_free = 0
+    try:
+        stat = os.statvfs(DB_PATH.parent)
+        storage_total = int(stat.f_blocks * stat.f_frsize)
+        storage_free = int(stat.f_bavail * stat.f_frsize)
+    except OSError:
+        pass
+
+    backup_ok = (
+        latest_backup_age_seconds is not None
+        and latest_backup_age_seconds <= max(BACKUP_INTERVAL_SECONDS * 2, 172800)
+    )
+    schema_ok = _schema_version() == CURRENT_SCHEMA_VERSION
+    database_ok = database_integrity == "ok"
+    overall_status = "ok" if database_ok and schema_ok and backup_ok else "warning"
+
     return {
+        "overall_status": overall_status,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
         "api_version": API_VERSION,
         "build_sha": BUILD_SHA,
         "schema_version": _schema_version(),
+        "expected_schema_version": CURRENT_SCHEMA_VERSION,
+        "schema_ok": schema_ok,
+        "database_integrity": database_integrity,
+        "database_ok": database_ok,
         "database_path": str(DB_PATH),
         "database_size_bytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
+        "storage_total_bytes": storage_total,
+        "storage_free_bytes": storage_free,
         "backup_directory": str(BACKUP_DIR),
         "backup_retention": BACKUP_RETENTION,
         "backup_count": len(backups),
-        "latest_backup": _backup_info(backups[0]) if backups else None,
+        "latest_backup": latest_backup,
+        "latest_backup_age_seconds": latest_backup_age_seconds,
+        "backup_ok": backup_ok,
+        "active_users": active_users,
+        "active_sessions": active_sessions,
+        "members": members,
+        "registered_devices": registered_devices,
+        "queued_push": queued_push,
     }
 
 

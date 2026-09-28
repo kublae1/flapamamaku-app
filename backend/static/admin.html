@@ -845,6 +845,7 @@
             <button type="button" id="system-refresh">Aktualisieren</button>
           </div>
           <div id="system-status"><p class="meta">Systemdaten werden geladen …</p></div>
+          <div id="system-health-details" style="margin-top:14px"></div>
         </div>
         <div class="card">
           <div class="preview-heading">
@@ -2290,14 +2291,36 @@ async function loadSystem() {
     const latest = status.latest_backup
       ? `${formatDateTimeCH(status.latest_backup.created_at)} · ${formatBytes(status.latest_backup.size_bytes)}`
       : "Noch kein Backup vorhanden";
+    const overallOk = status.overall_status === "ok";
+    const backupAgeHours = status.latest_backup_age_seconds == null
+      ? null
+      : Math.floor(status.latest_backup_age_seconds / 3600);
+    const storageUsed = Math.max(
+      0,
+      Number(status.storage_total_bytes || 0) - Number(status.storage_free_bytes || 0)
+    );
     statusBox.innerHTML = `
+      <p><strong>Gesamtstatus:</strong> <span class="${overallOk ? "" : "error"}">${overallOk ? "OK" : "Prüfen"}</span></p>
       <p><strong>API-Version:</strong> ${status.api_version}</p>
-      <p><strong>Datenbank-Schema:</strong> Version ${status.schema_version}</p>
+      <p><strong>Datenbank-Schema:</strong> Version ${status.schema_version} / erwartet ${status.expected_schema_version} · ${status.schema_ok ? "OK" : "ABWEICHUNG"}</p>
+      <p><strong>Datenbankprüfung:</strong> ${status.database_ok ? "OK" : status.database_integrity}</p>
       <p><strong>Build:</strong> <span class="meta">${status.build_sha}</span></p>
       <p><strong>Datenbankgrösse:</strong> ${formatBytes(status.database_size_bytes)}</p>
+      <p><strong>Speicher:</strong> ${formatBytes(storageUsed)} belegt / ${formatBytes(status.storage_total_bytes)} gesamt · ${formatBytes(status.storage_free_bytes)} frei</p>
       <p><strong>Backups:</strong> ${status.backup_count} / Aufbewahrung ${status.backup_retention}</p>
-      <p><strong>Letztes Backup:</strong> ${latest}</p>
+      <p><strong>Letztes Backup:</strong> ${latest}${backupAgeHours == null ? "" : ` · vor ${backupAgeHours} h`} · ${status.backup_ok ? "OK" : "PRÜFEN"}</p>
+      <p><strong>Mitglieder:</strong> ${status.members} · <strong>aktive Benutzer:</strong> ${status.active_users} · <strong>Sitzungen:</strong> ${status.active_sessions}</p>
+      <p><strong>Push-Geräte:</strong> ${status.registered_devices} · <strong>Push-Warteschlange:</strong> ${status.queued_push}</p>
+      <p class="meta"><strong>Letzte Prüfung:</strong> ${formatDateTimeCH(status.checked_at)}</p>
     `;
+    const healthDetails = document.getElementById("system-health-details");
+    const warnings = [];
+    if (!status.database_ok) warnings.push("Datenbankprüfung meldet ein Problem.");
+    if (!status.schema_ok) warnings.push("Datenbank-Schema entspricht nicht der erwarteten Version.");
+    if (!status.backup_ok) warnings.push("Es ist kein ausreichend aktuelles Backup vorhanden.");
+    healthDetails.innerHTML = warnings.length
+      ? `<div class="error"><strong>Hinweise:</strong><br>${warnings.join("<br>")}</div>`
+      : '<div class="meta"><strong>Alle Kernprüfungen sind in Ordnung.</strong></div>';
 
     backupList.innerHTML = "";
     if (!backups.length) {
