@@ -68,8 +68,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text(
                     store.appName,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFFE41F26),
+                    style: TextStyle(
+                      color: store.themeColor,
                       fontSize: 28,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 1.2,
@@ -155,7 +155,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           height: 52,
                           child: FilledButton(
                             style: FilledButton.styleFrom(
-                              backgroundColor: FlapBrand.burgundy,
+                              backgroundColor: store.themeColor,
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
