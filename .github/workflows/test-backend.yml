@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, feature/backup-restore-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -31,7 +31,55 @@ jobs:
       - name: Initialize database
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-backups
         run: python -c "from app.main import init_db; init_db(); print('database ok')"
+
+      - name: Test backup and restore
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-backups
+        run: |
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          from app.main import (
+              DB_PATH,
+              _create_database_backup,
+              _restore_database_backup,
+              init_db,
+          )
+
+          init_db()
+          with sqlite3.connect(DB_PATH) as db:
+              db.execute(
+                  "INSERT INTO members (name, role, since, created_at) VALUES (?, ?, ?, ?)",
+                  ("Restore Test", "Mitglied", "2026", "2026-09-28T00:00:00+00:00"),
+              )
+              db.commit()
+
+          backup = _create_database_backup("workflow-test")
+
+          with sqlite3.connect(DB_PATH) as db:
+              db.execute("DELETE FROM members WHERE name = ?", ("Restore Test",))
+              db.commit()
+
+          result = _restore_database_backup(backup)
+          assert result["restored"] is True
+          assert result["sessions_cleared"] is True
+          assert result["safety_backup"]["name"].endswith(".db")
+
+          with sqlite3.connect(DB_PATH) as db:
+              count = db.execute(
+                  "SELECT COUNT(*) FROM members WHERE name = ?",
+                  ("Restore Test",),
+              ).fetchone()[0]
+              sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+
+          assert count == 1, "restored member is missing"
+          assert sessions == 0, "sessions were not cleared"
+          assert Path(result["safety_backup"]["name"]).suffix == ".db"
+          print("backup restore ok")
+          PY
 
       - name: Build Docker image
         run: docker build -t flapamamaku-backend:test .
