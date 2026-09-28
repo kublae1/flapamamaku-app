@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 
@@ -678,7 +679,7 @@ class _LinkList extends StatelessWidget {
                           )
                         : Padding(
                             padding: const EdgeInsets.all(6),
-                            child: Image.network(
+                            child: OfflineNetworkImage(
                               logo,
                               headers: uploadedLogo.isNotEmpty ? headers : null,
                               fit: BoxFit.contain,
@@ -1229,7 +1230,7 @@ class _VisualAlbumList extends StatelessWidget {
                   AspectRatio(
                     aspectRatio: 4 / 3,
                     child: urls.isNotEmpty
-                        ? Image.network(
+                        ? OfflineNetworkImage(
                             urls.first,
                             headers: headers,
                             width: double.infinity,
@@ -1562,7 +1563,7 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen> {
               scaleEnabled: true,
               boundaryMargin: const EdgeInsets.all(80),
               child: Center(
-                child: Image.network(
+                child: OfflineNetworkImage(
                   widget.urls[index],
                   headers: headers,
                   width: double.infinity,

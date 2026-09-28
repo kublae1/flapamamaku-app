@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../theme/flap_brand.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -98,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(28),
                     ),
                     child: store.appLogoUrl.isNotEmpty
-                        ? Image.network(
+                        ? OfflineNetworkImage(
                             store.appLogoUrl,
                             fit: BoxFit.contain,
                             errorBuilder: (_, __, ___) => Image.asset(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 import 'flap_image_viewer_screen.dart';
@@ -101,7 +102,7 @@ class StartScreen extends StatelessWidget {
                     width: double.infinity,
                     height: 480,
                     child: heroImage.isNotEmpty
-                        ? Image.network(
+                        ? OfflineNetworkImage(
                             heroImage,
                             headers: store.api.authHeaders,
                             fit: BoxFit.contain,
@@ -193,7 +194,7 @@ class StartScreen extends StatelessWidget {
                                     width: 108,
                                     height: 108,
                                     child: item.imageUrl.isNotEmpty
-                                        ? Image.network(
+                                        ? OfflineNetworkImage(
                                             item.imageUrl,
                                             headers: store.api.authHeaders,
                                             fit: BoxFit.contain,

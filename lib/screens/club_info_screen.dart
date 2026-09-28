@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../theme/flap_brand.dart';
 
 class ClubInfoScreen extends StatelessWidget {
@@ -48,7 +49,7 @@ class ClubInfoScreen extends StatelessWidget {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
                 ),
-                child: Image.network(
+                child: OfflineNetworkImage(
                   store.appLogoUrl,
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) =>

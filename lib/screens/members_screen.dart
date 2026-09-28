@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 import 'content_detail_screens.dart';
@@ -321,7 +322,7 @@ class _MemberCard extends StatelessWidget {
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: member.photoUrl.isNotEmpty
-                      ? Image.network(
+                      ? OfflineNetworkImage(
                           member.photoUrl,
                           headers: headers,
                           fit: BoxFit.contain,

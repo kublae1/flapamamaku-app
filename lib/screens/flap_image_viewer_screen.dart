@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 
 class FlapImageViewerScreen extends StatefulWidget {
   final String title;
@@ -109,7 +110,7 @@ class _FlapImageViewerScreenState extends State<FlapImageViewerScreen> {
               maxScale: 5,
               child: Center(
                 child: widget.imageUrl.isNotEmpty
-                    ? Image.network(
+                    ? OfflineNetworkImage(
                         widget.imageUrl,
                         headers: headers,
                         width: double.infinity,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 import 'content_detail_screens.dart';
@@ -12,7 +13,7 @@ class NewsScreen extends StatelessWidget {
     if (item.imageUrl.isNotEmpty) {
       return AspectRatio(
         aspectRatio: 16 / 9,
-        child: Image.network(
+        child: OfflineNetworkImage(
           item.imageUrl,
           headers: headers,
           width: double.infinity,

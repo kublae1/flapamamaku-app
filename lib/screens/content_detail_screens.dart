@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 import 'flap_image_viewer_screen.dart';
@@ -41,7 +42,7 @@ class NewsDetailScreen extends StatelessWidget {
                   AspectRatio(
                     aspectRatio: 4 / 3,
                     child: item.imageUrl.isNotEmpty
-                        ? Image.network(
+                        ? OfflineNetworkImage(
                             item.imageUrl,
                             headers: store.api.authHeaders,
                             width: double.infinity,
@@ -655,7 +656,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                   child: AspectRatio(
                     aspectRatio: 4 / 3,
                     child: member.photoUrl.isNotEmpty
-                        ? Image.network(
+                        ? OfflineNetworkImage(
                             member.photoUrl,
                             headers: headers,
                             width: double.infinity,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
 import '../theme/flap_brand.dart';
 
@@ -117,7 +118,7 @@ class _YearMottoScreenState extends State<YearMottoScreen> {
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
-                              Image.network(
+                              OfflineNetworkImage(
                                 image.url,
                                 headers: store.api.authHeaders,
                                 fit: BoxFit.cover,
@@ -256,7 +257,7 @@ class _MottoFullscreenViewerState extends State<_MottoFullscreenViewer> {
           minScale: 1,
           maxScale: 5,
           child: Center(
-            child: Image.network(
+            child: OfflineNetworkImage(
               widget.images[imageIndex].url,
               headers: headers,
               width: double.infinity,
