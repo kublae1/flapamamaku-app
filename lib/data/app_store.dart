@@ -99,7 +99,7 @@ class AppStore extends ChangeNotifier {
       _startSyncTimer();
     } else {
       authReady = true;
-      isAuthenticated = true;
+      isAuthenticated = false;
       notifyListeners();
     }
   }
