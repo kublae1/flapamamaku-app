@@ -825,7 +825,8 @@ let memberFilters = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
-  "can_gallery_upload","can_polls","can_links","can_admin_page","can_manage_users"
+  "can_gallery_upload","can_polls","can_links","can_contact","can_about",
+  "can_admin_page","can_manage_users"
 ];
 
 const contentPermissions = {
@@ -968,7 +969,10 @@ function userFormData(form) {
     password: form.elements.password.value,
     active: form.elements.active.checked,
   };
-  permissionFields.forEach(key => data[key] = form.elements[key].checked);
+  permissionFields.forEach(key => {
+    const field = form.elements[key];
+    data[key] = field ? field.checked : false;
+  });
   return data;
 }
 
@@ -1285,6 +1289,30 @@ function editUser(user) {
   });
   form.scrollIntoView({behavior: "smooth"});
 }
+
+document.querySelector('#users-form select[name="member_id"]').addEventListener("change", event => {
+  const form = document.getElementById("users-form");
+  const memberId = Number(event.currentTarget.value || 0);
+  const linkedUser = userAccounts.find(
+    user => Number(user.member_id || 0) === memberId && memberId > 0
+  );
+
+  if (linkedUser) {
+    editUser(linkedUser);
+    return;
+  }
+
+  form.elements.id.value = "";
+  form.elements.username.value = "";
+  form.elements.password.value = "";
+  form.elements.active.checked = true;
+  permissionFields.forEach(key => {
+    const field = form.elements[key];
+    if (field) field.checked = false;
+  });
+});
+
+
 
 async function revokeUserSessions(user) {
   const label = user.member_name || user.username;
