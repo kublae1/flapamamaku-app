@@ -32,9 +32,9 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.34"
+API_VERSION = "0.8.35"
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -171,6 +171,12 @@ class ContentPayload(BaseModel):
     link_url: str = ""
     poll_options: list[str] = []
     poll_allow_suggestions: bool = False
+
+
+class AppConfigPayload(BaseModel):
+    app_name: str = Field(default="FLAPAMAMAKU", min_length=1, max_length=80)
+    app_subtitle: str = Field(default="Fasnachtsgruppe Luzern", max_length=120)
+    primary_color: str = Field(default="#8A101B", pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
 class PollVotePayload(BaseModel):
@@ -399,6 +405,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
     )
     migrations: list[tuple[int, str]] = [
         (1, "baseline-v0.8.33"),
+        (2, "app-config-foundation"),
     ]
     applied = {
         int(row["version"])
@@ -505,6 +512,26 @@ def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                app_name TEXT NOT NULL DEFAULT 'FLAPAMAMAKU',
+                app_subtitle TEXT NOT NULL DEFAULT 'Fasnachtsgruppe Luzern',
+                primary_color TEXT NOT NULL DEFAULT '#8A101B',
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            INSERT OR IGNORE INTO app_config (
+                id, app_name, app_subtitle, primary_color, updated_at
+            ) VALUES (1, 'FLAPAMAMAKU', 'Fasnachtsgruppe Luzern', '#8A101B', ?)
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
 
         db.execute(
             """
@@ -1573,6 +1600,28 @@ def _require_content_permission(
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
 
 
+def _app_config() -> dict[str, str]:
+    with connect() as db:
+        row = db.execute(
+            """
+            SELECT app_name, app_subtitle, primary_color
+            FROM app_config
+            WHERE id = 1
+            """
+        ).fetchone()
+    if row is None:
+        return {
+            "app_name": "FLAPAMAMAKU",
+            "app_subtitle": "Fasnachtsgruppe Luzern",
+            "primary_color": "#8A101B",
+        }
+    return {
+        "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
+        "app_subtitle": str(row["app_subtitle"] or ""),
+        "primary_color": str(row["primary_color"] or "#8A101B"),
+    }
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {
@@ -1590,6 +1639,41 @@ def health() -> dict[str, Any]:
         "build_sha": BUILD_SHA,
         "schema_version": _schema_version(),
     }
+
+
+@app.get("/api/app-config")
+def get_app_config() -> dict[str, str]:
+    return _app_config()
+
+
+@app.put("/api/app-config")
+def put_app_config(
+    payload: AppConfigPayload,
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, str]:
+    values = payload.model_dump()
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        db.execute(
+            """
+            INSERT INTO app_config (
+                id, app_name, app_subtitle, primary_color, updated_at
+            ) VALUES (1, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                app_name = excluded.app_name,
+                app_subtitle = excluded.app_subtitle,
+                primary_color = excluded.primary_color,
+                updated_at = excluded.updated_at
+            """,
+            (
+                values["app_name"].strip(),
+                values["app_subtitle"].strip(),
+                values["primary_color"].upper(),
+                now,
+            ),
+        )
+        db.commit()
+    return _app_config()
 
 
 @app.get("/admin")
