@@ -666,6 +666,10 @@
             </div>
             <input name="poll_allow_suggestions" type="checkbox" class="hidden">
             <p class="meta">Eine Antwort pro Zeile. Mindestens zwei Möglichkeiten. Mit „Eigener Vorschlag: EIN“ dürfen Mitglieder in der App eine eigene Antwort erfassen und später bearbeiten.</p>
+            <div id="poll-member-suggestions" class="hidden" style="margin-top:14px;padding:12px;border:1px solid #34373b;border-radius:10px;background:#141619">
+              <strong style="display:block;margin-bottom:8px">Vorschläge der Mitglieder</strong>
+              <div id="poll-member-suggestions-list" class="meta">Noch keine Mitgliedervorschläge vorhanden.</div>
+            </div>
           </div>
           <div id="document-upload-wrap" class="hidden">
             <label>PDF-Dokument</label>
@@ -1825,6 +1829,7 @@ function resetContentForm({keepSection = true} = {}) {
   form.elements.poll_options.value = "";
   form.elements.poll_allow_suggestions.checked = false;
   updatePollSuggestionToggle();
+  renderPollMemberSuggestions(null);
   form.elements.document_file.value = "";
   form.elements.image_files.value = "";
   document.getElementById("document-current").textContent = "";
@@ -1855,6 +1860,7 @@ function editContent(item) {
   form.elements.poll_options.value = (item.poll_options || []).join("\n");
   form.elements.poll_allow_suggestions.checked = item.poll_allow_suggestions === true;
   updatePollSuggestionToggle();
+  renderPollMemberSuggestions(item);
   form.elements.document_file.value = "";
   document.getElementById("document-current").textContent =
     item.document_name ? `Aktuell: ${item.document_name}` : "";
@@ -1906,6 +1912,35 @@ document.getElementById("poll-preset-yes-no-abstain").addEventListener("click", 
   const form = document.getElementById("content-form");
   form.elements.poll_options.value = "Ja\nNein\nEnthaltung";
 });
+
+function renderPollMemberSuggestions(item) {
+  const box = document.getElementById("poll-member-suggestions");
+  const list = document.getElementById("poll-member-suggestions-list");
+  if (!box || !list) return;
+
+  const isPoll = item?.section === "polls";
+  box.classList.toggle("hidden", !isPoll);
+  if (!isPoll) {
+    list.textContent = "Noch keine Mitgliedervorschläge vorhanden.";
+    return;
+  }
+
+  const suggestions = item.poll_suggestions || [];
+  if (!suggestions.length) {
+    list.textContent = "Noch keine Mitgliedervorschläge vorhanden.";
+    return;
+  }
+
+  list.innerHTML = suggestions.map((suggestion, index) => {
+    const votes = Number(suggestion.vote_count || 0);
+    return `
+      <div style="padding:8px 0;border-bottom:${index < suggestions.length - 1 ? "1px solid #2d3034" : "none"}">
+        <div><strong>${suggestion.text || ""}</strong></div>
+        <div class="meta">von ${suggestion.member_name || "Mitglied"} · ${votes} Stimme${votes === 1 ? "" : "n"}</div>
+      </div>
+    `;
+  }).join("");
+}
 
 function updatePollSuggestionToggle() {
   const form = document.getElementById("content-form");
