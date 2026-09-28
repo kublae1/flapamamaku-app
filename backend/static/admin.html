@@ -1605,6 +1605,28 @@ async function loadContent() {
     const preview = (item.text || "").length > 220
       ? (item.text || "").slice(0, 220) + "…"
       : (item.text || "");
+    const pollSuggestionHtml = item.section === "polls"
+      ? (() => {
+          const suggestions = item.poll_suggestions || [];
+          if (!suggestions.length) {
+            return '<div class="meta">Mitgliedervorschläge: 0</div>';
+          }
+          const rows = suggestions.map(suggestion => `
+            <div class="meta" style="margin-top:6px">
+              <strong>${suggestion.member_name || "Mitglied"}:</strong>
+              ${suggestion.text || ""}
+              · ${suggestion.vote_count || 0} Stimme${Number(suggestion.vote_count || 0) === 1 ? "" : "n"}
+            </div>
+          `).join("");
+          return `
+            <div class="meta" style="margin-top:10px">
+              <strong>Mitgliedervorschläge: ${suggestions.length}</strong>
+            </div>
+            ${rows}
+          `;
+        })()
+      : "";
+
     div.innerHTML = `
       <div class="cms-badge">${contentLabels[item.section] || item.section}</div>
       <h3>${item.title}</h3>
@@ -1612,6 +1634,7 @@ async function loadContent() {
       ${preview ? `<p>${preview}</p>` : ""}
       ${item.image_urls?.length ? `<div class="meta">✓ ${item.image_urls.length} Bilder gespeichert</div>` : '<div class="meta">Keine Bilder</div>'}
       ${item.link_url ? `<div class="meta">Link: <a href="${item.link_url}" target="_blank" rel="noopener">${item.link_url}</a></div>` : ""}
+      ${pollSuggestionHtml}
       <div class="actions">
         <button type="button" class="move-up" title="Nach oben">↑</button>
         <button type="button" class="move-down" title="Nach unten">↓</button>
