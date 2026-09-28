@@ -176,8 +176,8 @@ class MoreScreen extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const CircleAvatar(
-                      backgroundColor: FlapBrand.burgundy,
+                    CircleAvatar(
+                      backgroundColor: store.themeColor,
                       foregroundColor: Colors.white,
                       child: Icon(Icons.person_rounded),
                     ),
@@ -229,6 +229,7 @@ class MoreScreen extends StatelessWidget {
   }) {
     final count = AppStoreScope.of(context).contentFor(section).length;
     return _MockupMenuCard(
+      color: AppStoreScope.of(context).themeColor,
       icon: icon,
       title: title,
       subtitle: count == 0 ? subtitle : '$count Einträge · $subtitle',
@@ -277,12 +278,14 @@ class _SectionLabel extends StatelessWidget {
 }
 
 class _MockupMenuCard extends StatelessWidget {
+  final Color? color;
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
 
   const _MockupMenuCard({
+    this.color,
     required this.icon,
     required this.title,
     required this.subtitle,
@@ -307,7 +310,7 @@ class _MockupMenuCard extends StatelessWidget {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: FlapBrand.burgundy,
+                    color: color ?? Theme.of(context).colorScheme.primary,
                     borderRadius: BorderRadius.circular(15),
                   ),
                   child: Icon(icon, color: Colors.white, size: 27),
