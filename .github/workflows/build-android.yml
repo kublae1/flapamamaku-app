@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1 ]
 
 jobs:
   build:
