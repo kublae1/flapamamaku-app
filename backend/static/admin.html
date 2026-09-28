@@ -1631,7 +1631,7 @@ async function loadContent() {
     const edit = div.querySelector(".edit");
     const remove = div.querySelector(".delete");
     if (edit) edit.onclick = () => editContent(item);
-    if (remove) remove.onclick = () => removeContent(item.id);
+    if (remove) remove.onclick = () => removeContent(item.id, item.section);
     list.appendChild(div);
   });
 }
@@ -1844,9 +1844,12 @@ function editContent(item) {
   form.scrollIntoView({behavior:"smooth"});
 }
 
-async function removeContent(id) {
-  if (!confirm("Eintrag wirklich löschen?")) return;
-  await api(`/api/content/${id}`, {method:"DELETE"});
+async function removeContent(id, section = "") {
+  if (!confirm(section === "polls" ? "Umfrage wirklich löschen?" : "Eintrag wirklich löschen?")) return;
+  const path = section === "polls"
+    ? `/api/polls/${id}`
+    : `/api/content/${id}`;
+  await api(path, {method:"DELETE"});
   await loadContent();
 }
 
@@ -1919,18 +1922,30 @@ document.getElementById("content-form").addEventListener("submit", async event =
     form.elements.poll_options.focus();
     return;
   }
-  const saved = await api(id ? `/api/content/${id}` : "/api/content", {
-    method: id ? "PUT" : "POST",
-    body: JSON.stringify({
-      section,
-      title: form.elements.title.value.trim(),
-      text: form.elements.text.value.trim(),
-      link_url: form.elements.link_url.value.trim(),
-      poll_options: pollOptions,
-      poll_allow_suggestions:
-        section === "polls" && form.elements.poll_allow_suggestions.checked,
-    }),
-  });
+  const pollPayload = {
+    title: form.elements.title.value.trim(),
+    text: form.elements.text.value.trim(),
+    options: pollOptions,
+    allow_suggestions:
+      section === "polls" && form.elements.poll_allow_suggestions.checked,
+  };
+  const contentPayload = {
+    section,
+    title: form.elements.title.value.trim(),
+    text: form.elements.text.value.trim(),
+    link_url: form.elements.link_url.value.trim(),
+    poll_options: [],
+    poll_allow_suggestions: false,
+  };
+  const saved = section === "polls"
+    ? await api(id ? `/api/polls/${id}` : "/api/polls", {
+        method: id ? "PUT" : "POST",
+        body: JSON.stringify(pollPayload),
+      })
+    : await api(id ? `/api/content/${id}` : "/api/content", {
+        method: id ? "PUT" : "POST",
+        body: JSON.stringify(contentPayload),
+      });
 
   const documentFile = form.elements.document_file.files[0];
   if (section === "documents" && documentFile) {
