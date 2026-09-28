@@ -37,7 +37,7 @@ class FlapBrand {
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: charcoal,
-        indicatorColor: burgundy,
+        indicatorColor: appColor,
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
             color: states.contains(WidgetState.selected)
