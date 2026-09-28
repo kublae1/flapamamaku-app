@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -82,6 +83,140 @@ class AppStore extends ChangeNotifier {
 
   Color get themeColor => Color(themeColorValue);
 
+  String get _offlineCacheKey =>
+      'flapamamaku_offline_cache_${Uri.encodeComponent(api.baseUrl)}';
+
+  Map<String, dynamic> _brandingSnapshot() => {
+        'app_name': appName,
+        'app_subtitle': appSubtitle,
+        'app_logo_url': appLogoUrl,
+        'club_description': clubDescription,
+        'website_url': websiteUrl,
+        'contact_email': contactEmail,
+        'contact_phone': contactPhone,
+        'club_address': clubAddress,
+        'theme_color_value': themeColorValue,
+        'show_sujet': showSujet,
+        'label_sujet': labelSujet,
+        'show_archive': showArchive,
+        'label_archive': labelArchive,
+        'show_photos': showPhotos,
+        'label_photos': labelPhotos,
+        'show_documents': showDocuments,
+        'label_documents': labelDocuments,
+        'show_polls': showPolls,
+        'label_polls': labelPolls,
+        'show_links': showLinks,
+        'label_links': labelLinks,
+      };
+
+  void _applyCachedBranding(Map<String, dynamic> value) {
+    appName = value['app_name']?.toString().trim().isNotEmpty == true
+        ? value['app_name'].toString().trim()
+        : appName;
+    appSubtitle = value['app_subtitle']?.toString() ?? appSubtitle;
+    appLogoUrl = value['app_logo_url']?.toString() ?? appLogoUrl;
+    clubDescription = value['club_description']?.toString() ?? clubDescription;
+    websiteUrl = value['website_url']?.toString() ?? websiteUrl;
+    contactEmail = value['contact_email']?.toString() ?? contactEmail;
+    contactPhone = value['contact_phone']?.toString() ?? contactPhone;
+    clubAddress = value['club_address']?.toString() ?? clubAddress;
+    themeColorValue = value['theme_color_value'] is int
+        ? value['theme_color_value'] as int
+        : themeColorValue;
+    showSujet = value['show_sujet'] != false;
+    labelSujet = value['label_sujet']?.toString() ?? labelSujet;
+    showArchive = value['show_archive'] != false;
+    labelArchive = value['label_archive']?.toString() ?? labelArchive;
+    showPhotos = value['show_photos'] != false;
+    labelPhotos = value['label_photos']?.toString() ?? labelPhotos;
+    showDocuments = value['show_documents'] != false;
+    labelDocuments = value['label_documents']?.toString() ?? labelDocuments;
+    showPolls = value['show_polls'] != false;
+    labelPolls = value['label_polls']?.toString() ?? labelPolls;
+    showLinks = value['show_links'] != false;
+    labelLinks = value['label_links']?.toString() ?? labelLinks;
+  }
+
+  Future<void> _saveOfflineCache() async {
+    if (!api.isConfigured || currentUser == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final syncedAt = lastSuccessfulSync ?? DateTime.now();
+    final payload = {
+      'version': 1,
+      'server_url': api.baseUrl,
+      'saved_at': syncedAt.toIso8601String(),
+      'current_user': currentUser,
+      'branding': _brandingSnapshot(),
+      'news': news.map((item) => item.toJson()).toList(),
+      'events': events.map((item) => item.toJson()).toList(),
+      'members': members.map((item) => item.toJson()).toList(),
+      'member_filters':
+          memberFilters.map((item) => item.toJson()).toList(),
+      'content': content.map((item) => item.toJson()).toList(),
+    };
+    await prefs.setString(_offlineCacheKey, jsonEncode(payload));
+  }
+
+  Future<bool> _loadOfflineCache() async {
+    if (!api.isConfigured) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_offlineCacheKey);
+    if (raw == null || raw.trim().isEmpty) return false;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return false;
+      final data = Map<String, dynamic>.from(decoded);
+      if (data['server_url']?.toString() != api.baseUrl) return false;
+
+      final cachedUser = data['current_user'];
+      if (cachedUser is! Map) return false;
+      currentUser = Map<String, dynamic>.from(cachedUser);
+      isAuthenticated = true;
+
+      final branding = data['branding'];
+      if (branding is Map) {
+        _applyCachedBranding(Map<String, dynamic>.from(branding));
+      }
+
+      List<Map<String, dynamic>> listOfMaps(String key) {
+        return (data[key] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((value) => Map<String, dynamic>.from(value))
+            .toList();
+      }
+
+      news
+        ..clear()
+        ..addAll(listOfMaps('news').map(NewsItem.fromJson));
+      events
+        ..clear()
+        ..addAll(listOfMaps('events').map(EventItem.fromJson));
+      members
+        ..clear()
+        ..addAll(listOfMaps('members').map(MemberItem.fromJson));
+      memberFilters
+        ..clear()
+        ..addAll(listOfMaps('member_filters').map(MemberFilterItem.fromJson));
+      content
+        ..clear()
+        ..addAll(listOfMaps('content').map(ContentItem.fromJson));
+
+      _sortNews();
+      _sortEvents();
+      isUsingServer = false;
+      syncError = 'Offline – letzter gespeicherter Stand';
+      lastSuccessfulSync = DateTime.tryParse(
+        data['saved_at']?.toString() ?? '',
+      );
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final savedServer = prefs.getString('flapamamaku_server_url')?.trim() ?? '';
@@ -94,8 +229,10 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
 
     if (api.isConfigured) {
-      await _loadRemoteBranding(prefs);
       await restoreSession();
+      if (isAuthenticated) {
+        await _loadRemoteBranding(prefs);
+      }
       _startSyncTimer();
     } else {
       authReady = true;
@@ -168,9 +305,12 @@ class AppStore extends ChangeNotifier {
         themeColorValue = int.parse('FF${match.group(1)!}', radix: 16);
         await prefs.setInt('flapamamaku_brand_color', themeColorValue);
       }
+      if (isAuthenticated) {
+        await _saveOfflineCache();
+      }
       notifyListeners();
     } catch (_) {
-      // Keep the built-in FLAPAMAMAKU defaults when the server is unavailable.
+      // Cached branding remains available when the server is unavailable.
     }
   }
   bool get canNews => currentUser?['can_news'] == true;
@@ -313,11 +453,17 @@ class AppStore extends ChangeNotifier {
         await pushService.enable();
       }
     } catch (_) {
-      api.setToken(null);
-      currentUser = null;
-      isAuthenticated = false;
-      biometricUnlockPending = false;
-      await _secureStorage.delete(key: 'flapamamaku_token');
+      final restored = await _loadOfflineCache();
+      if (restored) {
+        biometricUnlockPending = false;
+        authError = null;
+      } else {
+        api.setToken(null);
+        currentUser = null;
+        isAuthenticated = false;
+        biometricUnlockPending = false;
+        await _secureStorage.delete(key: 'flapamamaku_token');
+      }
     } finally {
       authReady = true;
       notifyListeners();
@@ -609,8 +755,13 @@ class AppStore extends ChangeNotifier {
       isUsingServer = true;
       syncError = null;
       lastSuccessfulSync = DateTime.now();
+      await _saveOfflineCache();
     } catch (error) {
+      isUsingServer = false;
       syncError = error.toString();
+      if (news.isEmpty && events.isEmpty && members.isEmpty && content.isEmpty) {
+        await _loadOfflineCache();
+      }
     } finally {
       isSyncing = false;
       notifyListeners();
