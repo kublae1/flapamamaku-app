@@ -24,8 +24,55 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submit() async {
     final store = AppStoreScope.of(context);
+    if (!store.serverConfigured) {
+      await _changeServer();
+      return;
+    }
     if (_username.text.trim().isEmpty || _password.text.isEmpty) return;
     await store.login(_username.text, _password.text);
+  }
+
+  Future<void> _changeServer() async {
+    final store = AppStoreScope.of(context);
+    final controller = TextEditingController(text: store.serverUrl);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vereinsserver'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: 'Serveradresse',
+            hintText: 'https://verein.example.ch',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Verbinden'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || value.trim().isEmpty) return;
+
+    final ok = await store.changeServerUrl(value);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            store.authError ?? 'Server konnte nicht übernommen werden.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -180,6 +227,29 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           ),
                         ),
+                        const SizedBox(height: 14),
+                        TextButton.icon(
+                          onPressed: _changeServer,
+                          icon: const Icon(Icons.dns_outlined),
+                          label: Text(
+                            store.serverConfigured
+                                ? 'Vereinsserver wechseln'
+                                : 'Vereinsserver einrichten',
+                          ),
+                        ),
+                        if (store.serverConfigured) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            store.serverUrl,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         const Row(
                           children: [
