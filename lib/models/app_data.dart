@@ -47,6 +47,33 @@ class PollVoter {
   }
 }
 
+class PollSuggestion {
+  final String memberName;
+  final String text;
+  final int optionIndex;
+  final int voteCount;
+
+  const PollSuggestion({
+    required this.memberName,
+    required this.text,
+    required this.optionIndex,
+    required this.voteCount,
+  });
+
+  factory PollSuggestion.fromJson(Map<String, dynamic> json) {
+    return PollSuggestion(
+      memberName: json['member_name']?.toString() ?? '',
+      text: json['text']?.toString() ?? '',
+      optionIndex: json['option_index'] is int
+          ? json['option_index'] as int
+          : int.tryParse(json['option_index']?.toString() ?? '') ?? -1,
+      voteCount: json['vote_count'] is int
+          ? json['vote_count'] as int
+          : int.tryParse(json['vote_count']?.toString() ?? '') ?? 0,
+    );
+  }
+}
+
 class ContentItem {
   final int? id;
   final String section;
@@ -76,6 +103,7 @@ class ContentItem {
   final int? pollMySuggestionIndex;
   final String pollMySuggestionText;
   final List<PollVoter> pollVoters;
+  final List<PollSuggestion> pollSuggestions;
 
   const ContentItem({
     this.id,
@@ -106,6 +134,7 @@ class ContentItem {
     this.pollMySuggestionIndex,
     this.pollMySuggestionText = '',
     this.pollVoters = const [],
+    this.pollSuggestions = const [],
   });
 
   factory ContentItem.fromJson(Map<String, dynamic> json) {
@@ -176,6 +205,14 @@ class ContentItem {
               ))
           .where((voter) => voter.name.isNotEmpty && voter.optionIndex >= 0)
           .toList(),
+      pollSuggestions:
+          (json['poll_suggestions'] as List<dynamic>? ?? const [])
+              .map((value) => PollSuggestion.fromJson(
+                    Map<String, dynamic>.from(value as Map),
+                  ))
+              .where((suggestion) =>
+                  suggestion.text.isNotEmpty && suggestion.optionIndex >= 0)
+              .toList(),
     );
   }
 }
