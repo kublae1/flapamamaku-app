@@ -91,7 +91,12 @@ class ApiService {
         .get(_uri('/api/app-config'))
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
-    return jsonDecode(response.body) as Map<String, dynamic>;
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final logoUrl = json['logo_url']?.toString() ?? '';
+    if (logoUrl.startsWith('/')) {
+      json['logo_url'] = '$baseUrl$logoUrl';
+    }
+    return json;
   }
 
   Future<DownloadedImage> downloadImage(String url) async {
