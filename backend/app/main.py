@@ -32,10 +32,10 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.47"
+API_VERSION = "0.8.48"
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -109,6 +109,62 @@ PERMISSION_FIELDS = (
     "can_admin_page",
     "can_manage_users",
 )
+
+
+ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "member": {
+        "label": "Mitglied",
+        "permissions": {key: False for key in PERMISSION_FIELDS},
+    },
+    "editor": {
+        "label": "Redaktion",
+        "permissions": {
+            key: key in {
+                "can_news", "can_events", "can_documents", "can_photos",
+                "can_gallery_upload", "can_polls", "can_links", "can_contact",
+                "can_about", "can_admin_page",
+            }
+            for key in PERMISSION_FIELDS
+        },
+    },
+    "board": {
+        "label": "Vorstand",
+        "permissions": {
+            key: key != "can_manage_users"
+            for key in PERMISSION_FIELDS
+        },
+    },
+    "admin": {
+        "label": "Administrator",
+        "permissions": {key: True for key in PERMISSION_FIELDS},
+    },
+}
+
+
+def _normalize_role_key(value: str) -> str:
+    role_key = str(value or "member").strip().lower()
+    if role_key not in ROLE_DEFINITIONS:
+        raise HTTPException(status_code=422, detail="Unbekannte Benutzerrolle")
+    return role_key
+
+
+def _normalize_permission_overrides(values: dict[str, bool] | None) -> dict[str, bool]:
+    result: dict[str, bool] = {}
+    for key, value in (values or {}).items():
+        if key not in PERMISSION_FIELDS:
+            raise HTTPException(status_code=422, detail=f"Unbekannte Berechtigung: {key}")
+        result[key] = bool(value)
+    return result
+
+
+def _effective_permissions(
+    role_key: str,
+    overrides: dict[str, bool] | None = None,
+) -> dict[str, bool]:
+    normalized_role = role_key if role_key in ROLE_DEFINITIONS else "member"
+    permissions = dict(ROLE_DEFINITIONS[normalized_role]["permissions"])
+    permissions.update(_normalize_permission_overrides(overrides))
+    return permissions
 
 
 class NewsPayload(BaseModel):
@@ -246,6 +302,8 @@ class UserPayload(BaseModel):
     can_about: bool = False
     can_admin_page: bool = False
     can_manage_users: bool = False
+    role_key: str = Field(default="member", max_length=40)
+    permission_overrides: dict[str, bool] = Field(default_factory=dict)
 
 
 class PushTokenPayload(BaseModel):
@@ -440,6 +498,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (3, "app-config-logo"),
         (4, "app-config-club-details"),
         (5, "app-config-modules"),
+        (6, "user-roles-and-permission-overrides"),
     ]
     applied = {
         int(row["version"])
@@ -839,6 +898,46 @@ def init_db() -> None:
 
         _ensure_column(
             db,
+            "users",
+            "role_key",
+            "TEXT NOT NULL DEFAULT 'member'",
+        )
+        _ensure_column(
+            db,
+            "users",
+            "permission_overrides",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+
+        legacy_role_rows = db.execute(
+            "SELECT * FROM users WHERE permission_overrides = ''"
+        ).fetchall()
+        for legacy_user in legacy_role_rows:
+            legacy_permissions = {
+                key: bool(legacy_user[key])
+                for key in PERMISSION_FIELDS
+            }
+            if all(legacy_permissions.values()):
+                role_key = "admin"
+                overrides: dict[str, bool] = {}
+            else:
+                role_key = "member"
+                overrides = legacy_permissions
+            db.execute(
+                """
+                UPDATE users
+                SET role_key = ?, permission_overrides = ?
+                WHERE id = ?
+                """,
+                (
+                    role_key,
+                    json.dumps(overrides, ensure_ascii=False, sort_keys=True),
+                    legacy_user["id"],
+                ),
+            )
+
+        _ensure_column(
+            db,
             "content_items",
             "sort_order",
             "INTEGER NOT NULL DEFAULT 0",
@@ -1228,8 +1327,22 @@ def _serialize_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
     item.pop("password_hash", None)
     item.pop("password_salt", None)
+    role_key = str(item.get("role_key") or "member")
+    if role_key not in ROLE_DEFINITIONS:
+        role_key = "member"
+    try:
+        overrides = json.loads(str(item.get("permission_overrides") or "{}"))
+        if not isinstance(overrides, dict):
+            overrides = {}
+    except Exception:
+        overrides = {}
+    overrides = _normalize_permission_overrides(overrides)
+    effective = _effective_permissions(role_key, overrides)
     for key in PERMISSION_FIELDS:
-        item[key] = bool(item.get(key, 0))
+        item[key] = effective[key]
+    item["role_key"] = role_key
+    item["role_label"] = ROLE_DEFINITIONS[role_key]["label"]
+    item["permission_overrides"] = overrides
     item["active"] = bool(item.get("active", 0))
     return item
 
@@ -2119,8 +2232,8 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
             f"""
             INSERT INTO users (
                 member_id, username, password_hash, password_salt, active,
-                {", ".join(PERMISSION_FIELDS)}, created_at
-            ) VALUES (?, ?, ?, ?, 1, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?)
+                {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides, created_at
+            ) VALUES (?, ?, ?, ?, 1, {", ".join("?" for _ in PERMISSION_FIELDS)}, 'admin', '{}', ?)
             """,
             [
                 payload.member_id,
@@ -2189,6 +2302,20 @@ def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     return _user_profile(user["id"])
 
 
+@app.get("/api/roles")
+def get_roles(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "key": key,
+            "label": definition["label"],
+            "permissions": definition["permissions"],
+        }
+        for key, definition in ROLE_DEFINITIONS.items()
+    ]
+
+
 @app.get("/api/users")
 def get_users(
     _: dict[str, Any] = Depends(require("can_manage_users")),
@@ -2213,7 +2340,16 @@ def post_user(
     if len(payload.password) < 6:
         raise HTTPException(status_code=422, detail="Passwort muss mindestens 6 Zeichen haben")
     password_hash, salt = _hash_password(payload.password)
-    data = payload.model_dump(exclude={"password"})
+    role_key = _normalize_role_key(payload.role_key)
+    overrides = _normalize_permission_overrides(payload.permission_overrides)
+    if not overrides and role_key == "member":
+        legacy_permissions = {
+            key: bool(getattr(payload, key))
+            for key in PERMISSION_FIELDS
+        }
+        if any(legacy_permissions.values()):
+            overrides = legacy_permissions
+    effective = _effective_permissions(role_key, overrides)
     now = datetime.now(timezone.utc).isoformat()
 
     with connect() as db:
@@ -2222,16 +2358,18 @@ def post_user(
                 f"""
                 INSERT INTO users (
                     member_id, username, password_hash, password_salt, active,
-                    {", ".join(PERMISSION_FIELDS)}, created_at
-                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?)
+                    {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides, created_at
+                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?, ?, ?)
                 """,
                 [
-                    data["member_id"],
-                    data["username"].strip(),
+                    payload.member_id,
+                    payload.username.strip(),
                     password_hash,
                     salt,
-                    int(data["active"]),
-                    *[int(data[key]) for key in PERMISSION_FIELDS],
+                    int(payload.active),
+                    *[int(effective[key]) for key in PERMISSION_FIELDS],
+                    role_key,
+                    json.dumps(overrides, ensure_ascii=False, sort_keys=True),
                     now,
                 ],
             )
@@ -2247,16 +2385,40 @@ def put_user(
     payload: UserPayload,
     actor: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> dict[str, Any]:
-    data = payload.model_dump(exclude={"password"})
-    assignments = ["member_id = ?", "username = ?", "active = ?"]
+    role_key = _normalize_role_key(payload.role_key)
+    overrides = _normalize_permission_overrides(payload.permission_overrides)
+    if not overrides and role_key == "member":
+        legacy_permissions = {
+            key: bool(getattr(payload, key))
+            for key in PERMISSION_FIELDS
+        }
+        if any(legacy_permissions.values()):
+            overrides = legacy_permissions
+    effective = _effective_permissions(role_key, overrides)
+
+    if user_id == actor["id"] and not effective["can_manage_users"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Eigenes Recht zur Benutzerverwaltung kann nicht entfernt werden",
+        )
+
+    assignments = [
+        "member_id = ?",
+        "username = ?",
+        "active = ?",
+        "role_key = ?",
+        "permission_overrides = ?",
+    ]
     values: list[Any] = [
-        data["member_id"],
-        data["username"].strip(),
-        int(data["active"]),
+        payload.member_id,
+        payload.username.strip(),
+        int(payload.active),
+        role_key,
+        json.dumps(overrides, ensure_ascii=False, sort_keys=True),
     ]
     for key in PERMISSION_FIELDS:
         assignments.append(f"{key} = ?")
-        values.append(int(data[key]))
+        values.append(int(effective[key]))
 
     password_changed = bool(payload.password)
     if payload.password:
@@ -2265,12 +2427,6 @@ def put_user(
         password_hash, salt = _hash_password(payload.password)
         assignments.extend(["password_hash = ?", "password_salt = ?"])
         values.extend([password_hash, salt])
-
-    if user_id == actor["id"] and not data["can_manage_users"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Eigenes Recht zur Benutzerverwaltung kann nicht entfernt werden",
-        )
 
     values.append(user_id)
     with connect() as db:

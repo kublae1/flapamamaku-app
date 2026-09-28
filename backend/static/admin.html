@@ -526,20 +526,95 @@
               Bestehendes Konto: Feld leer lassen, wenn das Passwort unverändert bleiben soll.
             </p>
             <label><input name="account_active" type="checkbox" checked> Konto aktiv</label>
-            <h3>Berechtigungen</h3>
+            <label>Rolle</label>
+            <select name="account_role_key" class="role-select"></select>
+            <p class="meta">Standardrechte kommen aus der Rolle. Abweichungen gelten nur für dieses Konto.</p>
+            <h3>Abweichungen von der Rolle</h3>
             <div class="permission-grid">
-              <label><input type="checkbox" name="account_can_news"> News verwalten</label>
-              <label><input type="checkbox" name="account_can_events"> Termine verwalten</label>
-              <label><input type="checkbox" name="account_can_members"> Mitglieder verwalten</label>
-              <label><input type="checkbox" name="account_can_documents"> Dokumente verwalten</label>
-              <label><input type="checkbox" name="account_can_photos"> Galerie/Fotoalben verwalten</label>
-              <label><input type="checkbox" name="account_can_gallery_upload"> Galerie-Snapshots aufnehmen</label>
-              <label><input type="checkbox" name="account_can_polls"> Umfragen verwalten</label>
-              <label><input type="checkbox" name="account_can_links"> Links verwalten</label>
-              <label><input type="checkbox" name="account_can_contact"> Kontakt verwalten</label>
-              <label><input type="checkbox" name="account_can_about"> Über uns verwalten</label>
-              <label><input type="checkbox" name="account_can_admin_page"> PC-Adminseite benutzen</label>
-              <label><input type="checkbox" name="account_can_manage_users"> Benutzer/Berechtigungen verwalten</label>
+            <label>News verwalten
+              <select name="account_can_news">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Termine verwalten
+              <select name="account_can_events">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Mitglieder verwalten
+              <select name="account_can_members">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Dokumente verwalten
+              <select name="account_can_documents">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Galerie/Fotoalben verwalten
+              <select name="account_can_photos">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Galerie-Snapshots aufnehmen
+              <select name="account_can_gallery_upload">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Umfragen verwalten
+              <select name="account_can_polls">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Links verwalten
+              <select name="account_can_links">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Kontakt verwalten
+              <select name="account_can_contact">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Über uns verwalten
+              <select name="account_can_about">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>PC-Adminseite benutzen
+              <select name="account_can_admin_page">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Benutzer/Berechtigungen verwalten
+              <select name="account_can_manage_users">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
             </div>
           </div>
 
@@ -596,20 +671,95 @@
             Bestehender Benutzer: Feld leer lassen, wenn das Passwort unverändert bleiben soll.
           </p>
           <label><input name="active" type="checkbox" checked> Konto aktiv</label>
-          <h3>Berechtigungen</h3>
+          <label>Rolle</label>
+          <select name="role_key" class="role-select"></select>
+          <p class="meta">Die Rolle liefert die Standardrechte. Einzelne Rechte können darunter gezielt erlaubt oder gesperrt werden.</p>
+          <h3>Abweichungen von der Rolle</h3>
           <div class="permission-grid">
-            <label><input type="checkbox" name="can_news"> News verwalten</label>
-            <label><input type="checkbox" name="can_events"> Termine verwalten</label>
-            <label><input type="checkbox" name="can_members"> Mitglieder verwalten</label>
-            <label><input type="checkbox" name="can_documents"> Dokumente verwalten</label>
-            <label><input type="checkbox" name="can_photos"> Galerie/Fotoalben verwalten</label>
-            <label><input type="checkbox" name="can_gallery_upload"> Galerie-Snapshots aufnehmen</label>
-            <label><input type="checkbox" name="can_polls"> Umfragen verwalten</label>
-            <label><input type="checkbox" name="can_links"> Links verwalten</label>
-            <label><input type="checkbox" name="can_contact"> Kontakt verwalten</label>
-            <label><input type="checkbox" name="can_about"> Über uns verwalten</label>
-            <label><input type="checkbox" name="can_admin_page"> PC-Adminseite benutzen</label>
-            <label><input type="checkbox" name="can_manage_users"> Benutzer/Berechtigungen verwalten</label>
+            <label>News verwalten
+              <select name="can_news">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Termine verwalten
+              <select name="can_events">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Mitglieder verwalten
+              <select name="can_members">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Dokumente verwalten
+              <select name="can_documents">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Galerie/Fotoalben verwalten
+              <select name="can_photos">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Galerie-Snapshots aufnehmen
+              <select name="can_gallery_upload">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Umfragen verwalten
+              <select name="can_polls">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Links verwalten
+              <select name="can_links">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Kontakt verwalten
+              <select name="can_contact">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Über uns verwalten
+              <select name="can_about">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>PC-Adminseite benutzen
+              <select name="can_admin_page">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
+            <label>Benutzer/Berechtigungen verwalten
+              <select name="can_manage_users">
+                <option value="">Von Rolle übernehmen</option>
+                <option value="allow">Zusätzlich erlauben</option>
+                <option value="deny">Explizit sperren</option>
+              </select>
+            </label>
           </div>
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
@@ -871,6 +1021,7 @@ let currentUser = null;
 let bootstrapRequired = false;
 let userAccounts = [];
 let memberFilters = [];
+let roleDefinitions = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
@@ -1009,18 +1160,56 @@ function formData(form, resource) {
   return data;
 }
 
+function permissionOverridesFromForm(form, prefix = "") {
+  const overrides = {};
+  permissionFields.forEach(key => {
+    const field = form.elements[`${prefix}${key}`];
+    if (!field) return;
+    if (field.value === "allow") overrides[key] = true;
+    if (field.value === "deny") overrides[key] = false;
+  });
+  return overrides;
+}
+
 function userFormData(form) {
-  const data = {
+  return {
     member_id: form.elements.member_id.value ? Number(form.elements.member_id.value) : null,
     username: form.elements.username.value.trim(),
     password: form.elements.password.value,
     active: form.elements.active.checked,
+    role_key: form.elements.role_key.value || "member",
+    permission_overrides: permissionOverridesFromForm(form),
   };
-  permissionFields.forEach(key => {
-    const field = form.elements[key];
-    data[key] = field ? field.checked : false;
+}
+
+async function loadRoles() {
+  if (!currentUser?.can_manage_users) return;
+  roleDefinitions = await api("/api/roles");
+  document.querySelectorAll(".role-select").forEach(select => {
+    const current = select.value;
+    select.innerHTML = "";
+    roleDefinitions.forEach(role => {
+      const option = document.createElement("option");
+      option.value = role.key;
+      option.textContent = role.label;
+      select.appendChild(option);
+    });
+    select.value = roleDefinitions.some(role => role.key === current)
+      ? current
+      : "member";
   });
-  return data;
+}
+
+function setPermissionOverrideFields(form, overrides = {}, prefix = "") {
+  permissionFields.forEach(key => {
+    const field = form.elements[`${prefix}${key}`];
+    if (!field) return;
+    if (Object.prototype.hasOwnProperty.call(overrides || {}, key)) {
+      field.value = overrides[key] ? "allow" : "deny";
+    } else {
+      field.value = "";
+    }
+  });
 }
 
 function formatDateCH(value) {
@@ -1149,10 +1338,8 @@ function edit(resource, item) {
     form.elements.account_username.value = account?.username || "";
     form.elements.account_password.value = "";
     form.elements.account_active.checked = account ? !!account.active : true;
-    permissionFields.forEach(key => {
-      const field = form.elements[`account_${key}`];
-      if (field) field.checked = account ? !!account[key] : false;
-    });
+    form.elements.account_role_key.value = account?.role_key || "member";
+    setPermissionOverrideFields(form, account?.permission_overrides || {}, "account_");
   }
 
   form.scrollIntoView({behavior: "smooth"});
@@ -1309,11 +1496,13 @@ async function loadUsers() {
     div.innerHTML = `
       <h3>${user.username}</h3>
       <div class="meta">${user.member_name || "Kein Mitglied verknüpft"}</div>
-      <div class="meta">${user.active ? "Aktiv" : "Gesperrt"} · ${rights || "Keine Verwaltungsrechte"}</div>
+      <div class="meta">${user.active ? "Aktiv" : "Gesperrt"} · Rolle: ${user.role_label || user.role_key || "Mitglied"}</div>
+      <div class="meta">${rights || "Keine Verwaltungsrechte"} · Abweichungen: ${Object.keys(user.permission_overrides || {}).length}</div>
       <div class="actions">
         <button type="button" class="move-up" title="Nach oben">↑</button>
         <button type="button" class="move-down" title="Nach unten">↓</button>
         <button type="button" class="edit">Bearbeiten</button>
+        <button type="button" class="revoke-sessions">Sitzungen beenden</button>
         <button type="button" class="delete">Löschen</button>
       </div>`;
     div.querySelector(".edit").onclick = () => editUser(user);
@@ -1330,10 +1519,8 @@ function editUser(user) {
   form.elements.username.value = user.username || "";
   form.elements.password.value = "";
   form.elements.active.checked = !!user.active;
-  permissionFields.forEach(key => {
-    const field = form.elements[key];
-    if (field) field.checked = !!user[key];
-  });
+  form.elements.role_key.value = user.role_key || "member";
+  setPermissionOverrideFields(form, user.permission_overrides || {});
   form.scrollIntoView({behavior: "smooth"});
 }
 
@@ -1353,10 +1540,8 @@ document.querySelector('#users-form select[name="member_id"]').addEventListener(
   form.elements.username.value = "";
   form.elements.password.value = "";
   form.elements.active.checked = true;
-  permissionFields.forEach(key => {
-    const field = form.elements[key];
-    if (field) field.checked = false;
-  });
+  form.elements.role_key.value = "member";
+  setPermissionOverrideFields(form, {});
 });
 
 
@@ -1401,10 +1586,9 @@ Object.keys(resources).forEach(resource => {
           username,
           password,
           active: form.elements.account_active.checked,
+          role_key: form.elements.account_role_key.value || "member",
+          permission_overrides: permissionOverridesFromForm(form, "account_"),
         };
-        permissionFields.forEach(key => {
-          accountData[key] = form.elements[`account_${key}`].checked;
-        });
 
         try {
           await api(accountId ? `/api/users/${accountId}` : "/api/users", {
@@ -1461,10 +1645,8 @@ Object.keys(resources).forEach(resource => {
         form.elements.account_username.value = "";
         form.elements.account_password.value = "";
         form.elements.account_active.checked = true;
-        permissionFields.forEach(key => {
-          const field = form.elements[`account_${key}`];
-          if (field) field.checked = false;
-        });
+        form.elements.account_role_key.value = "member";
+        setPermissionOverrideFields(form, {}, "account_");
       }
     }
     await load(resource);
@@ -2106,6 +2288,8 @@ document.getElementById("users-form").addEventListener("submit", async event => 
     form.reset();
     form.elements.id.value = "";
     form.elements.active.checked = true;
+    form.elements.role_key.value = "member";
+    setPermissionOverrideFields(form, {});
     await loadUsers();
   } catch (error) {
     alert(
@@ -2505,6 +2689,7 @@ async function startAdmin() {
     await loadSafely("Termine", () => load("events"));
   }
   if (currentUser.can_manage_users) {
+    await loadSafely("Rollen", () => loadRoles());
     await loadSafely("Benutzer", () => loadUsers());
   }
   if (currentUser.can_members || currentUser.can_manage_users) {
