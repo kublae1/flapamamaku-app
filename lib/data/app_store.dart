@@ -80,6 +80,19 @@ class AppStore extends ChangeNotifier {
   String contactPhone = '';
   String clubAddress = '';
 
+  bool showSujet = true;
+  String labelSujet = 'Sujet nächstes Jahr';
+  bool showArchive = true;
+  String labelArchive = 'Vergangene Sujet';
+  bool showPhotos = true;
+  String labelPhotos = 'Fotoalben';
+  bool showDocuments = true;
+  String labelDocuments = 'Dokumente';
+  bool showPolls = true;
+  String labelPolls = 'Umfragen';
+  bool showLinks = true;
+  String labelLinks = 'Links';
+
   Color get themeColor => Color(themeColorValue);
 
   Future<void> _loadAppearance() async {
@@ -112,6 +125,32 @@ class AppStore extends ChangeNotifier {
       contactEmail = config['contact_email']?.toString().trim() ?? '';
       contactPhone = config['contact_phone']?.toString().trim() ?? '';
       clubAddress = config['club_address']?.toString().trim() ?? '';
+
+      showSujet = config['show_sujet'] != false;
+      labelSujet = config['label_sujet']?.toString().trim().isNotEmpty == true
+          ? config['label_sujet'].toString().trim()
+          : 'Sujet nächstes Jahr';
+      showArchive = config['show_archive'] != false;
+      labelArchive = config['label_archive']?.toString().trim().isNotEmpty == true
+          ? config['label_archive'].toString().trim()
+          : 'Vergangene Sujet';
+      showPhotos = config['show_photos'] != false;
+      labelPhotos = config['label_photos']?.toString().trim().isNotEmpty == true
+          ? config['label_photos'].toString().trim()
+          : 'Fotoalben';
+      showDocuments = config['show_documents'] != false;
+      labelDocuments =
+          config['label_documents']?.toString().trim().isNotEmpty == true
+              ? config['label_documents'].toString().trim()
+              : 'Dokumente';
+      showPolls = config['show_polls'] != false;
+      labelPolls = config['label_polls']?.toString().trim().isNotEmpty == true
+          ? config['label_polls'].toString().trim()
+          : 'Umfragen';
+      showLinks = config['show_links'] != false;
+      labelLinks = config['label_links']?.toString().trim().isNotEmpty == true
+          ? config['label_links'].toString().trim()
+          : 'Links';
 
       final match = RegExp(r'^#([0-9A-Fa-f]{6})\$').firstMatch(colorText);
       if (match != null) {
