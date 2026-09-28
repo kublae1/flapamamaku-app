@@ -101,6 +101,33 @@ class ApiService {
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
+  Map<String, dynamic> _prepareContentJson(Map<String, dynamic> json) {
+    String absolute(String value) =>
+        value.startsWith('/') ? '$baseUrl$value' : value;
+
+    final images = (json['images'] as List<dynamic>? ?? const [])
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .map((image) {
+          final url = image['url']?.toString() ?? '';
+          image['url'] = absolute(url);
+          return image;
+        })
+        .toList();
+    json['images'] = images;
+
+    final imageUrls = (json['image_urls'] as List<dynamic>? ?? const [])
+        .map((value) => absolute(value.toString()))
+        .toList();
+    json['image_urls'] = imageUrls;
+
+    final imageUrl = json['image_url']?.toString() ?? '';
+    json['image_url'] = absolute(imageUrl);
+
+    final documentUrl = json['document_url']?.toString() ?? '';
+    json['document_url'] = absolute(documentUrl);
+    return json;
+  }
+
   Future<Map<String, dynamic>> fetchAppConfig() async {
     final response = await http
         .get(_uri('/api/app-config'))
@@ -194,22 +221,9 @@ class ApiService {
     _ensureSuccess(response);
     final values = jsonDecode(response.body) as List<dynamic>;
     return values.map((value) {
-      final json = Map<String, dynamic>.from(
-        value as Map<String, dynamic>,
+      final json = _prepareContentJson(
+        Map<String, dynamic>.from(value as Map<String, dynamic>),
       );
-      final imageUrls = (json['image_urls'] as List<dynamic>? ?? const [])
-          .map((value) => value.toString())
-          .map((value) => value.startsWith('/') ? '$baseUrl$value' : value)
-          .toList();
-      json['image_urls'] = imageUrls;
-      final imageUrl = json['image_url']?.toString() ?? '';
-      if (imageUrl.startsWith('/')) {
-        json['image_url'] = '$baseUrl$imageUrl';
-      }
-      final documentUrl = json['document_url']?.toString() ?? '';
-      if (documentUrl.startsWith('/')) {
-        json['document_url'] = '$baseUrl$documentUrl';
-      }
       return ContentItem.fromJson(json);
     }).toList();
   }
@@ -235,20 +249,9 @@ class ApiService {
             )
             .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final imageUrls = (json['image_urls'] as List<dynamic>? ?? const [])
-        .map((value) => value.toString())
-        .map((value) => value.startsWith('/') ? '$baseUrl$value' : value)
-        .toList();
-    json['image_urls'] = imageUrls;
-    final imageUrl = json['image_url']?.toString() ?? '';
-    if (imageUrl.startsWith('/')) {
-      json['image_url'] = '$baseUrl$imageUrl';
-    }
-    final documentUrl = json['document_url']?.toString() ?? '';
-    if (documentUrl.startsWith('/')) {
-      json['document_url'] = '$baseUrl$documentUrl';
-    }
+    final json = _prepareContentJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
     return ContentItem.fromJson(json);
   }
 
@@ -356,16 +359,9 @@ class ApiService {
     final streamed = await request.send().timeout(const Duration(seconds: 30));
     final response = await http.Response.fromStream(streamed);
     _ensureSuccess(response);
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final imageUrls = (json['image_urls'] as List<dynamic>? ?? const [])
-        .map((value) => value.toString())
-        .map((value) => value.startsWith('/') ? '$baseUrl$value' : value)
-        .toList();
-    json['image_urls'] = imageUrls;
-    final imageUrl = json['image_url']?.toString() ?? '';
-    if (imageUrl.startsWith('/')) {
-      json['image_url'] = '$baseUrl$imageUrl';
-    }
+    final json = _prepareContentJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
     return ContentItem.fromJson(json);
   }
 
