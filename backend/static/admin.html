@@ -427,6 +427,7 @@
       <button data-panel="members" id="members-nav">Mitglieder</button>
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
       <button data-panel="content" id="content-nav">Medien & Inhalte</button>
+      <button data-panel="push" id="push-nav" data-permission="can_manage_users">Push</button>
       <button data-panel="system" id="system-nav" data-permission="can_manage_users">System</button>
       <button id="logout-button">Abmelden</button>
     </nav>
@@ -733,6 +734,49 @@
           </select>
           <p class="meta" id="content-summary"></p>
           <div id="content-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="push" class="panel">
+      <div class="workspace-title">
+        <div>
+          <h2>Push-Zentrale</h2>
+          <p class="meta">Manuelle Nachrichten senden und automatische Push-Zustellungen kontrollieren.</p>
+        </div>
+        <button type="button" id="push-refresh">Aktualisieren</button>
+      </div>
+      <div class="grid">
+        <form class="card" id="push-form">
+          <h2>Push senden</h2>
+          <p class="meta">Die Nachricht wird an alle aktuell registrierten Geräte dieses Vereins gesendet.</p>
+          <label>Titel</label>
+          <input name="title" maxlength="200" required placeholder="z. B. Wichtige Mitteilung">
+          <label>Text</label>
+          <textarea name="body" maxlength="500" placeholder="Nachricht an die Mitglieder"></textarea>
+          <label>Beim Antippen öffnen</label>
+          <select name="route">
+            <option value="">App öffnen</option>
+            <option value="/news">News</option>
+            <option value="/events">Termine</option>
+            <option value="/gallery">Galerie</option>
+            <option value="/more">Mehr / Vereinsinhalte</option>
+          </select>
+          <p><button class="primary" type="submit">Push senden</button></p>
+          <p class="meta">Automatische Pushs aus News, Terminen, Umfragen, Dokumenten und Medien erscheinen ebenfalls im Verlauf.</p>
+        </form>
+        <div>
+          <div class="card">
+            <div class="preview-heading">
+              <h2>Status</h2>
+              <span class="meta" id="push-status-summary">Wird geladen …</span>
+            </div>
+            <div id="push-status-details"><p class="meta">Push-System wird geprüft …</p></div>
+          </div>
+          <div class="card">
+            <h2>Push-Verlauf</h2>
+            <div id="push-history"><p class="meta">Verlauf wird geladen …</p></div>
+          </div>
         </div>
       </div>
     </section>
@@ -2134,6 +2178,104 @@ async function loadAppConfig() {
     console.error(error);
   }
 }
+
+function pushKindLabel(kind) {
+  const labels = {
+    manual: "Manuell",
+    news: "News",
+    event: "Termin",
+    event_update: "Termin geändert",
+    document: "Dokument",
+    poll: "Umfrage",
+    photo_album: "Fotoalbum",
+    gallery: "Galerie",
+    sujet: "Sujet",
+    archive: "Archiv",
+  };
+  return labels[kind] || kind || "Push";
+}
+
+async function loadPushAdmin() {
+  if (!currentUser?.can_manage_users) return;
+  const summary = document.getElementById("push-status-summary");
+  const details = document.getElementById("push-status-details");
+  const history = document.getElementById("push-history");
+  summary.textContent = "Wird geladen …";
+  try {
+    const state = await api("/api/push/admin");
+    const ready = state.delivery_configured && state.firebase_auth_ready;
+    summary.textContent = ready ? "Bereit" : "Nicht bereit";
+    details.innerHTML = `
+      <p><strong>Firebase:</strong> ${ready ? "bereit" : "nicht bereit"}</p>
+      <p><strong>Registrierte Geräte:</strong> ${state.registered_devices_total || 0}</p>
+      <p><strong>Warteschlange:</strong> ${state.queued_notifications || 0}</p>
+      <p><strong>Firebase-Projekt:</strong> ${state.firebase_project_id || "–"}</p>
+      ${state.firebase_error ? `<p class="error"><strong>Firebase-Fehler:</strong> ${state.firebase_error}</p>` : ""}
+      ${state.last_delivery_error ? `<p class="error"><strong>Letzter Zustellfehler:</strong> ${state.last_delivery_error}</p>` : ""}
+    `;
+
+    const notifications = state.notifications || [];
+    if (!notifications.length) {
+      history.innerHTML = '<p class="meta">Noch keine Push-Nachrichten vorhanden.</p>';
+      return;
+    }
+    history.innerHTML = "";
+    notifications.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "entry";
+      const status =
+        item.status === "sent" ? "Gesendet" :
+        item.status === "error" ? "Fehler / Wiederholung" :
+        "Warteschlange";
+      row.innerHTML = `
+        <div class="cms-badge">${pushKindLabel(item.kind)}</div>
+        <h3>${item.title || "Push"}</h3>
+        ${item.body ? `<div>${item.body}</div>` : ""}
+        <div class="meta" style="margin-top:6px">
+          ${formatDateTimeCH(item.created_at)} · ${status}
+          · zugestellt: ${item.delivered_count || 0}
+          ${item.failed_count ? ` · Fehler: ${item.failed_count}` : ""}
+          ${item.route ? ` · Ziel: ${item.route}` : ""}
+        </div>
+        ${item.last_error ? `<div class="error" style="margin-top:6px">${item.last_error}</div>` : ""}
+      `;
+      history.appendChild(row);
+    });
+  } catch (error) {
+    summary.textContent = "Fehler";
+    details.innerHTML = '<p class="error">Push-Status konnte nicht geladen werden.</p>';
+    history.innerHTML = '<p class="error">Push-Verlauf konnte nicht geladen werden.</p>';
+    console.error(error);
+  }
+}
+
+document.getElementById("push-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await api("/api/push/admin/send", {
+      method: "POST",
+      body: JSON.stringify({
+        title: form.elements.title.value.trim(),
+        body: form.elements.body.value.trim(),
+        route: form.elements.route.value,
+      }),
+    });
+    form.reset();
+    await loadPushAdmin();
+    alert("Push wurde in die Zustellung aufgenommen.");
+  } catch (error) {
+    alert("Push konnte nicht gesendet werden.");
+    console.error(error);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("push-nav").addEventListener("click", loadPushAdmin);
+document.getElementById("push-refresh").addEventListener("click", loadPushAdmin);
 
 async function loadSystem() {
   if (!currentUser?.can_manage_users) return;

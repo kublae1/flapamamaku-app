@@ -32,7 +32,7 @@ BACKUP_INTERVAL_SECONDS = max(
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.45"
+API_VERSION = "0.8.46"
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 5
@@ -255,6 +255,12 @@ class PushTokenPayload(BaseModel):
 
 class PushTokenDeletePayload(BaseModel):
     token: str = Field(min_length=20, max_length=4096)
+
+
+class ManualPushPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(default="", max_length=500)
+    route: str = Field(default="", max_length=80)
 
 
 TABLES: dict[str, tuple[str, type[BaseModel]]] = {
@@ -2335,6 +2341,114 @@ def delete_gallery_snapshot(
             raise HTTPException(status_code=403, detail="Keine Berechtigung")
         db.execute("DELETE FROM gallery_snapshots WHERE id = ?", (snapshot_id,))
         db.commit()
+
+
+def _serialize_push_notification(
+    row: sqlite3.Row | dict[str, Any],
+) -> dict[str, Any]:
+    item = dict(row)
+    item["delivered_count"] = int(item.get("delivered_count", 0) or 0)
+    item["failed_count"] = int(item.get("failed_count", 0) or 0)
+    item["status"] = (
+        "sent"
+        if item.get("sent_at")
+        else ("error" if item.get("last_error") else "queued")
+    )
+    return item
+
+
+@app.get("/api/push/admin")
+def get_push_admin(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    with connect() as db:
+        registered_devices_total = int(
+            db.execute(
+                "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+            ).fetchone()[0]
+        )
+        queued_notifications = int(
+            db.execute(
+                "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+            ).fetchone()[0]
+        )
+        rows = db.execute(
+            """
+            SELECT
+                pn.*,
+                (
+                    SELECT COUNT(*)
+                    FROM push_deliveries pd
+                    WHERE pd.notification_id = pn.id
+                      AND pd.sent_at IS NOT NULL
+                ) AS delivered_count,
+                (
+                    SELECT COUNT(*)
+                    FROM push_deliveries pd
+                    WHERE pd.notification_id = pn.id
+                      AND pd.sent_at IS NULL
+                      AND pd.last_error <> ''
+                ) AS failed_count
+            FROM push_notifications pn
+            ORDER BY pn.id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        last_delivery_error = db.execute(
+            """
+            SELECT last_error
+            FROM push_deliveries
+            WHERE last_error IS NOT NULL AND last_error <> ''
+            ORDER BY rowid DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    return {
+        "registered_devices_total": registered_devices_total,
+        "queued_notifications": queued_notifications,
+        "last_delivery_error": (
+            str(last_delivery_error["last_error"])[:500]
+            if last_delivery_error is not None
+            else ""
+        ),
+        "notifications": [_serialize_push_notification(row) for row in rows],
+        **_firebase_diagnostic(),
+    }
+
+
+@app.post("/api/push/admin/send")
+def send_manual_push(
+    payload: ManualPushPayload,
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    route = payload.route.strip()
+    allowed_routes = {"", "/news", "/events", "/gallery", "/more"}
+    if route not in allowed_routes:
+        raise HTTPException(status_code=422, detail="Unbekanntes Push-Ziel")
+
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="manual",
+            title=payload.title.strip(),
+            body=payload.body.strip(),
+            route=route,
+        )
+        notification_id = int(db.execute("SELECT last_insert_rowid()").fetchone()[0])
+        db.commit()
+        row = db.execute(
+            """
+            SELECT
+                pn.*,
+                0 AS delivered_count,
+                0 AS failed_count
+            FROM push_notifications pn
+            WHERE pn.id = ?
+            """,
+            (notification_id,),
+        ).fetchone()
+    return _serialize_push_notification(row)
 
 
 @app.post("/api/push/register")
