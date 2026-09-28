@@ -119,11 +119,17 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
     ContentItem item,
   ) async {
     if (item.id == null) return;
-    final controller = TextEditingController();
+    final controller = TextEditingController(
+      text: item.pollMySuggestionText,
+    );
     final suggestion = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Eigener Vorschlag'),
+        title: Text(
+          item.pollMySuggestionText.isEmpty
+              ? 'Eigener Vorschlag'
+              : 'Eigenen Vorschlag bearbeiten',
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -144,7 +150,11 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
           FilledButton(
             onPressed: () =>
                 Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('Vorschlag übernehmen & abstimmen'),
+            child: Text(
+              item.pollMySuggestionText.isEmpty
+                  ? 'Vorschlag übernehmen & abstimmen'
+                  : 'Änderung speichern & abstimmen',
+            ),
           ),
         ],
       ),
@@ -962,7 +972,11 @@ class _PollList extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: () => onSuggest(item),
                     icon: const Icon(Icons.add_comment_outlined, size: 18),
-                    label: const Text('Eigener Vorschlag'),
+                    label: Text(
+                      item.pollMySuggestionText.isEmpty
+                          ? 'Eigener Vorschlag'
+                          : 'Eigenen Vorschlag bearbeiten',
+                    ),
                   ),
                 ],
               ),
