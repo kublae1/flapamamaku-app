@@ -28,15 +28,6 @@ class ContentImage {
   }
 }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'url': url,
-        'sort_order': sortOrder,
-        'created_at': createdAt,
-        'legacy': legacy,
-      };
-
-
 class PollVoter {
   final String name;
   final int optionIndex;
@@ -55,12 +46,6 @@ class PollVoter {
     );
   }
 }
-
-  Map<String, dynamic> toJson() => {
-        'name': name,
-        'option_index': optionIndex,
-      };
-
 
 class PollSuggestion {
   final String memberName;
@@ -88,14 +73,6 @@ class PollSuggestion {
     );
   }
 }
-
-  Map<String, dynamic> toJson() => {
-        'member_name': memberName,
-        'text': text,
-        'option_index': optionIndex,
-        'vote_count': voteCount,
-      };
-
 
 class ContentItem {
   final int? id;
@@ -240,36 +217,6 @@ class ContentItem {
   }
 }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'section': section,
-        'title': title,
-        'text': text,
-        'link_url': linkUrl,
-        'image_url': imageUrl,
-        'images': mediaImages.map((image) => image.toJson()).toList(),
-        'created_at': createdAt,
-        'sort_order': sortOrder,
-        'snapshot_id': snapshotId,
-        'is_snapshot': isSnapshot,
-        'can_delete': canDelete,
-        'expires_at': expiresAt,
-        'document_url': documentUrl,
-        'document_name': documentName,
-        'document_mime': documentMime,
-        'poll_options': pollOptions,
-        'poll_allow_suggestions': pollAllowSuggestions,
-        'poll_counts': pollCounts,
-        'poll_total_votes': pollTotalVotes,
-        'poll_my_vote': pollMyVote,
-        'poll_my_suggestion_index': pollMySuggestionIndex,
-        'poll_my_suggestion_text': pollMySuggestionText,
-        'poll_voters': pollVoters.map((voter) => voter.toJson()).toList(),
-        'poll_suggestions':
-            pollSuggestions.map((suggestion) => suggestion.toJson()).toList(),
-      };
-
-
 class NewsItem {
   final int? id;
   final String date;
@@ -303,17 +250,6 @@ class NewsItem {
     );
   }
 }
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'date': date,
-        'title': title,
-        'text': text,
-        'created_at': createdAt,
-        'sort_order': sortOrder,
-        'image_url': imageUrl,
-      };
-
 
 class EventItem {
   final int? id;
@@ -361,19 +297,6 @@ class EventItem {
   }
 }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'event_date': eventDate,
-        'day': day,
-        'month': month,
-        'title': title,
-        'location': location,
-        'time': time,
-        'registration_count': registrationCount,
-        'registered_by_me': registeredByMe,
-      };
-
-
 class MemberFilterItem {
   final int id;
   final String label;
@@ -396,14 +319,6 @@ class MemberFilterItem {
     );
   }
 }
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'label': label,
-        'active': active,
-        'sort_order': sortOrder,
-      };
-
 
 class MemberItem {
   final int? id;
@@ -483,30 +398,6 @@ class MemberItem {
   }
 }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'role': role,
-        'since': since,
-        'birth_date': birthDate,
-        'status': status,
-        'member_group': memberGroup,
-        'engagement': engagement,
-        'sort_order': sortOrder,
-        'filter_ids': filterIds,
-        'partner_name': partnerName,
-        'phone_mobile': phoneMobile,
-        'phone_private': phonePrivate,
-        'phone_work': phoneWork,
-        'email': email,
-        'address': address,
-        'occupation': occupation,
-        'employer': employer,
-        'employer_url': employerUrl,
-        'photo_url': photoUrl,
-      };
-
-
 const newsItems = [
   NewsItem(
     '12.09.2026',
@@ -573,3 +464,121 @@ const initialMembers = [
   MemberItem('Thomas Steiner', 'Präsident', 'seit 2019'),
   MemberItem('Patrick Felder', 'Präsident', 'seit 2020'),
 ];
+
+
+extension ContentImageOfflineCacheJson on ContentImage {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'url': url,
+        'sort_order': sortOrder,
+        'created_at': createdAt,
+        'legacy': legacy,
+      };
+}
+
+extension PollVoterOfflineCacheJson on PollVoter {
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'option_index': optionIndex,
+      };
+}
+
+extension PollSuggestionOfflineCacheJson on PollSuggestion {
+  Map<String, dynamic> toJson() => {
+        'member_name': memberName,
+        'text': text,
+        'option_index': optionIndex,
+        'vote_count': voteCount,
+      };
+}
+
+extension ContentItemOfflineCacheJson on ContentItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'section': section,
+        'title': title,
+        'text': text,
+        'link_url': linkUrl,
+        'image_url': imageUrl,
+        'images': mediaImages.map((image) => image.toJson()).toList(),
+        'created_at': createdAt,
+        'sort_order': sortOrder,
+        'snapshot_id': snapshotId,
+        'is_snapshot': isSnapshot,
+        'can_delete': canDelete,
+        'expires_at': expiresAt,
+        'document_url': documentUrl,
+        'document_name': documentName,
+        'document_mime': documentMime,
+        'poll_options': pollOptions,
+        'poll_allow_suggestions': pollAllowSuggestions,
+        'poll_counts': pollCounts,
+        'poll_total_votes': pollTotalVotes,
+        'poll_my_vote': pollMyVote,
+        'poll_my_suggestion_index': pollMySuggestionIndex,
+        'poll_my_suggestion_text': pollMySuggestionText,
+        'poll_voters': pollVoters.map((voter) => voter.toJson()).toList(),
+        'poll_suggestions':
+            pollSuggestions.map((suggestion) => suggestion.toJson()).toList(),
+      };
+}
+
+extension NewsItemOfflineCacheJson on NewsItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'date': date,
+        'title': title,
+        'text': text,
+        'created_at': createdAt,
+        'sort_order': sortOrder,
+        'image_url': imageUrl,
+      };
+}
+
+extension EventItemOfflineCacheJson on EventItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'event_date': eventDate,
+        'day': day,
+        'month': month,
+        'title': title,
+        'location': location,
+        'time': time,
+        'registration_count': registrationCount,
+        'registered_by_me': registeredByMe,
+      };
+}
+
+extension MemberFilterItemOfflineCacheJson on MemberFilterItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'label': label,
+        'active': active,
+        'sort_order': sortOrder,
+      };
+}
+
+extension MemberItemOfflineCacheJson on MemberItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'role': role,
+        'since': since,
+        'birth_date': birthDate,
+        'status': status,
+        'member_group': memberGroup,
+        'engagement': engagement,
+        'sort_order': sortOrder,
+        'filter_ids': filterIds,
+        'partner_name': partnerName,
+        'phone_mobile': phoneMobile,
+        'phone_private': phonePrivate,
+        'phone_work': phoneWork,
+        'email': email,
+        'address': address,
+        'occupation': occupation,
+        'employer': employer,
+        'employer_url': employerUrl,
+        'photo_url': photoUrl,
+      };
+}
