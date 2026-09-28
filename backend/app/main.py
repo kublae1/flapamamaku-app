@@ -442,6 +442,22 @@ def init_db() -> None:
 
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS poll_suggestions (
+                poll_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                option_index INTEGER NOT NULL,
+                suggestion_text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(poll_id, user_id),
+                FOREIGN KEY(poll_id) REFERENCES content_items(id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS content_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content_id INTEGER NOT NULL,
@@ -792,7 +808,7 @@ def _send_fcm_message(
             "android": {
                 "priority": "high",
                 "notification": {
-                    "icon": "ic_launcher",
+                    "icon": "ic_stat_flapamamaku",
                     **({"image": PUSH_ICON_URL} if PUSH_ICON_URL else {}),
                 },
             },
@@ -1300,10 +1316,29 @@ def _serialize_content(
                 (item["id"],),
             ).fetchall()
 
+            my_suggestion_index = None
+            my_suggestion_text = ""
+            if user_id is not None:
+                suggestion = db.execute(
+                    """
+                    SELECT option_index, suggestion_text
+                    FROM poll_suggestions
+                    WHERE poll_id = ? AND user_id = ?
+                    """,
+                    (item["id"], user_id),
+                ).fetchone()
+                if suggestion is not None:
+                    index = int(suggestion["option_index"])
+                    if 0 <= index < len(options):
+                        my_suggestion_index = index
+                        my_suggestion_text = str(options[index] or "").strip()
+
             item["poll_options"] = options
             item["poll_counts"] = counts
             item["poll_total_votes"] = sum(counts)
             item["poll_my_vote"] = my_vote
+            item["poll_my_suggestion_index"] = my_suggestion_index
+            item["poll_my_suggestion_text"] = my_suggestion_text
             item["poll_voters"] = [
                 {
                     "name": str(voter["voter_name"] or "").strip(),
@@ -1317,6 +1352,8 @@ def _serialize_content(
             item["poll_counts"] = []
             item["poll_total_votes"] = 0
             item["poll_my_vote"] = None
+            item["poll_my_suggestion_index"] = None
+            item["poll_my_suggestion_text"] = ""
             item["poll_voters"] = []
     images = [
         {
@@ -2043,6 +2080,7 @@ def delete_content(
         _require_content_permission(row["section"], user)
         db.execute("DELETE FROM content_images WHERE content_id = ?", (row_id,))
         db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (row_id,))
+        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (row_id,))
         db.execute("DELETE FROM content_items WHERE id = ?", (row_id,))
         db.commit()
 
@@ -2206,28 +2244,93 @@ def suggest_and_vote_poll(
             options = []
         options = [str(value).strip() for value in options if str(value).strip()]
 
-        existing_index = next(
-            (
-                index
-                for index, value in enumerate(options)
-                if value.casefold() == suggestion.casefold()
-            ),
-            None,
-        )
-        if existing_index is None:
-            if len(options) >= 21:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Maximal 21 Antwortoptionen möglich",
+        owned = db.execute(
+            """
+            SELECT option_index
+            FROM poll_suggestions
+            WHERE poll_id = ? AND user_id = ?
+            """,
+            (poll_id, user["id"]),
+        ).fetchone()
+
+        if owned is not None:
+            option_index = int(owned["option_index"])
+            if not (0 <= option_index < len(options)):
+                db.execute(
+                    "DELETE FROM poll_suggestions WHERE poll_id = ? AND user_id = ?",
+                    (poll_id, user["id"]),
                 )
-            options.append(suggestion)
-            option_index = len(options) - 1
-            db.execute(
-                "UPDATE content_items SET poll_options = ? WHERE id = ?",
-                (json.dumps(options, ensure_ascii=False), poll_id),
+                owned = None
+            else:
+                duplicate_index = next(
+                    (
+                        index
+                        for index, value in enumerate(options)
+                        if index != option_index
+                        and value.casefold() == suggestion.casefold()
+                    ),
+                    None,
+                )
+                if duplicate_index is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Dieser Vorschlag ist bereits vorhanden",
+                    )
+                options[option_index] = suggestion
+                db.execute(
+                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
+                    (json.dumps(options, ensure_ascii=False), poll_id),
+                )
+                now = datetime.now(timezone.utc).isoformat()
+                db.execute(
+                    """
+                    UPDATE poll_suggestions
+                    SET suggestion_text = ?, updated_at = ?
+                    WHERE poll_id = ? AND user_id = ?
+                    """,
+                    (suggestion, now, poll_id, user["id"]),
+                )
+
+        if owned is None:
+            existing_index = next(
+                (
+                    index
+                    for index, value in enumerate(options)
+                    if value.casefold() == suggestion.casefold()
+                ),
+                None,
             )
-        else:
-            option_index = existing_index
+            if existing_index is not None:
+                option_index = existing_index
+            else:
+                if len(options) >= 21:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Maximal 21 Antwortoptionen möglich",
+                    )
+                options.append(suggestion)
+                option_index = len(options) - 1
+                now = datetime.now(timezone.utc).isoformat()
+                db.execute(
+                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
+                    (json.dumps(options, ensure_ascii=False), poll_id),
+                )
+                db.execute(
+                    """
+                    INSERT INTO poll_suggestions (
+                        poll_id, user_id, option_index, suggestion_text,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        poll_id,
+                        user["id"],
+                        option_index,
+                        suggestion,
+                        now,
+                        now,
+                    ),
+                )
 
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
