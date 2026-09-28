@@ -665,7 +665,7 @@
               <button type="button" id="poll-toggle-suggestions">Eigener Vorschlag: AUS</button>
             </div>
             <input name="poll_allow_suggestions" type="checkbox" class="hidden">
-            <p class="meta">Eine Antwort pro Zeile. Mindestens zwei Möglichkeiten. Mit „Eigener Vorschlag: EIN“ dürfen Mitglieder in der App eine eigene Antwort erfassen und später bearbeiten.</p>
+            <p class="meta">Eine Antwort pro Zeile. Ohne eigene Vorschläge sind mindestens zwei Möglichkeiten nötig. Mit „Eigener Vorschlag: EIN“ kann die Umfrage auch ohne vorgegebene Antworten gestartet werden; Mitglieder erfassen dann die Vorschläge selbst.</p>
             <div id="poll-member-suggestions" class="hidden" style="margin-top:14px;padding:12px;border:1px solid #34373b;border-radius:10px;background:#141619">
               <strong style="display:block;margin-bottom:8px">Vorschläge der Mitglieder</strong>
               <div id="poll-member-suggestions-list" class="meta">Noch keine Mitgliedervorschläge vorhanden.</div>
@@ -1981,8 +1981,14 @@ document.getElementById("content-form").addEventListener("submit", async event =
         .map(value => value.trim())
         .filter(Boolean)
     : [];
-  if (section === "polls" && pollOptions.length < 2) {
-    alert("Bitte mindestens zwei Antwortmöglichkeiten erfassen, z. B. Ja und Nein.");
+  if (
+    section === "polls" &&
+    pollOptions.length < 2 &&
+    !form.elements.poll_allow_suggestions.checked
+  ) {
+    alert(
+      "Bitte mindestens zwei Antwortmöglichkeiten erfassen oder „Eigener Vorschlag: EIN“ aktivieren."
+    );
     form.elements.poll_options.focus();
     return;
   }
