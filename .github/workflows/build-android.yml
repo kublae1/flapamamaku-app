@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1 ]
     tags:
       - 'v*'
 
@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_APPLICATION_ID: ${{ vars.FLAPAMAMAKU_ANDROID_APPLICATION_ID || 'ch.flapamamaku.app' }}
+      APP_DISPLAY_NAME: ${{ vars.WHITE_LABEL_APP_NAME || 'FLAPAMAMAKU' }}
+      APP_DISPLAY_SUBTITLE: ${{ vars.WHITE_LABEL_APP_SUBTITLE || 'Fasnachtsgruppe Luzern' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -193,11 +195,29 @@ jobs:
           if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
             sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
           fi
-          if grep -q 'android:label=' "$MANIFEST"; then
-            sed -i 's/android:label="[^"]*"/android:label="FLAPAMAMAKU"/' "$MANIFEST"
-          else
-            sed -i 's#<application#<application android:label="FLAPAMAMAKU"#' "$MANIFEST"
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          label = os.environ["APP_DISPLAY_NAME"].strip() or "FLAPAMAMAKU"
+
+          if re.search(r'android:label="[^"]*"', text):
+              text = re.sub(
+                  r'android:label="[^"]*"',
+                  f'android:label="{label}"',
+                  text,
+                  count=1,
+              )
+          else:
+              text = text.replace(
+                  "<application",
+                  f'<application android:label="{label}"',
+                  1,
+              )
+          manifest.write_text(text)
+          PY
 
           if ! grep -q 'com.google.firebase.messaging.default_notification_icon' "$MANIFEST"; then
             sed -i '/<\/application>/i\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_flapamamaku" />' "$MANIFEST"
@@ -388,6 +408,8 @@ jobs:
           API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          APP_NAME: ${{ env.APP_DISPLAY_NAME }}
+          APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
           FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
           FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
@@ -399,6 +421,8 @@ jobs:
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$APP_VERSION" \
             --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
             --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
             --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
@@ -409,6 +433,8 @@ jobs:
           API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          APP_NAME: ${{ env.APP_DISPLAY_NAME }}
+          APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
           FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
           FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
@@ -420,6 +446,8 @@ jobs:
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$APP_VERSION" \
             --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
             --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
             --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
@@ -430,6 +458,8 @@ jobs:
           API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          APP_NAME: ${{ env.APP_DISPLAY_NAME }}
+          APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
           FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
           FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
@@ -441,6 +471,8 @@ jobs:
             --dart-define=API_BASE_URL="$API_BASE_URL" \
             --dart-define=APP_VERSION="$APP_VERSION" \
             --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
             --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
             --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
