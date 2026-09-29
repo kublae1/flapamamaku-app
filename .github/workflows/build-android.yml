@@ -385,7 +385,7 @@ jobs:
 
       - name: Build universal release APK
         env:
-          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
+          API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
@@ -406,7 +406,7 @@ jobs:
 
       - name: Build split release APKs
         env:
-          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
+          API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
@@ -427,7 +427,7 @@ jobs:
 
       - name: Build Play Store AAB
         env:
-          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
+          API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
