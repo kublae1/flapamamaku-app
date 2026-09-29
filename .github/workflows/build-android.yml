@@ -2,8 +2,13 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "White-label build profile"
+        required: false
+        default: "flapamamaku"
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1, feature/white-label-push-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1, feature/white-label-push-v1, feature/white-label-profiles-v1 ]
     tags:
       - 'v*'
 
@@ -15,9 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_APPLICATION_ID: ${{ vars.FLAPAMAMAKU_ANDROID_APPLICATION_ID || 'ch.flapamamaku.app' }}
-      APP_DISPLAY_NAME: ${{ vars.WHITE_LABEL_APP_NAME || 'FLAPAMAMAKU' }}
-      APP_DISPLAY_SUBTITLE: ${{ vars.WHITE_LABEL_APP_SUBTITLE || 'Fasnachtsgruppe Luzern' }}
-      WHITE_LABEL_APP_ICON_URL: ${{ vars.WHITE_LABEL_APP_ICON_URL || '' }}
+      BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
       FIREBASE_API_KEY_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_API_KEY || secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
       FIREBASE_APP_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_APP_ID || secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
       FIREBASE_MESSAGING_SENDER_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_MESSAGING_SENDER_ID || secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
@@ -25,6 +28,57 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load white label build profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          profile = os.environ["BUILD_PROFILE"].strip()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile):
+              raise SystemExit("Invalid white-label profile name")
+
+          path = Path("config/white-label") / f"{profile}.json"
+          if not path.exists():
+              raise SystemExit(f"White-label profile not found: {path}")
+
+          data = json.loads(path.read_text())
+          required = ["id", "app_name", "app_subtitle", "api_base_url", "app_icon_url"]
+          missing = [key for key in required if key not in data]
+          if missing:
+              raise SystemExit("Missing profile fields: " + ", ".join(missing))
+          if data["id"] != profile:
+              raise SystemExit("Profile id does not match file name")
+          if not str(data["api_base_url"]).startswith("https://"):
+              raise SystemExit("Profile api_base_url must use HTTPS")
+          icon = str(data["app_icon_url"]).strip()
+          if icon and not icon.startswith("https://"):
+              raise SystemExit("Profile app_icon_url must use HTTPS when set")
+
+          values = {
+              "APP_DISPLAY_NAME": str(data["app_name"]).strip(),
+              "APP_DISPLAY_SUBTITLE": str(data["app_subtitle"]).strip(),
+              "API_BASE_URL": str(data["api_base_url"]).rstrip("/"),
+              "WHITE_LABEL_APP_ICON_URL": icon,
+          }
+          if not values["APP_DISPLAY_NAME"]:
+              raise SystemExit("Profile app_name must not be empty")
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a") as handle:
+              for key, value in values.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit(f"{key} must be a single line")
+                  handle.write(f"{key}={value}\n")
+
+          print(f"Loaded white-label profile: {profile}")
+          print(f"App name: {values['APP_DISPLAY_NAME']}")
+          print(f"API: {values['API_BASE_URL']}")
+          PY
 
       - uses: subosito/flutter-action@v2
         with:
@@ -446,7 +500,6 @@ jobs:
 
       - name: Build universal release APK
         env:
-          API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           APP_NAME: ${{ env.APP_DISPLAY_NAME }}
@@ -471,7 +524,6 @@ jobs:
 
       - name: Build split release APKs
         env:
-          API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           APP_NAME: ${{ env.APP_DISPLAY_NAME }}
@@ -496,7 +548,6 @@ jobs:
 
       - name: Build Play Store AAB
         env:
-          API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
           APP_VERSION: ${{ steps.version.outputs.name }}
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           APP_NAME: ${{ env.APP_DISPLAY_NAME }}
