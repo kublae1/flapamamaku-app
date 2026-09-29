@@ -1,6 +1,29 @@
-# Öffentlicher FLAPAMAMAKU-Zugriff
+# Öffentlicher Betrieb / White Label
 
-Zielarchitektur:
+Die öffentliche Bereitstellung ist bewusst White-Label-fähig aufgebaut. FLAPAMAMAKU ist die erste Instanz; weitere Vereine verwenden dieselbe Codebasis mit eigener Domain und eigener Konfiguration.
+
+## Öffentliche Adresse je Verein
+
+Jede Instanz erhält eine eigene HTTPS-Adresse, zum Beispiel:
+
+```
+https://app.verein-a.ch
+https://app.verein-b.ch
+```
+
+Für Builds und externe Prüfungen wird bevorzugt die Repository-Variable
+`WHITE_LABEL_API_BASE_URL` verwendet.
+
+Für die bestehende FLAPAMAMAKU-Instanz bleibt
+`FLAPAMAMAKU_API_BASE_URL` als kompatibler Fallback erhalten.
+
+Ohne gesetzte Variable verwendet dieses Repository weiterhin:
+
+```
+https://flapamamaku.kublaecloud.synology.me
+```
+
+## Zielarchitektur
 
 ```
 Android / iPhone / Browser
@@ -9,69 +32,70 @@ Android / iPhone / Browser
           |
   Reverse Proxy / TLS
           |
-   127.0.0.1:8087
+   Backend-Container
           |
- FLAPAMAMAKU FastAPI
-          |
- /data/flapamamaku.db
+ Vereins-Datenbank
 ```
 
-Die SQLite-Datenbank wird **niemals direkt** veröffentlicht. Öffentlich erreichbar
-ist nur die HTTPS-Adresse des Backends.
+Die Datenbank wird niemals direkt veröffentlicht. Öffentlich erreichbar ist nur die HTTPS-Adresse des jeweiligen Backends.
 
-## 1. Öffentliche Adresse
+## Produktionsbetrieb
 
-Wir verwenden später eine feste Subdomain, zum Beispiel:
+Für jede Vereinsinstanz gelten dieselben Anforderungen:
 
-```
-https://app.flapamamaku.ch
-```
+- eigener HTTPS-Hostname
+- gültiges TLS-Zertifikat
+- Backend nur hinter Reverse Proxy erreichbar
+- `FLAPAMAMAKU_ENV=production`
+- `FLAPAMAMAKU_ALLOWED_ORIGINS` auf die konkrete HTTPS-Adresse der Instanz beschränken
+- eigene persistente Daten
+- eigenes Backup/Restore
+- eigene Benutzer und Berechtigungen
 
-Die endgültige Adresse wird danach in GitHub als Repository Variable
-`FLAPAMAMAKU_API_BASE_URL` hinterlegt. Android und iOS verwenden dann dieselbe API.
+Die Namen der bestehenden Backend-Umgebungsvariablen bleiben vorerst kompatibel, damit die laufende FLAPAMAMAKU-Installation nicht umgebaut werden muss.
 
-## 2. Produktions-Stack
+## GitHub Public HTTPS Smoke Test
 
-Für den öffentlichen Betrieb ist `backend/docker-compose.production.yml` vorgesehen.
+Der Workflow `.github/workflows/public-smoke.yml` prüft die konfigurierte öffentliche Adresse von GitHub aus dem Internet.
 
-Wichtig:
-- Backend-Port ist nur an `127.0.0.1:8087` gebunden.
-- Die Datenbank bleibt im persistenten Docker-Volume.
-- Zugriff aus dem Internet erfolgt nur über den Reverse Proxy.
-- `FLAPAMAMAKU_ALLOWED_ORIGINS` wird auf die echte HTTPS-Adresse gesetzt.
-- `FLAPAMAMAKU_ENV=production` deaktiviert die öffentliche API-Dokumentation.
-- Das Backend setzt zusätzliche Security-Header; HSTS wird nur im Produktionsmodus aktiviert.
+Geprüft werden:
 
-## 3. Synology Reverse Proxy
+- URL verwendet HTTPS
+- DNS/TLS-Verbindung funktioniert
+- `/api/health` antwortet korrekt
+- Backend-Version, Build-SHA und Schema sind vorhanden
+- HSTS und weitere Security-Header sind gesetzt
+- öffentliche API-Dokumentation ist im Produktionsmodus deaktiviert
+- Auth-Status-Endpunkt ist erreichbar
 
-Auf der Synology wird ein Reverse-Proxy-Eintrag benötigt:
+Damit kann derselbe Test für jede White-Label-Instanz verwendet werden. Es muss nur deren `WHITE_LABEL_API_BASE_URL` gesetzt werden.
 
-- Quelle: `HTTPS`
-- Hostname: die spätere FLAPAMAMAKU-Subdomain
-- Port: `443`
-- Ziel: `HTTP`
-- Zielhost: `127.0.0.1`
-- Zielport: `8087`
+## Reverse Proxy
 
-Dazu gehört ein gültiges TLS-Zertifikat für die Subdomain.
+Beispiel Synology:
 
-## 4. Router / Firewall
+- Quelle: HTTPS
+- Hostname: öffentliche Vereinsdomain
+- Port: 443
+- Ziel: HTTP
+- Zielhost: interner Docker-/Synology-Host
+- Zielport: Backend-Port der Instanz
 
-Von aussen wird nur HTTPS/443 benötigt. Port 8087 wird **nicht** direkt ins Internet
-weitergeleitet.
+Von aussen wird nur HTTPS/443 freigegeben. Der interne Backend-Port wird nicht direkt ins Internet weitergeleitet.
 
-## 5. Vor öffentlicher Freigabe
+## Vor Freigabe einer Vereinsinstanz
 
-Vor der echten Internetfreigabe prüfen wir gemeinsam:
-- öffentliche DNS-Auflösung
-- gültiges HTTPS-Zertifikat
-- Anmeldung als normales Mitglied
+Vor der Freigabe prüfen:
+
+- DNS
+- TLS-Zertifikat
+- Public HTTPS Smoke Test
+- normaler Mitglieder-Login
 - Admin-Berechtigungen
-- Bild-/Galeriezugriff nach Anmeldung
+- Medienzugriff
 - Session-Verhalten
-- Backup der Docker-Daten
-- Wiederherstellungstest
-- Android mit öffentlicher URL
-- iOS mit derselben öffentlichen URL
+- Backup
+- kontrollierter Restore-Test
+- Android-Build mit der öffentlichen Instanz-URL
 
-Erst nach diesen Prüfungen wird die Adresse für Mitglieder freigegeben.
+Erst danach wird die jeweilige Vereinsinstanz freigegeben.
