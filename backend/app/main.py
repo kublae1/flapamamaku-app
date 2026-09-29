@@ -8,6 +8,8 @@ import logging
 import os
 import secrets
 import sqlite3
+import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -35,8 +37,27 @@ MAX_BACKUP_UPLOAD_BYTES = max(
     int(os.getenv("FLAPAMAMAKU_MAX_BACKUP_UPLOAD_BYTES", str(256 * 1024 * 1024))),
 )
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-SESSION_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-API_VERSION = "0.8.48"
+SESSION_LIFETIME_DAYS = max(
+    1,
+    int(os.getenv("FLAPAMAMAKU_SESSION_LIFETIME_DAYS", "90")),
+)
+LOGIN_RATE_WINDOW_SECONDS = max(
+    60,
+    int(os.getenv("FLAPAMAMAKU_LOGIN_RATE_WINDOW_SECONDS", "600")),
+)
+LOGIN_RATE_MAX_ATTEMPTS = max(
+    3,
+    int(os.getenv("FLAPAMAMAKU_LOGIN_RATE_MAX_ATTEMPTS", "5")),
+)
+LOGIN_LOCKOUT_SECONDS = max(
+    60,
+    int(os.getenv("FLAPAMAMAKU_LOGIN_LOCKOUT_SECONDS", "900")),
+)
+_LOGIN_RATE_LOCK = threading.Lock()
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_LOGIN_LOCKED_UNTIL: dict[str, float] = {}
+
+API_VERSION = "0.8.49"
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 6
@@ -1395,6 +1416,59 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def _login_rate_key(request: Request, username: str) -> str:
+    host = request.client.host if request.client else "unknown"
+    normalized = username.strip().lower()
+    return hashlib.sha256(f"{host}|{normalized}".encode()).hexdigest()
+
+
+def _check_login_rate_limit(key: str) -> None:
+    now = time.monotonic()
+    with _LOGIN_RATE_LOCK:
+        locked_until = _LOGIN_LOCKED_UNTIL.get(key, 0.0)
+        if locked_until > now:
+            retry_after = max(1, int(locked_until - now) + 1)
+            raise HTTPException(
+                status_code=429,
+                detail="Zu viele fehlgeschlagene Anmeldeversuche. Bitte später nochmals versuchen.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        if locked_until:
+            _LOGIN_LOCKED_UNTIL.pop(key, None)
+
+        attempts = [
+            stamp
+            for stamp in _LOGIN_ATTEMPTS.get(key, [])
+            if now - stamp <= LOGIN_RATE_WINDOW_SECONDS
+        ]
+        if attempts:
+            _LOGIN_ATTEMPTS[key] = attempts
+        else:
+            _LOGIN_ATTEMPTS.pop(key, None)
+
+
+def _record_login_failure(key: str) -> None:
+    now = time.monotonic()
+    with _LOGIN_RATE_LOCK:
+        attempts = [
+            stamp
+            for stamp in _LOGIN_ATTEMPTS.get(key, [])
+            if now - stamp <= LOGIN_RATE_WINDOW_SECONDS
+        ]
+        attempts.append(now)
+        if len(attempts) >= LOGIN_RATE_MAX_ATTEMPTS:
+            _LOGIN_ATTEMPTS.pop(key, None)
+            _LOGIN_LOCKED_UNTIL[key] = now + LOGIN_LOCKOUT_SECONDS
+        else:
+            _LOGIN_ATTEMPTS[key] = attempts
+
+
+def _clear_login_failures(key: str) -> None:
+    with _LOGIN_RATE_LOCK:
+        _LOGIN_ATTEMPTS.pop(key, None)
+        _LOGIN_LOCKED_UNTIL.pop(key, None)
+
+
 def _serialize_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
     item.pop("password_hash", None)
@@ -1448,15 +1522,16 @@ def current_user(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     token = _extract_token(authorization)
+    now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
         row = db.execute(
             """
             SELECT u.*
             FROM sessions s
             JOIN users u ON u.id = s.user_id
-            WHERE s.token_hash = ? AND u.active = 1
+            WHERE s.token_hash = ? AND s.expires_at > ? AND u.active = 1
             """,
-            (_token_hash(token),),
+            (_token_hash(token), now),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
@@ -2372,7 +2447,10 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginPayload) -> dict[str, Any]:
+def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
+    rate_key = _login_rate_key(request, payload.username)
+    _check_login_rate_limit(rate_key)
+
     with connect() as db:
         row = db.execute(
             "SELECT * FROM users WHERE username = ? COLLATE NOCASE AND active = 1",
@@ -2383,11 +2461,20 @@ def login(payload: LoginPayload) -> dict[str, Any]:
             row["password_hash"],
             row["password_salt"],
         ):
+            _record_login_failure(rate_key)
             raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
 
+        _clear_login_failures(rate_key)
         token = secrets.token_urlsafe(48)
         now_dt = datetime.now(timezone.utc)
-        expires = SESSION_EXPIRES_AT
+        expires = (now_dt + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
+        db.execute(
+            """
+            DELETE FROM sessions
+            WHERE expires_at <= ?
+            """,
+            (now_dt.isoformat(),),
+        )
         db.execute(
             """
             INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
@@ -2407,7 +2494,6 @@ def login(payload: LoginPayload) -> dict[str, Any]:
         "expires_at": expires,
         "user": _user_profile(row["id"]),
     }
-
 
 @app.post("/api/auth/logout", status_code=204)
 def logout(
