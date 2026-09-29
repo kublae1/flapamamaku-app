@@ -1016,6 +1016,7 @@
           </div>
           <div id="system-status"><p class="meta">Systemdaten werden geladen …</p></div>
           <div id="system-health-details" style="margin-top:14px"></div>
+          <div id="system-readiness" style="margin-top:14px"></div>
         </div>
         <div class="card">
           <div class="preview-heading">
@@ -2518,9 +2519,10 @@ async function loadSystem() {
   const statusBox = document.getElementById("system-status");
   const backupList = document.getElementById("system-backup-list");
   try {
-    const [status, backups] = await Promise.all([
+    const [status, backups, readiness] = await Promise.all([
       api("/api/system/status"),
       api("/api/system/backups"),
+      api("/api/system/readiness"),
     ]);
     const latest = status.latest_backup
       ? `${formatDateTimeCH(status.latest_backup.created_at)} · ${formatBytes(status.latest_backup.size_bytes)}`
@@ -2555,6 +2557,32 @@ async function loadSystem() {
     healthDetails.innerHTML = warnings.length
       ? `<div class="error"><strong>Hinweise:</strong><br>${warnings.join("<br>")}</div>`
       : '<div class="meta"><strong>Alle Kernprüfungen sind in Ordnung.</strong></div>';
+
+    const readinessBox = document.getElementById("system-readiness");
+    const readinessLabels = {
+      production_mode: "Produktionsmodus",
+      cors_not_wildcard: "CORS ohne Wildcard",
+      cors_https_only: "CORS nur HTTPS",
+      api_docs_disabled: "API-Dokumentation deaktiviert",
+      database_exists: "Datenbank vorhanden",
+      schema_current: "Datenbank-Schema aktuell",
+      database_integrity: "Datenbank-Integrität",
+      recent_backup: "Aktuelles Backup",
+      build_identified: "Build eindeutig identifiziert",
+      session_lifetime_bounded: "Session-Laufzeit begrenzt",
+    };
+    const readinessRows = Object.entries(readiness.checks || {}).map(([key, ok]) =>
+      `<div>${ok ? "✅" : "❌"} <strong>${readinessLabels[key] || key}</strong></div>`
+    ).join("");
+    readinessBox.innerHTML = `
+      <div class="${readiness.ready ? "meta" : "error"}">
+        <strong>Öffentliche Betriebsbereitschaft: ${readiness.ready ? "BEREIT" : "NOCH NICHT BEREIT"}</strong>
+      </div>
+      <div style="margin-top:8px">${readinessRows}</div>
+      <div class="meta" style="margin-top:8px">
+        Erlaubte Origins: ${(readiness.allowed_origins || []).join(", ") || "keine"}
+      </div>
+    `;
 
     backupList.innerHTML = "";
     if (!backups.length) {
