@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.49"
+API_VERSION = "0.8.50"
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 6
@@ -94,10 +94,50 @@ app = FastAPI(
 )
 
 ALLOWED_ORIGINS = [
-    origin.strip()
+    origin.strip().rstrip("/")
     for origin in os.getenv("FLAPAMAMAKU_ALLOWED_ORIGINS", "*").split(",")
     if origin.strip()
 ]
+
+
+def _production_readiness() -> dict[str, Any]:
+    checks: dict[str, bool] = {
+        "production_mode": IS_PRODUCTION,
+        "cors_not_wildcard": bool(ALLOWED_ORIGINS) and "*" not in ALLOWED_ORIGINS,
+        "cors_https_only": bool(ALLOWED_ORIGINS) and all(
+            origin.startswith("https://") for origin in ALLOWED_ORIGINS
+        ),
+        "api_docs_disabled": app.docs_url is None and app.openapi_url is None,
+        "database_exists": DB_PATH.exists(),
+        "schema_current": _schema_version() == CURRENT_SCHEMA_VERSION,
+        "build_identified": BUILD_SHA != "development",
+        "session_lifetime_bounded": 1 <= SESSION_LIFETIME_DAYS <= 90,
+    }
+
+    database_integrity = "missing"
+    if DB_PATH.exists():
+        try:
+            with connect() as db:
+                row = db.execute("PRAGMA integrity_check").fetchone()
+                database_integrity = str(row[0]).lower() if row else "unknown"
+        except sqlite3.Error:
+            database_integrity = "error"
+    checks["database_integrity"] = database_integrity == "ok"
+
+    backups = _backup_files()
+    if backups:
+        age = datetime.now(timezone.utc).timestamp() - backups[0].stat().st_mtime
+        checks["recent_backup"] = age <= max(BACKUP_INTERVAL_SECONDS * 2, 172800)
+    else:
+        checks["recent_backup"] = False
+
+    return {
+        "ready": all(checks.values()),
+        "checks": checks,
+        "allowed_origins": ALLOWED_ORIGINS,
+        "database_integrity": database_integrity,
+    }
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,6 +155,9 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    if request.url.path.startswith("/api/auth/") or request.url.path.startswith("/admin"):
+        response.headers["Cache-Control"] = "no-store"
     if IS_PRODUCTION:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
@@ -2036,11 +2079,13 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
+    readiness = _production_readiness()
     return {
         "status": "ok",
         "version": API_VERSION,
         "build_sha": BUILD_SHA,
         "schema_version": _schema_version(),
+        "production_ready": readiness["ready"],
     }
 
 
@@ -2304,6 +2349,21 @@ def system_status(
         "members": members,
         "registered_devices": registered_devices,
         "queued_push": queued_push,
+    }
+
+
+@app.get("/api/system/readiness")
+def system_readiness(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    readiness = _production_readiness()
+    return {
+        **readiness,
+        "environment": APP_ENV,
+        "api_version": API_VERSION,
+        "build_sha": BUILD_SHA,
+        "session_lifetime_days": SESSION_LIFETIME_DAYS,
+        "expected_schema_version": CURRENT_SCHEMA_VERSION,
     }
 
 
