@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1, feature/white-label-push-v1 ]
     tags:
       - 'v*'
 
@@ -18,6 +18,10 @@ jobs:
       APP_DISPLAY_NAME: ${{ vars.WHITE_LABEL_APP_NAME || 'FLAPAMAMAKU' }}
       APP_DISPLAY_SUBTITLE: ${{ vars.WHITE_LABEL_APP_SUBTITLE || 'Fasnachtsgruppe Luzern' }}
       WHITE_LABEL_APP_ICON_URL: ${{ vars.WHITE_LABEL_APP_ICON_URL || '' }}
+      FIREBASE_API_KEY_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_API_KEY || secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+      FIREBASE_APP_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_APP_ID || secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
+      FIREBASE_MESSAGING_SENDER_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_MESSAGING_SENDER_ID || secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_PROJECT_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_PROJECT_ID || secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -447,10 +451,10 @@ jobs:
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           APP_NAME: ${{ env.APP_DISPLAY_NAME }}
           APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
-          FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
-          FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
+          FIREBASE_API_KEY: ${{ env.FIREBASE_API_KEY_VALUE }}
+          FIREBASE_APP_ID: ${{ env.FIREBASE_APP_ID_VALUE }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID_VALUE }}
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID_VALUE }}
         run: |
           flutter build apk --release \
             --build-name="$APP_VERSION" \
@@ -472,10 +476,10 @@ jobs:
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           APP_NAME: ${{ env.APP_DISPLAY_NAME }}
           APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
-          FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
-          FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
+          FIREBASE_API_KEY: ${{ env.FIREBASE_API_KEY_VALUE }}
+          FIREBASE_APP_ID: ${{ env.FIREBASE_APP_ID_VALUE }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID_VALUE }}
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID_VALUE }}
         run: |
           flutter build apk --release --split-per-abi \
             --build-name="$APP_VERSION" \
@@ -497,10 +501,10 @@ jobs:
           APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
           APP_NAME: ${{ env.APP_DISPLAY_NAME }}
           APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
-          FIREBASE_API_KEY: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
-          FIREBASE_APP_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
+          FIREBASE_API_KEY: ${{ env.FIREBASE_API_KEY_VALUE }}
+          FIREBASE_APP_ID: ${{ env.FIREBASE_APP_ID_VALUE }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID_VALUE }}
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID_VALUE }}
         run: |
           flutter build appbundle --release \
             --build-name="$APP_VERSION" \
