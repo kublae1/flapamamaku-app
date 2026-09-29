@@ -59,8 +59,14 @@ class AppStore extends ChangeNotifier {
   Map<String, dynamic>? currentUser;
   String? authError;
   int themeColorValue = 0xFF8A101B;
-  String appName = 'FLAPAMAMAKU';
-  String appSubtitle = 'Fasnachtsgruppe Luzern';
+  String appName = const String.fromEnvironment(
+    'APP_NAME',
+    defaultValue: 'FLAPAMAMAKU',
+  );
+  String appSubtitle = const String.fromEnvironment(
+    'APP_SUBTITLE',
+    defaultValue: 'Fasnachtsgruppe Luzern',
+  );
   String appLogoUrl = '';
   String clubDescription = '';
   String websiteUrl = '';
@@ -229,10 +235,10 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
 
     if (api.isConfigured) {
+      // Branding is public and must be available before the first login so a
+      // white-label instance never shows FLAPAMAMAKU branding to another club.
+      await _loadRemoteBranding(prefs);
       await restoreSession();
-      if (isAuthenticated) {
-        await _loadRemoteBranding(prefs);
-      }
       _startSyncTimer();
     } else {
       authReady = true;
