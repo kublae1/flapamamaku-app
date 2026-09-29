@@ -115,3 +115,24 @@ Das Icon wird während des Android-Builds geladen und sowohl als Launcher-Icon a
 Wenn keine White-Label-Werte gesetzt sind, bleiben die bestehenden FLAPAMAMAKU-Werte und das FLAPAMAMAKU-App-Icon unverändert.
 
 Die Android Application ID und die Release-Signierung werden durch diese Branding-Einstellungen nicht verändert.
+
+
+## White-Label Push / Firebase
+
+Jede Vereinsinstanz kann ein eigenes Firebase-Projekt verwenden. Dafür können folgende GitHub Repository Secrets gesetzt werden:
+
+- `WHITE_LABEL_FIREBASE_API_KEY`
+- `WHITE_LABEL_FIREBASE_APP_ID`
+- `WHITE_LABEL_FIREBASE_MESSAGING_SENDER_ID`
+- `WHITE_LABEL_FIREBASE_PROJECT_ID`
+
+Sind diese White-Label-Secrets nicht gesetzt, verwendet der Android-Build weiterhin die bestehenden FLAPAMAMAKU-Secrets:
+
+- `FLAPAMAMAKU_FIREBASE_API_KEY`
+- `FLAPAMAMAKU_FIREBASE_APP_ID`
+- `FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID`
+- `FLAPAMAMAKU_FIREBASE_PROJECT_ID`
+
+Dadurch bleibt die bestehende FLAPAMAMAKU-Push-Konfiguration unverändert, während weitere Vereine ihre Push-Benachrichtigungen vollständig getrennt betreiben können.
+
+Der sichtbare Name des Android-Benachrichtigungskanals und der Fallback-Titel übernehmen den jeweiligen `WHITE_LABEL_APP_NAME`.
