@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -180,6 +180,42 @@ jobs:
               assert exc.status_code == 401
 
           print("security hardening ok")
+          PY
+
+      - name: Test production readiness
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-readiness-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-readiness-backups
+          FLAPAMAMAKU_ENV: production
+          FLAPAMAMAKU_ALLOWED_ORIGINS: https://app.example.test
+          FLAPAMAMAKU_BUILD_SHA: readiness-test-build
+          FLAPAMAMAKU_SESSION_LIFETIME_DAYS: "30"
+        run: |
+          rm -f /tmp/flapamamaku-readiness-test.db
+          rm -rf /tmp/flapamamaku-readiness-backups
+          python - <<'PY'
+          from app.main import (
+              _create_database_backup,
+              _production_readiness,
+              app,
+              init_db,
+          )
+
+          init_db()
+          _create_database_backup("readiness-test")
+          result = _production_readiness()
+
+          assert app.docs_url is None
+          assert app.openapi_url is None
+          assert result["ready"] is True, result
+          assert result["checks"]["production_mode"] is True
+          assert result["checks"]["cors_not_wildcard"] is True
+          assert result["checks"]["cors_https_only"] is True
+          assert result["checks"]["database_integrity"] is True
+          assert result["checks"]["recent_backup"] is True
+          assert result["checks"]["build_identified"] is True
+          assert result["checks"]["session_lifetime_bounded"] is True
+          print("production readiness ok")
           PY
 
       - name: Build Docker image
