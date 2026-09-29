@@ -3,7 +3,7 @@ name: Publish Backend Image
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/backend-foundation-hardening-v1, feature/admin-cms-refresh-v1, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/backup-restore-v1, feature/security-hardening-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/backend-foundation-hardening-v1, feature/admin-cms-refresh-v1, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/publish-backend-image.yml"
