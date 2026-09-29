@@ -136,3 +136,28 @@ Sind diese White-Label-Secrets nicht gesetzt, verwendet der Android-Build weiter
 Dadurch bleibt die bestehende FLAPAMAMAKU-Push-Konfiguration unverändert, während weitere Vereine ihre Push-Benachrichtigungen vollständig getrennt betreiben können.
 
 Der sichtbare Name des Android-Benachrichtigungskanals und der Fallback-Titel übernehmen den jeweiligen `WHITE_LABEL_APP_NAME`.
+
+
+## White-Label Build-Profile für mehrere Vereine
+
+Für bis zu 10 Testvereine kann jede App-Instanz ein eigenes Build-Profil unter
+`config/white-label/<profil>.json` erhalten.
+
+Ein Build-Profil enthält nur technische Startwerte wie:
+
+- Vereins-/App-Name
+- Untertitel
+- öffentliche API-Adresse
+- optionales App-Icon
+
+Das vorhandene Referenzprofil ist:
+
+`config/white-label/flapamamaku.json`
+
+FLAPAMAMAKU bleibt das Standardprofil und damit die Referenzinstanz.
+
+Beim manuellen Android-Build kann über den Workflow-Eingabewert `profile` ein anderes Profil ausgewählt werden. Dadurch kann später für Verein 2 bis Verein 10 jeweils ein eigener Build erzeugt werden, ohne die FLAPAMAMAKU-Konfiguration umzuschreiben.
+
+Wichtig: Das Build-Profil ersetzt **nicht** die autonome Vereinsverwaltung. Laufende Inhalte und Vereinsdaten wie Mitglieder, Termine, News, Bilder, Dokumente, Module, Farben, Kontaktdaten, Benutzer und Berechtigungen werden weiterhin über die jeweilige Admin-Oberfläche und das jeweilige Backend verwaltet.
+
+Ein Verein benötigt dafür keinen eigenen Docker-Server. Das gleiche Profil-/Instanzmodell kann sowohl auf einem eigenen Docker-Host als auch auf einer zentral betriebenen Cloud-Infrastruktur verwendet werden.
