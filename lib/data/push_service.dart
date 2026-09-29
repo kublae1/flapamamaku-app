@@ -25,6 +25,10 @@ class PushService {
   static const _appId = String.fromEnvironment('FIREBASE_APP_ID');
   static const _senderId = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
   static const _projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
+  static const _appName = String.fromEnvironment(
+    'APP_NAME',
+    defaultValue: 'FLAPAMAMAKU',
+  );
 
   bool get isConfigured =>
       _apiKey.isNotEmpty &&
@@ -59,9 +63,9 @@ class PushService {
         );
 
         if (Platform.isAndroid) {
-          const channel = AndroidNotificationChannel(
+          final channel = AndroidNotificationChannel(
             'flapamamaku_push',
-            'FLAPAMAMAKU Benachrichtigungen',
+            '$_appName Benachrichtigungen',
             description: 'News, Termine und neue Vereinsinhalte',
             importance: Importance.high,
           );
@@ -106,22 +110,22 @@ class PushService {
       _foregroundSubscription = FirebaseMessaging.onMessage.listen((message) async {
         final title = message.notification?.title ??
             message.data['title']?.toString() ??
-            'FLAPAMAMAKU';
+            _appName;
         final body = message.notification?.body ??
             message.data['body']?.toString() ??
             '';
         final route = message.data['route']?.toString() ?? '';
 
-        const androidDetails = AndroidNotificationDetails(
+        final androidDetails = AndroidNotificationDetails(
           'flapamamaku_push',
-          'FLAPAMAMAKU Benachrichtigungen',
+          '$_appName Benachrichtigungen',
           channelDescription: 'News, Termine und neue Vereinsinhalte',
           importance: Importance.high,
           priority: Priority.high,
           icon: 'ic_stat_flapamamaku',
-          largeIcon: DrawableResourceAndroidBitmap('ic_launcher'),
+          largeIcon: const DrawableResourceAndroidBitmap('ic_launcher'),
         );
-        const details = NotificationDetails(android: androidDetails);
+        final details = NotificationDetails(android: androidDetails);
         await _localNotifications.show(
           message.messageId?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
           title,
