@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1 ]
     tags:
       - 'v*'
 
@@ -17,6 +17,7 @@ jobs:
       ANDROID_APPLICATION_ID: ${{ vars.FLAPAMAMAKU_ANDROID_APPLICATION_ID || 'ch.flapamamaku.app' }}
       APP_DISPLAY_NAME: ${{ vars.WHITE_LABEL_APP_NAME || 'FLAPAMAMAKU' }}
       APP_DISPLAY_SUBTITLE: ${{ vars.WHITE_LABEL_APP_SUBTITLE || 'Fasnachtsgruppe Luzern' }}
+      WHITE_LABEL_APP_ICON_URL: ${{ vars.WHITE_LABEL_APP_ICON_URL || '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -365,6 +366,42 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Configure white label app icon
+        shell: bash
+        run: |
+          if [ -z "$WHITE_LABEL_APP_ICON_URL" ]; then
+            echo "Using bundled FLAPAMAMAKU app icon."
+            exit 0
+          fi
+
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          url = os.environ["WHITE_LABEL_APP_ICON_URL"].strip()
+          parsed = urlparse(url)
+          if parsed.scheme != "https" or not parsed.netloc:
+              raise SystemExit("WHITE_LABEL_APP_ICON_URL must be a valid HTTPS URL")
+          print(f"Downloading white-label icon from {parsed.netloc}")
+          PY
+
+          curl --fail --silent --show-error --location             --connect-timeout 15             --max-time 30             "$WHITE_LABEL_APP_ICON_URL"             --output "/tmp/white-label-app-icon.png"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("/tmp/white-label-app-icon.png")
+          data = source.read_bytes()
+          if len(data) < 8 or data[:8] != b"\x89PNG\r\n\x1a\n":
+              raise SystemExit("White-label app icon must be a PNG file")
+          if len(data) > 5 * 1024 * 1024:
+              raise SystemExit("White-label app icon is larger than 5 MiB")
+
+          target = Path("assets/FLAPAMAMAKU App-Icon.png")
+          target.write_bytes(data)
+          print(f"White-label app icon installed: {len(data)} bytes")
+          PY
+
       - name: Generate Android launcher icons
         run: dart run flutter_launcher_icons
 
@@ -513,5 +550,5 @@ jobs:
             build/app/outputs/flutter-apk/app-*-release.apk \\
             build/app/outputs/bundle/release/app-release.aab \\
             build/app/outputs/SHA256SUMS.txt \\
-            --title "FLAPAMAMAKU $GITHUB_REF_NAME" \\
+            --title "$APP_DISPLAY_NAME $GITHUB_REF_NAME" \\
             --generate-notes
