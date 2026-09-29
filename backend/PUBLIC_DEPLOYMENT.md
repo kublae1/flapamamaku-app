@@ -99,3 +99,19 @@ Vor der Freigabe prüfen:
 - Android-Build mit der öffentlichen Instanz-URL
 
 Erst danach wird die jeweilige Vereinsinstanz freigegeben.
+
+
+## White-Label Android-Identität
+
+Für eine weitere Vereinsinstanz können in GitHub Repository Variables folgende Werte gesetzt werden:
+
+- `WHITE_LABEL_API_BASE_URL` — öffentliche HTTPS-Adresse des Vereinsservers
+- `WHITE_LABEL_APP_NAME` — Anzeigename der App
+- `WHITE_LABEL_APP_SUBTITLE` — Untertitel vor der Anmeldung
+- `WHITE_LABEL_APP_ICON_URL` — öffentliche HTTPS-Adresse zu einem PNG-App-Icon
+
+Das Icon wird während des Android-Builds geladen und sowohl als Launcher-Icon als auch als lokales Fallback-Logo verwendet. Die Quelldatei im Repository wird dabei nicht dauerhaft überschrieben.
+
+Wenn keine White-Label-Werte gesetzt sind, bleiben die bestehenden FLAPAMAMAKU-Werte und das FLAPAMAMAKU-App-Icon unverändert.
+
+Die Android Application ID und die Release-Signierung werden durch diese Branding-Einstellungen nicht verändert.
