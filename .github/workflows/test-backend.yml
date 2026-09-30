@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -82,7 +82,7 @@ jobs:
               ).fetchone()
               assert migration is not None
               assert migration["name"] == "multi-tenant-clubs-foundation"
-              assert CURRENT_SCHEMA_VERSION == 12
+              assert CURRENT_SCHEMA_VERSION == 13
 
               member = db.execute(
                   """
@@ -208,7 +208,7 @@ jobs:
           init_db()
 
           with connect() as db:
-              assert CURRENT_SCHEMA_VERSION == 12
+              assert CURRENT_SCHEMA_VERSION == 13
               assert db.execute("SELECT id, club_id FROM news WHERE id = 41").fetchone()[:] == (41, 1)
               assert db.execute("SELECT id, club_id FROM events WHERE id = 51").fetchone()[:] == (51, 1)
               assert db.execute("SELECT id, club_id FROM members WHERE id = 61").fetchone()[:] == (61, 1)
@@ -375,7 +375,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 12
+          assert CURRENT_SCHEMA_VERSION == 13
 
           with connect() as db:
               now = datetime.now(timezone.utc).isoformat()
@@ -578,7 +578,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 12
+          assert CURRENT_SCHEMA_VERSION == 13
 
           with connect() as db:
               features = _club_features(db, 1)
@@ -626,6 +626,174 @@ jobs:
 
           assert _app_config()["show_news"] is True
           print("package 6 club feature flags ok")
+          PY
+
+      - name: Test package 7 tenant-aware admin
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-package7-admin.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-package7-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-package7-admin.db
+          rm -rf /tmp/flapamamaku-package7-backups
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from fastapi import HTTPException
+          from pathlib import Path
+          from app.main import (
+              ClubSwitchPayload,
+              CURRENT_SCHEMA_VERSION,
+              _token_hash,
+              accessible_clubs,
+              connect,
+              current_user,
+              init_db,
+              switch_active_club,
+          )
+
+          init_db()
+          assert CURRENT_SCHEMA_VERSION == 13
+          now = datetime.now(timezone.utc)
+          expires = (now + timedelta(days=1)).isoformat()
+
+          with connect() as db:
+              club2 = db.execute(
+                  """
+                  INSERT INTO clubs (
+                      slug, name, short_name, active,
+                      primary_color, secondary_color, created_at, updated_at
+                  ) VALUES (
+                      'testverein', 'Testverein', 'Testverein', 1,
+                      '#123456', '#FFFFFF', ?, ?
+                  )
+                  """,
+                  (now.isoformat(), now.isoformat()),
+              ).lastrowid
+
+              super_id = db.execute(
+                  """
+                  INSERT INTO users (
+                      username, password_hash, password_salt, active,
+                      can_news, can_events, can_members, can_documents,
+                      can_photos, can_gallery_upload, can_polls, can_links,
+                      can_contact, can_about, can_admin_page,
+                      can_manage_settings, can_manage_users,
+                      role_key, permission_overrides, created_at
+                  ) VALUES (
+                      'superadmin', 'x', 'x', 1,
+                      1,1,1,1,1,1,1,1,1,1,1,1,1,
+                      'admin', '{}', ?
+                  )
+                  """,
+                  (now.isoformat(),),
+              ).lastrowid
+              admin_id = db.execute(
+                  """
+                  INSERT INTO users (
+                      username, password_hash, password_salt, active,
+                      can_news, can_events, can_members, can_documents,
+                      can_photos, can_gallery_upload, can_polls, can_links,
+                      can_contact, can_about, can_admin_page,
+                      can_manage_settings, can_manage_users,
+                      role_key, permission_overrides, created_at
+                  ) VALUES (
+                      'clubadmin', 'x', 'x', 1,
+                      1,1,1,1,1,1,1,1,1,1,1,1,1,
+                      'admin', '{}', ?
+                  )
+                  """,
+                  (now.isoformat(),),
+              ).lastrowid
+
+              db.execute(
+                  """
+                  INSERT INTO user_clubs
+                      (user_id, club_id, role, active, created_at, updated_at)
+                  VALUES (?, 1, 'super_admin', 1, ?, ?)
+                  """,
+                  (super_id, now.isoformat(), now.isoformat()),
+              )
+              db.execute(
+                  """
+                  INSERT INTO user_clubs
+                      (user_id, club_id, role, active, created_at, updated_at)
+                  VALUES (?, 1, 'club_admin', 1, ?, ?)
+                  """,
+                  (admin_id, now.isoformat(), now.isoformat()),
+              )
+
+              super_token = "package7-super-token"
+              admin_token = "package7-admin-token"
+              db.execute(
+                  """
+                  INSERT INTO sessions
+                      (token_hash, user_id, expires_at, created_at, active_club_id)
+                  VALUES (?, ?, ?, ?, 1)
+                  """,
+                  (_token_hash(super_token), super_id, expires, now.isoformat()),
+              )
+              db.execute(
+                  """
+                  INSERT INTO sessions
+                      (token_hash, user_id, expires_at, created_at, active_club_id)
+                  VALUES (?, ?, ?, ?, 1)
+                  """,
+                  (_token_hash(admin_token), admin_id, expires, now.isoformat()),
+              )
+              db.commit()
+
+          super_user = current_user(authorization=f"Bearer {super_token}")
+          club_admin = current_user(authorization=f"Bearer {admin_token}")
+          assert super_user["is_super_admin"] is True
+          assert super_user["current_club_id"] == 1
+          assert club_admin["is_super_admin"] is False
+          assert club_admin["club_role"] == "club_admin"
+
+          clubs = accessible_clubs(user=super_user)
+          assert {club["slug"] for club in clubs} == {"flapamamaku", "testverein"}
+
+          try:
+              switch_active_club(
+                  ClubSwitchPayload(club_id=club2),
+                  authorization=f"Bearer {admin_token}",
+                  user=club_admin,
+              )
+              raise AssertionError("club admin switched to foreign club")
+          except HTTPException as exc:
+              assert exc.status_code == 403
+
+          switched = switch_active_club(
+              ClubSwitchPayload(club_id=club2),
+              authorization=f"Bearer {super_token}",
+              user=super_user,
+          )
+          assert switched["club_id"] == club2
+          assert switched["club_role"] == "super_admin"
+
+          after = current_user(authorization=f"Bearer {super_token}")
+          assert after["current_club_id"] == club2
+          assert after["is_super_admin"] is True
+
+          with connect() as db:
+              assert db.execute(
+                  "SELECT active_club_id FROM sessions WHERE token_hash = ?",
+                  (_token_hash(admin_token),),
+              ).fetchone()[0] == 1
+              assert db.execute(
+                  "SELECT active_club_id FROM sessions WHERE token_hash = ?",
+                  (_token_hash(super_token),),
+              ).fetchone()[0] == club2
+
+          admin_html = Path("static/admin.html").read_text(encoding="utf-8")
+          for marker in (
+              'id="tenant-context-card"',
+              'id="tenant-switch"',
+              'id="club-feature-list"',
+              "Aktueller Mandant",
+          ):
+              assert marker in admin_html, marker
+
+          print("package 7 tenant-aware admin ok")
           PY
 
       - name: Test backup and restore
@@ -959,7 +1127,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 12
+          assert CURRENT_SCHEMA_VERSION == 13
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
           assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
