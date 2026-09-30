@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.53"
+API_VERSION = "0.8.54"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2489,6 +2489,7 @@ def system_status(
         "overall_status": overall_status,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "api_version": API_VERSION,
+        "instance_id": INSTANCE_ID,
         "build_sha": BUILD_SHA,
         "schema_version": _schema_version(),
         "expected_schema_version": CURRENT_SCHEMA_VERSION,
@@ -2521,6 +2522,7 @@ def system_readiness(
     return {
         **readiness,
         "environment": APP_ENV,
+        "instance_id": INSTANCE_ID,
         "api_version": API_VERSION,
         "build_sha": BUILD_SHA,
         "session_lifetime_days": SESSION_LIFETIME_DAYS,
