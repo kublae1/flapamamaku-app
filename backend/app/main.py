@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.52"
+API_VERSION = "0.8.53"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +68,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -575,6 +575,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (4, "app-config-club-details"),
         (5, "app-config-modules"),
         (6, "user-roles-and-permission-overrides"),
+        (7, "club-instance-binding"),
     ]
     applied = {
         int(row["version"])
@@ -609,12 +610,17 @@ def _schema_version() -> int:
 def _backup_files() -> list[Path]:
     if not BACKUP_DIR.exists():
         return []
+    patterns = [f"{INSTANCE_ID}-*.db"]
+    # Keep existing FLAPAMAMAKU backups visible after upgrading from schema <= 6.
+    if INSTANCE_ID == "flapamamaku":
+        patterns.append("flapamamaku-*.db")
+    files: dict[Path, None] = {}
+    for pattern in patterns:
+        for path in BACKUP_DIR.glob(pattern):
+            if path.is_file():
+                files[path] = None
     return sorted(
-        (
-            path
-            for path in BACKUP_DIR.glob("flapamamaku-*.db")
-            if path.is_file()
-        ),
+        files,
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
@@ -649,7 +655,7 @@ def _create_database_backup(reason: str = "automatic") -> Path:
         if char.isalnum() or char in {"-", "_"}
     ) or "backup"
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    target = BACKUP_DIR / f"flapamamaku-{timestamp}-{safe_reason}.db"
+    target = BACKUP_DIR / f"{INSTANCE_ID}-{timestamp}-{safe_reason}.db"
 
     with sqlite3.connect(DB_PATH) as source, sqlite3.connect(target) as destination:
         source.backup(destination)
@@ -690,9 +696,15 @@ def _validate_restore_database(path: Path) -> int:
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             }
-            required = {"users", "members", "sessions", "schema_migrations"}
+            required = {
+                "users",
+                "members",
+                "sessions",
+                "schema_migrations",
+                "app_config",
+            }
             if not required.issubset(tables):
-                raise RuntimeError("Backup does not contain a valid FLAPAMAMAKU database")
+                raise RuntimeError("Backup does not contain a valid club database")
 
             row = db.execute(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
@@ -702,6 +714,32 @@ def _validate_restore_database(path: Path) -> int:
                 raise RuntimeError(
                     f"Backup schema {schema_version} is newer than supported schema "
                     f"{CURRENT_SCHEMA_VERSION}"
+                )
+
+            app_columns = {
+                str(row[1])
+                for row in db.execute("PRAGMA table_info(app_config)").fetchall()
+            }
+            if "instance_id" in app_columns:
+                instance_row = db.execute(
+                    "SELECT instance_id FROM app_config WHERE id = 1"
+                ).fetchone()
+                source_instance = (
+                    str(instance_row[0]).strip().lower()
+                    if instance_row is not None and instance_row[0]
+                    else ""
+                )
+                if not source_instance:
+                    raise RuntimeError("Backup has no club instance identity")
+                if source_instance != INSTANCE_ID:
+                    raise RuntimeError(
+                        "Backup belongs to another club instance "
+                        f"({source_instance}); expected {INSTANCE_ID}"
+                    )
+            elif INSTANCE_ID != "flapamamaku":
+                raise RuntimeError(
+                    "Legacy backup has no club instance identity and cannot be "
+                    "restored into this club"
                 )
             return schema_version
     except sqlite3.Error as exc:
@@ -769,6 +807,26 @@ def init_db() -> None:
             """,
             (datetime.now(timezone.utc).isoformat(),),
         )
+        _ensure_column(db, "app_config", "instance_id", "TEXT NOT NULL DEFAULT ''")
+        instance_row = db.execute(
+            "SELECT instance_id FROM app_config WHERE id = 1"
+        ).fetchone()
+        stored_instance = (
+            str(instance_row["instance_id"]).strip().lower()
+            if instance_row is not None and instance_row["instance_id"]
+            else ""
+        )
+        if stored_instance and stored_instance != INSTANCE_ID:
+            raise RuntimeError(
+                "Database belongs to another club instance "
+                f"({stored_instance}); configured instance is {INSTANCE_ID}"
+            )
+        if not stored_instance:
+            db.execute(
+                "UPDATE app_config SET instance_id = ? WHERE id = 1",
+                (INSTANCE_ID,),
+            )
+
         _ensure_column(db, "app_config", "logo_data", "BLOB")
         _ensure_column(db, "app_config", "logo_mime", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "app_config", "club_description", "TEXT NOT NULL DEFAULT ''")
