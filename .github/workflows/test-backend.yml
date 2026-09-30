@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -365,6 +365,63 @@ jobs:
               assert "can_manage_settings" in columns
 
           print("separate club settings permission ok")
+          PY
+
+      - name: Test settings permission integration
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-settings-integration.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-settings-integration-backups
+        run: |
+          rm -f /tmp/flapamamaku-settings-integration.db
+          rm -rf /tmp/flapamamaku-settings-integration-backups
+          python - <<'PY'
+          from fastapi import HTTPException
+          from app.main import (
+              ROLE_DEFINITIONS,
+              _serialize_user,
+              init_db,
+              require,
+          )
+
+          init_db()
+
+          board = _serialize_user({
+              "id": 1,
+              "username": "board-user",
+              "active": 1,
+              "role_key": "board",
+              "permission_overrides": "{}",
+          })
+          assert board["can_manage_settings"] is True
+          assert board["can_manage_users"] is False
+
+          settings_guard = require("can_manage_settings")
+          users_guard = require("can_manage_users")
+
+          assert settings_guard(board)["id"] == 1
+
+          try:
+              users_guard(board)
+              raise AssertionError("board role incorrectly received user-management access")
+          except HTTPException as exc:
+              assert exc.status_code == 403
+
+          overridden = _serialize_user({
+              "id": 2,
+              "username": "limited-board",
+              "active": 1,
+              "role_key": "board",
+              "permission_overrides": '{"can_manage_settings": false}',
+          })
+          assert overridden["can_manage_settings"] is False
+
+          try:
+              settings_guard(overridden)
+              raise AssertionError("settings override deny was ignored")
+          except HTTPException as exc:
+              assert exc.status_code == 403
+
+          print("settings permission integration ok")
           PY
 
       - name: Test production readiness
