@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.61"
+API_VERSION = "0.8.62"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +68,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -225,6 +225,23 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
 }
 
 
+CLUB_FEATURE_DEFAULTS: dict[str, tuple[str, bool]] = {
+    "news": ("News", True),
+    "events": ("Termine", True),
+    "members": ("Mitglieder", True),
+    "documents": ("Dokumente", True),
+    "gallery": ("Galerie", True),
+    "photos": ("Fotoalben", True),
+    "sujet_next": ("Sujet nächstes Jahr", True),
+    "sujet_archive": ("Vergangene Sujet", True),
+    "polls": ("Umfragen", True),
+    "links": ("Links", True),
+    "push_notifications": ("Push-Nachrichten", True),
+    "calendar": ("Kalender", True),
+    "participant_lists": ("Teilnehmerlisten", True),
+}
+
+
 def _normalize_role_key(value: str) -> str:
     role_key = str(value or "member").strip().lower()
     if role_key not in ROLE_DEFINITIONS:
@@ -348,6 +365,11 @@ class AppConfigPayload(BaseModel):
     label_polls: str = Field(default="Umfragen", min_length=1, max_length=80)
     show_links: bool = True
     label_links: str = Field(default="Links", min_length=1, max_length=80)
+
+
+class ClubFeaturesPayload(BaseModel):
+    features: dict[str, bool]
+    labels: dict[str, str] = Field(default_factory=dict)
 
 
 class PollVotePayload(BaseModel):
@@ -606,6 +628,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (9, "multi-tenant-clubs-foundation"),
         (10, "flapamamaku-club-data-migration"),
         (11, "user-club-memberships"),
+        (12, "club-features"),
     ]
     applied = {
         int(row["version"])
@@ -863,6 +886,24 @@ def init_db() -> None:
 
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS club_features (
+                club_id INTEGER NOT NULL,
+                feature_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+                label TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (club_id, feature_key),
+                FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_club_features_club_id ON club_features(club_id)"
+        )
+
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS app_config (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 app_name TEXT NOT NULL DEFAULT 'FLAPAMAMAKU',
@@ -948,6 +989,54 @@ def init_db() -> None:
         _ensure_column(db, "app_config", "label_polls", "TEXT NOT NULL DEFAULT 'Umfragen'")
         _ensure_column(db, "app_config", "show_links", "INTEGER NOT NULL DEFAULT 1")
         _ensure_column(db, "app_config", "label_links", "TEXT NOT NULL DEFAULT 'Links'")
+
+        feature_now = datetime.now(timezone.utc).isoformat()
+        legacy_features = db.execute(
+            """
+            SELECT
+                show_sujet, label_sujet,
+                show_archive, label_archive,
+                show_photos, label_photos,
+                show_documents, label_documents,
+                show_polls, label_polls,
+                show_links, label_links
+            FROM app_config
+            WHERE id = 1
+            """
+        ).fetchone()
+        for club in db.execute("SELECT id FROM clubs").fetchall():
+            club_id = int(club["id"])
+            for feature_key, (default_label, default_enabled) in CLUB_FEATURE_DEFAULTS.items():
+                enabled = default_enabled
+                label = default_label
+                if club_id == 1 and legacy_features is not None:
+                    legacy_map = {
+                        "sujet_next": ("show_sujet", "label_sujet"),
+                        "sujet_archive": ("show_archive", "label_archive"),
+                        "photos": ("show_photos", "label_photos"),
+                        "documents": ("show_documents", "label_documents"),
+                        "polls": ("show_polls", "label_polls"),
+                        "links": ("show_links", "label_links"),
+                    }
+                    if feature_key in legacy_map:
+                        show_key, label_key = legacy_map[feature_key]
+                        enabled = bool(legacy_features[show_key])
+                        label = str(legacy_features[label_key] or default_label)
+                db.execute(
+                    """
+                    INSERT OR IGNORE INTO club_features (
+                        club_id, feature_key, enabled, label, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        club_id,
+                        feature_key,
+                        int(enabled),
+                        label,
+                        feature_now,
+                        feature_now,
+                    ),
+                )
 
         db.execute(
             """
