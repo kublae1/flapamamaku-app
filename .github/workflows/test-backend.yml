@@ -808,207 +808,250 @@ jobs:
           rm -f /tmp/flapamamaku-package8-second-club.db
           rm -rf /tmp/flapamamaku-package8-backups
           python - <<'PY'
+          import asyncio
+          from datetime import datetime, timedelta, timezone
           from io import BytesIO
 
-          from fastapi.testclient import TestClient
+          from fastapi import UploadFile
           from PIL import Image
 
-          from app.main import CURRENT_SCHEMA_VERSION, app, connect, init_db
+          from app.main import (
+              AppConfigPayload,
+              ClubCreatePayload,
+              ClubSwitchPayload,
+              CURRENT_SCHEMA_VERSION,
+              EventPayload,
+              MemberPayload,
+              NewsPayload,
+              UserPayload,
+              _app_config,
+              _token_hash,
+              accessible_clubs,
+              connect,
+              create_club,
+              create_row,
+              current_user,
+              get_app_logo,
+              get_users,
+              init_db,
+              list_rows,
+              post_user,
+              put_app_config,
+              switch_active_club,
+              upload_app_logo,
+          )
 
           init_db()
           assert CURRENT_SCHEMA_VERSION == 14
-          client = TestClient(app)
+          now = datetime.now(timezone.utc)
+          expires = (now + timedelta(days=1)).isoformat()
 
-          bootstrap = client.post(
-              "/api/auth/bootstrap",
-              json={
-                  "username": "platform-admin",
-                  "password": "Testpasswort123!",
-                  "member_id": None,
-              },
-          )
-          assert bootstrap.status_code == 200, bootstrap.text
+          with connect() as db:
+              super_id = db.execute(
+                  """
+                  INSERT INTO users (
+                      username, password_hash, password_salt, active,
+                      can_news, can_events, can_members, can_documents,
+                      can_photos, can_gallery_upload, can_polls, can_links,
+                      can_contact, can_about, can_admin_page,
+                      can_manage_settings, can_manage_users,
+                      role_key, permission_overrides, created_at
+                  ) VALUES (
+                      'platform-admin', 'x', 'x', 1,
+                      1,1,1,1,1,1,1,1,1,1,1,1,1,
+                      'admin', '{}', ?
+                  )
+                  """,
+                  (now.isoformat(),),
+              ).lastrowid
+              db.execute(
+                  """
+                  INSERT INTO user_clubs (
+                      user_id, club_id, role, active, created_at, updated_at
+                  ) VALUES (?, 1, 'super_admin', 1, ?, ?)
+                  """,
+                  (super_id, now.isoformat(), now.isoformat()),
+              )
+              token = "package8-super-token"
+              db.execute(
+                  """
+                  INSERT INTO sessions (
+                      token_hash, user_id, expires_at, created_at, active_club_id
+                  ) VALUES (?, ?, ?, ?, 1)
+                  """,
+                  (_token_hash(token), super_id, expires, now.isoformat()),
+              )
+              db.commit()
 
-          login = client.post(
-              "/api/auth/login",
-              json={
-                  "username": "platform-admin",
-                  "password": "Testpasswort123!",
-              },
-          )
-          assert login.status_code == 200, login.text
-          token = login.json()["token"]
-          headers = {"Authorization": f"Bearer {token}"}
-          assert login.json()["user"]["is_super_admin"] is True
+          headers = f"Bearer {token}"
+          super_user = current_user(authorization=headers)
+          assert super_user["is_super_admin"] is True
+          assert super_user["current_club_id"] == 1
 
-          own_news = client.post(
-              "/api/news",
-              headers=headers,
-              json={"title": "FLAPA News", "text": "Nur FLAPAMAMAKU", "date": "30.09.2026"},
+          own_news = create_row(
+              "news",
+              NewsPayload(
+                  title="FLAPA News",
+                  text="Nur FLAPAMAMAKU",
+                  date="30.09.2026",
+              ),
           )
-          assert own_news.status_code == 200, own_news.text
-          own_event = client.post(
-              "/api/events",
-              headers=headers,
-              json={
-                  "event_date": "2026-10-01",
-                  "day": "01",
-                  "month": "OKT",
-                  "title": "FLAPA Termin",
-                  "location": "Luzern",
-                  "time": "19:00",
-              },
+          own_event = create_row(
+              "events",
+              EventPayload(
+                  event_date="2026-10-01",
+                  day="01",
+                  month="OKT",
+                  title="FLAPA Termin",
+                  location="Luzern",
+                  time="19:00",
+              ),
           )
-          assert own_event.status_code == 200, own_event.text
-          own_member = client.post(
-              "/api/members",
-              headers=headers,
-              json={"name": "FLAPA Mitglied", "role": "Mitglied", "since": "2026"},
+          own_member = create_row(
+              "members",
+              MemberPayload(
+                  name="FLAPA Mitglied",
+                  role="Mitglied",
+                  since="2026",
+              ),
           )
-          assert own_member.status_code == 200, own_member.text
+          assert own_news["club_id"] == 1
+          assert own_event["club_id"] == 1
+          assert own_member["club_id"] == 1
 
-          created = client.post(
-              "/api/clubs",
-              headers=headers,
-              json={
-                  "slug": "testverein",
-                  "name": "Testverein",
-                  "short_name": "TEST",
-                  "subtitle": "Neutraler Testverein",
-                  "primary_color": "#225588",
-                  "secondary_color": "#F2F2F2",
-                  "description": "Zweiter Mandant für Isolationstests",
-                  "city": "Teststadt",
-                  "country": "CH",
-                  "app_title": "Testverein App",
-                  "welcome_text": "Willkommen beim Testverein",
-              },
+          created = create_club(
+              ClubCreatePayload(
+                  slug="testverein",
+                  name="Testverein",
+                  short_name="TEST",
+                  subtitle="Neutraler Testverein",
+                  primary_color="#225588",
+                  secondary_color="#F2F2F2",
+                  description="Zweiter Mandant für Isolationstests",
+                  city="Teststadt",
+                  country="CH",
+                  app_title="Testverein App",
+                  welcome_text="Willkommen beim Testverein",
+              ),
+              user=super_user,
           )
-          assert created.status_code == 200, created.text
-          test_club = created.json()
-          test_club_id = test_club["id"]
-          assert test_club["slug"] == "testverein"
-          assert test_club["primary_color"] == "#225588"
+          test_club_id = int(created["id"])
+          assert created["slug"] == "testverein"
+          assert created["primary_color"] == "#225588"
 
-          switch = client.post(
-              "/api/auth/club",
-              headers=headers,
-              json={"club_id": test_club_id},
+          clubs = accessible_clubs(user=super_user)
+          assert {club["slug"] for club in clubs} == {"flapamamaku", "testverein"}
+
+          switched = switch_active_club(
+              ClubSwitchPayload(club_id=test_club_id),
+              authorization=headers,
+              user=super_user,
           )
-          assert switch.status_code == 200, switch.text
+          assert switched["club_id"] == test_club_id
 
-          me = client.get("/api/auth/me", headers=headers)
-          assert me.status_code == 200
-          assert me.json()["current_club_id"] == test_club_id
-          assert me.json()["is_super_admin"] is True
+          test_user = current_user(authorization=headers)
+          assert test_user["current_club_id"] == test_club_id
+          assert test_user["is_super_admin"] is True
 
-          config_update = client.put(
-              "/api/app-config",
-              headers=headers,
-              json={
-                  "app_name": "Testverein",
-                  "short_name": "TEST",
-                  "app_subtitle": "Neutraler Testverein",
-                  "primary_color": "#225588",
-                  "secondary_color": "#F2F2F2",
-                  "club_description": "Eigenständige Vereinskonfiguration",
-                  "city": "Teststadt",
-                  "country": "CH",
-                  "app_title": "Testverein App",
-                  "welcome_text": "Willkommen beim Testverein",
-              },
+          config = put_app_config(
+              AppConfigPayload(
+                  app_name="Testverein",
+                  short_name="TEST",
+                  app_subtitle="Neutraler Testverein",
+                  primary_color="#225588",
+                  secondary_color="#F2F2F2",
+                  club_description="Eigenständige Vereinskonfiguration",
+                  city="Teststadt",
+                  country="CH",
+                  app_title="Testverein App",
+                  welcome_text="Willkommen beim Testverein",
+              ),
+              _=test_user,
           )
-          assert config_update.status_code == 200, config_update.text
-          cfg = config_update.json()
-          assert cfg["app_name"] == "Testverein"
-          assert cfg["app_subtitle"] == "Neutraler Testverein"
-          assert cfg["primary_color"] == "#225588"
-          assert cfg["secondary_color"] == "#F2F2F2"
+          assert config["app_name"] == "Testverein"
+          assert config["app_subtitle"] == "Neutraler Testverein"
+          assert config["primary_color"] == "#225588"
+          assert config["secondary_color"] == "#F2F2F2"
 
           image = Image.new("RGB", (32, 32), (34, 85, 136))
           logo_buffer = BytesIO()
           image.save(logo_buffer, format="PNG")
           logo_buffer.seek(0)
-          logo = client.post(
-              "/api/app-config/logo",
-              headers=headers,
-              files={"logo": ("testverein.png", logo_buffer.getvalue(), "image/png")},
+          upload = UploadFile(
+              filename="testverein.png",
+              file=logo_buffer,
+              headers={"content-type": "image/png"},
           )
-          assert logo.status_code == 200, logo.text
-          logo_get = client.get("/api/app-config/logo", headers=headers)
-          assert logo_get.status_code == 200
-          assert len(logo_get.content) > 0
+          logo_result = asyncio.run(upload_app_logo(logo=upload, _=test_user))
+          assert logo_result["app_name"] == "Testverein"
+          logo_response = get_app_logo()
+          assert len(logo_response.body) > 0
 
-          test_news = client.post(
-              "/api/news",
-              headers=headers,
-              json={"title": "Testverein News", "text": "Nur Testverein", "date": "30.09.2026"},
+          test_news = create_row(
+              "news",
+              NewsPayload(
+                  title="Testverein News",
+                  text="Nur Testverein",
+                  date="30.09.2026",
+              ),
           )
-          assert test_news.status_code == 200, test_news.text
-          test_event = client.post(
-              "/api/events",
-              headers=headers,
-              json={
-                  "event_date": "2026-10-02",
-                  "day": "02",
-                  "month": "OKT",
-                  "title": "Testverein Termin",
-                  "location": "Teststadt",
-                  "time": "20:00",
-              },
+          test_event = create_row(
+              "events",
+              EventPayload(
+                  event_date="2026-10-02",
+                  day="02",
+                  month="OKT",
+                  title="Testverein Termin",
+                  location="Teststadt",
+                  time="20:00",
+              ),
           )
-          assert test_event.status_code == 200, test_event.text
-          test_member = client.post(
-              "/api/members",
-              headers=headers,
-              json={"name": "Testverein Mitglied", "role": "Mitglied", "since": "2026"},
+          test_member = create_row(
+              "members",
+              MemberPayload(
+                  name="Testverein Mitglied",
+                  role="Mitglied",
+                  since="2026",
+              ),
           )
-          assert test_member.status_code == 200, test_member.text
+          assert test_news["club_id"] == test_club_id
+          assert test_event["club_id"] == test_club_id
+          assert test_member["club_id"] == test_club_id
 
-          club_admin = client.post(
-              "/api/users",
-              headers=headers,
-              json={
-                  "username": "testverein-admin",
-                  "password": "TestvereinPass123!",
-                  "active": True,
-                  "role_key": "admin",
-                  "permission_overrides": {},
-              },
+          club_admin = post_user(
+              UserPayload(
+                  username="testverein-admin",
+                  password="TestvereinPass123!",
+                  active=True,
+                  role_key="admin",
+                  permission_overrides={},
+              ),
+              _=test_user,
           )
-          assert club_admin.status_code == 200, club_admin.text
-          assert club_admin.json()["club_role"] == "club_admin"
-          assert club_admin.json()["current_club_id"] == test_club_id
+          assert club_admin["club_role"] == "club_admin"
+          assert club_admin["current_club_id"] == test_club_id
 
-          news_test = client.get("/api/news", headers=headers).json()
-          events_test = client.get("/api/events", headers=headers).json()
-          members_test = client.get("/api/members", headers=headers).json()
-          assert {row["title"] for row in news_test} == {"Testverein News"}
-          assert {row["title"] for row in events_test} == {"Testverein Termin"}
-          assert {row["name"] for row in members_test} == {"Testverein Mitglied"}
+          assert {row["title"] for row in list_rows("news")} == {"Testverein News"}
+          assert {row["title"] for row in list_rows("events")} == {"Testverein Termin"}
+          assert {row["name"] for row in list_rows("members")} == {"Testverein Mitglied"}
+          assert {row["username"] for row in get_users(_=test_user)} == {"testverein-admin"}
 
-          users_test = client.get("/api/users", headers=headers)
-          assert users_test.status_code == 200
-          assert {row["username"] for row in users_test.json()} == {"testverein-admin"}
-
-          switch_back = client.post(
-              "/api/auth/club",
-              headers=headers,
-              json={"club_id": 1},
+          switch_active_club(
+              ClubSwitchPayload(club_id=1),
+              authorization=headers,
+              user=test_user,
           )
-          assert switch_back.status_code == 200, switch_back.text
+          flapa_user = current_user(authorization=headers)
+          assert flapa_user["current_club_id"] == 1
 
-          flap_config = client.get("/api/app-config", headers=headers).json()
+          flap_config = _app_config()
           assert flap_config["app_name"] == "FLAPAMAMAKU"
           assert flap_config["primary_color"] == "#8A101B"
           assert flap_config["app_subtitle"] == "Fasnachtsgruppe Luzern"
 
-          news_flapa = client.get("/api/news", headers=headers).json()
-          events_flapa = client.get("/api/events", headers=headers).json()
-          members_flapa = client.get("/api/members", headers=headers).json()
-          assert {row["title"] for row in news_flapa} == {"FLAPA News"}
-          assert {row["title"] for row in events_flapa} == {"FLAPA Termin"}
-          assert {row["name"] for row in members_flapa} == {"FLAPA Mitglied"}
+          assert {row["title"] for row in list_rows("news")} == {"FLAPA News"}
+          assert {row["title"] for row in list_rows("events")} == {"FLAPA Termin"}
+          assert {row["name"] for row in list_rows("members")} == {"FLAPA Mitglied"}
 
           with connect() as db:
               assert db.execute(
@@ -1024,12 +1067,16 @@ jobs:
                   (test_club_id,),
               ).fetchone()[0] == 1
               test_row = db.execute(
-                  "SELECT logo, primary_color, secondary_color FROM clubs WHERE id = ?",
+                  """
+                  SELECT logo, primary_color, secondary_color, subtitle
+                  FROM clubs WHERE id = ?
+                  """,
                   (test_club_id,),
               ).fetchone()
               assert test_row["logo"] is not None
               assert test_row["primary_color"] == "#225588"
               assert test_row["secondary_color"] == "#F2F2F2"
+              assert test_row["subtitle"] == "Neutraler Testverein"
 
           print("package 8 second club ok")
           PY
