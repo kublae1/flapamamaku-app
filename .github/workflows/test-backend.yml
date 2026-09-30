@@ -1092,7 +1092,7 @@ jobs:
         run: |
           rm -f /tmp/flapamamaku-package9-isolation.db
           rm -rf /tmp/flapamamaku-package9-backups
-          python tests/test_multitenant_isolation.py
+          PYTHONPATH=. python tests/test_multitenant_isolation.py
 
       - name: Test backup and restore
         env:
