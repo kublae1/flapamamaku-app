@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -237,6 +237,55 @@ jobs:
           assert updated["recommended"]["description"]["ok"] is True
           assert updated["required_complete"] is False
           print("club setup status ok")
+          PY
+
+      - name: Test backup club instance protection
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-instance-backup.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-instance-backups
+          FLAPAMAMAKU_INSTANCE_ID: test-verein
+        run: |
+          rm -f /tmp/flapamamaku-instance-backup.db
+          rm -rf /tmp/flapamamaku-instance-backups
+          python - <<'PY'
+          import shutil
+          import sqlite3
+          from app.main import (
+              INSTANCE_ID,
+              _create_database_backup,
+              _validate_restore_database,
+              connect,
+              init_db,
+          )
+
+          init_db()
+          assert INSTANCE_ID == "test-verein"
+          with connect() as db:
+              stored = db.execute(
+                  "SELECT instance_id FROM app_config WHERE id = 1"
+              ).fetchone()[0]
+              assert stored == "test-verein"
+
+          backup = _create_database_backup("instance-test")
+          assert backup.name.startswith("test-verein-")
+          assert _validate_restore_database(backup) >= 7
+
+          foreign = backup.with_name("renamed-foreign.db")
+          shutil.copy2(backup, foreign)
+          with sqlite3.connect(foreign) as db:
+              db.execute(
+                  "UPDATE app_config SET instance_id = ? WHERE id = 1",
+                  ("anderer-verein",),
+              )
+              db.commit()
+
+          try:
+              _validate_restore_database(foreign)
+              raise AssertionError("foreign club backup was accepted")
+          except RuntimeError as exc:
+              assert "another club instance" in str(exc)
+
+          print("backup club instance protection ok")
           PY
 
       - name: Test production readiness
