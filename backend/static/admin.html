@@ -2590,6 +2590,7 @@ async function loadSystem() {
     statusBox.innerHTML = `
       <p><strong>Gesamtstatus:</strong> <span class="${overallOk ? "" : "error"}">${overallOk ? "OK" : "Prüfen"}</span></p>
       <p><strong>API-Version:</strong> ${status.api_version}</p>
+      <p><strong>Vereinsinstanz:</strong> <span class="meta">${status.instance_id || "–"}</span></p>
       <p><strong>Datenbank-Schema:</strong> Version ${status.schema_version} / erwartet ${status.expected_schema_version} · ${status.schema_ok ? "OK" : "ABWEICHUNG"}</p>
       <p><strong>Datenbankprüfung:</strong> ${status.database_ok ? "OK" : status.database_integrity}</p>
       <p><strong>Build:</strong> <span class="meta">${status.build_sha}</span></p>
