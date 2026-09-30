@@ -58,7 +58,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.65"
+API_VERSION = "0.8.66"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -69,7 +69,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -687,6 +687,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (12, "club-features"),
         (13, "session-active-club"),
         (14, "club-provisioning"),
+        (15, "push-tenant-isolation"),
     ]
     applied = {
         int(row["version"])
@@ -1590,6 +1591,7 @@ def init_db() -> None:
             "content_items",
             "content_images",
             "gallery_snapshots",
+            "push_tokens",
             "push_notifications",
         )
         relation_club_tables = (
@@ -1803,9 +1805,10 @@ def _deliver_pending_push() -> None:
                 """
                 SELECT *
                 FROM push_tokens
-                WHERE enabled = 1
+                WHERE enabled = 1 AND club_id = ?
                 ORDER BY id ASC
-                """
+                """,
+                (notification["club_id"],),
             ).fetchall()
             if not tokens:
                 continue
@@ -1816,9 +1819,9 @@ def _deliver_pending_push() -> None:
                     """
                     SELECT sent_at
                     FROM push_deliveries
-                    WHERE notification_id = ? AND token_id = ?
+                    WHERE notification_id = ? AND token_id = ? AND club_id = ?
                     """,
-                    (notification["id"], token["id"]),
+                    (notification["id"], token["id"], notification["club_id"]),
                 ).fetchone()
                 if delivered is not None and delivered["sent_at"]:
                     continue
@@ -1838,26 +1841,28 @@ def _deliver_pending_push() -> None:
                     db.execute(
                         """
                         DELETE FROM push_deliveries
-                        WHERE notification_id = ? AND token_id = ?
+                        WHERE notification_id = ? AND token_id = ? AND club_id = ?
                         """,
-                        (notification["id"], token["id"]),
+                        (notification["id"], token["id"], notification["club_id"]),
                     )
                     continue
 
                 db.execute(
                     """
                     INSERT INTO push_deliveries (
-                        notification_id, token_id, sent_at, last_error
-                    ) VALUES (?, ?, ?, ?)
+                        notification_id, token_id, sent_at, last_error, club_id
+                    ) VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(notification_id, token_id) DO UPDATE SET
                         sent_at = excluded.sent_at,
-                        last_error = excluded.last_error
+                        last_error = excluded.last_error,
+                        club_id = excluded.club_id
                     """,
                     (
                         notification["id"],
                         token["id"],
                         now if ok else None,
                         error,
+                        notification["club_id"],
                     ),
                 )
                 if not ok:
@@ -1874,15 +1879,21 @@ def _deliver_pending_push() -> None:
                 SELECT COUNT(*)
                 FROM push_tokens pt
                 WHERE pt.enabled = 1
+                  AND pt.club_id = ?
                   AND NOT EXISTS (
                       SELECT 1
                       FROM push_deliveries pd
                       WHERE pd.notification_id = ?
                         AND pd.token_id = pt.id
+                        AND pd.club_id = ?
                         AND pd.sent_at IS NOT NULL
                   )
                 """,
-                (notification["id"],),
+                (
+                    notification["club_id"],
+                    notification["id"],
+                    notification["club_id"],
+                ),
             ).fetchone()[0]
 
             if remaining == 0 and not had_transient_error:
@@ -2465,8 +2476,12 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
             )
             for filter_id in sorted(set(member_filter_ids)):
                 db.execute(
-                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
-                    (row_id, filter_id),
+                    """
+                    INSERT OR IGNORE INTO member_filter_links
+                        (member_id, filter_id, club_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    (row_id, filter_id, _active_club_id(db)),
                 )
         db.commit()
         row = db.execute(
@@ -3197,21 +3212,48 @@ def system_status(
             database_integrity = (
                 str(integrity[0]).lower() if integrity is not None else "unbekannt"
             )
+            club_id = _active_club_id(db)
             active_users = int(
-                db.execute("SELECT COUNT(*) FROM users WHERE active = 1").fetchone()[0]
+                db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM user_clubs uc
+                    JOIN users u ON u.id = uc.user_id
+                    WHERE uc.club_id = ? AND uc.active = 1 AND u.active = 1
+                    """,
+                    (club_id,),
+                ).fetchone()[0]
             )
             active_sessions = int(
-                db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                db.execute(
+                    "SELECT COUNT(*) FROM sessions WHERE active_club_id = ?",
+                    (club_id,),
+                ).fetchone()[0]
             )
-            members = int(db.execute("SELECT COUNT(*) FROM members").fetchone()[0])
+            members = int(
+                db.execute(
+                    "SELECT COUNT(*) FROM members WHERE club_id = ?",
+                    (club_id,),
+                ).fetchone()[0]
+            )
             registered_devices = int(
                 db.execute(
-                    "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+                    """
+                    SELECT COUNT(*)
+                    FROM push_tokens
+                    WHERE enabled = 1 AND club_id = ?
+                    """,
+                    (club_id,),
                 ).fetchone()[0]
             )
             queued_push = int(
                 db.execute(
-                    "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+                    """
+                    SELECT COUNT(*)
+                    FROM push_notifications
+                    WHERE sent_at IS NULL AND club_id = ?
+                    """,
+                    (club_id,),
                 ).fetchone()[0]
             )
     except sqlite3.Error:
@@ -4040,14 +4082,21 @@ def get_push_admin(
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> dict[str, Any]:
     with connect() as db:
+        club_id = _active_club_id(db)
         registered_devices_total = int(
             db.execute(
-                "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+                "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1 AND club_id = ?",
+                (club_id,),
             ).fetchone()[0]
         )
         queued_notifications = int(
             db.execute(
-                "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+                """
+                SELECT COUNT(*)
+                FROM push_notifications
+                WHERE sent_at IS NULL AND club_id = ?
+                """,
+                (club_id,),
             ).fetchone()[0]
         )
         rows = db.execute(
@@ -4058,28 +4107,37 @@ def get_push_admin(
                     SELECT COUNT(*)
                     FROM push_deliveries pd
                     WHERE pd.notification_id = pn.id
+                      AND pd.club_id = pn.club_id
                       AND pd.sent_at IS NOT NULL
                 ) AS delivered_count,
                 (
                     SELECT COUNT(*)
                     FROM push_deliveries pd
                     WHERE pd.notification_id = pn.id
+                      AND pd.club_id = pn.club_id
                       AND pd.sent_at IS NULL
                       AND pd.last_error <> ''
                 ) AS failed_count
             FROM push_notifications pn
+            WHERE pn.club_id = ?
             ORDER BY pn.id DESC
             LIMIT 50
-            """
+            """,
+            (club_id,),
         ).fetchall()
         last_delivery_error = db.execute(
             """
-            SELECT last_error
-            FROM push_deliveries
-            WHERE last_error IS NOT NULL AND last_error <> ''
-            ORDER BY rowid DESC
+            SELECT pd.last_error
+            FROM push_deliveries pd
+            JOIN push_notifications pn ON pn.id = pd.notification_id
+            WHERE pd.club_id = ?
+              AND pn.club_id = ?
+              AND pd.last_error IS NOT NULL
+              AND pd.last_error <> ''
+            ORDER BY pd.rowid DESC
             LIMIT 1
-            """
+            """,
+            (club_id, club_id),
         ).fetchone()
 
     return {
@@ -4122,9 +4180,9 @@ def send_manual_push(
                 0 AS delivered_count,
                 0 AS failed_count
             FROM push_notifications pn
-            WHERE pn.id = ?
+            WHERE pn.id = ? AND pn.club_id = ?
             """,
-            (notification_id,),
+            (notification_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_push_notification(row)
 
@@ -4142,15 +4200,23 @@ def register_push_token(
         db.execute(
             """
             INSERT INTO push_tokens (
-                user_id, token, platform, enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, 1, ?, ?)
+                user_id, token, platform, enabled, created_at, updated_at, club_id
+            ) VALUES (?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(token) DO UPDATE SET
                 user_id = excluded.user_id,
                 platform = excluded.platform,
                 enabled = 1,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                club_id = excluded.club_id
             """,
-            (user["id"], payload.token, platform, now, now),
+            (
+                user["id"],
+                payload.token,
+                platform,
+                now,
+                now,
+                _active_club_id(db),
+            ),
         )
         db.commit()
     return {"registered": True}
@@ -4163,8 +4229,11 @@ def unregister_push_token(
 ) -> None:
     with connect() as db:
         db.execute(
-            "DELETE FROM push_tokens WHERE token = ? AND user_id = ?",
-            (payload.token, user["id"]),
+            """
+            DELETE FROM push_tokens
+            WHERE token = ? AND user_id = ? AND club_id = ?
+            """,
+            (payload.token, user["id"], _active_club_id(db)),
         )
         db.commit()
 
@@ -4174,24 +4243,40 @@ def push_status(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
+        club_id = _active_club_id(db)
         count = db.execute(
-            "SELECT COUNT(*) FROM push_tokens WHERE user_id = ? AND enabled = 1",
-            (user["id"],),
+            """
+            SELECT COUNT(*)
+            FROM push_tokens
+            WHERE user_id = ? AND enabled = 1 AND club_id = ?
+            """,
+            (user["id"], club_id),
         ).fetchone()[0]
         total_devices = db.execute(
-            "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1",
+            "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1 AND club_id = ?",
+            (club_id,),
         ).fetchone()[0]
         queued = db.execute(
-            "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL",
+            """
+            SELECT COUNT(*)
+            FROM push_notifications
+            WHERE sent_at IS NULL AND club_id = ?
+            """,
+            (club_id,),
         ).fetchone()[0]
         last_delivery_error = db.execute(
             """
-            SELECT last_error
-            FROM push_deliveries
-            WHERE last_error IS NOT NULL AND last_error <> ''
-            ORDER BY rowid DESC
+            SELECT pd.last_error
+            FROM push_deliveries pd
+            JOIN push_notifications pn ON pn.id = pd.notification_id
+            WHERE pd.club_id = ?
+              AND pn.club_id = ?
+              AND pd.last_error IS NOT NULL
+              AND pd.last_error <> ''
+            ORDER BY pd.rowid DESC
             LIMIT 1
-            """
+            """,
+            (club_id, club_id),
         ).fetchone()
     diagnostic = _firebase_diagnostic()
     return {
