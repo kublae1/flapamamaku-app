@@ -355,8 +355,14 @@ class AppStore extends ChangeNotifier {
 
   bool get canAdminister =>
       !api.isConfigured || canNews || canEvents || canMembers;
+  static const bool _allowServerChange = bool.fromEnvironment(
+    'ALLOW_SERVER_CHANGE',
+    defaultValue: true,
+  );
+
   bool get serverConfigured => api.isConfigured;
   String get serverUrl => api.baseUrl;
+  bool get canChangeServer => _allowServerChange;
 
   String userMessageForError(
     Object error, {
