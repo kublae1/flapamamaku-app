@@ -900,6 +900,47 @@ def init_db() -> None:
                 (INSTANCE_ID,),
             )
 
+        # Compatibility bridge for existing single-club deployments:
+        # before shared multi-tenancy, club 1 represented the configured
+        # FLAPAMAMAKU_INSTANCE_ID even when its slug had not yet existed in
+        # the new clubs registry. Keep the same row/id and bind it to that
+        # instance instead of creating or moving club-owned data.
+        if INSTANCE_ID != "flapamamaku":
+            mapped_club = db.execute(
+                "SELECT id FROM clubs WHERE slug = ?",
+                (INSTANCE_ID,),
+            ).fetchone()
+            club_count = int(
+                db.execute("SELECT COUNT(*) FROM clubs").fetchone()[0]
+            )
+            reference_club = db.execute(
+                "SELECT id FROM clubs WHERE id = 1 AND slug = 'flapamamaku'"
+            ).fetchone()
+            if mapped_club is None and club_count == 1 and reference_club is not None:
+                app_name_row = db.execute(
+                    "SELECT app_name FROM app_config WHERE id = 1"
+                ).fetchone()
+                configured_name = (
+                    str(app_name_row["app_name"]).strip()
+                    if app_name_row is not None and app_name_row["app_name"]
+                    else ""
+                )
+                if not configured_name or configured_name.upper() == "FLAPAMAMAKU":
+                    configured_name = INSTANCE_ID
+                db.execute(
+                    """
+                    UPDATE clubs
+                    SET slug = ?, name = ?, short_name = ?, updated_at = ?
+                    WHERE id = 1
+                    """,
+                    (
+                        INSTANCE_ID,
+                        configured_name,
+                        configured_name,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+
         _ensure_column(db, "app_config", "logo_data", "BLOB")
         _ensure_column(db, "app_config", "logo_mime", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "app_config", "club_description", "TEXT NOT NULL DEFAULT ''")
