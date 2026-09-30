@@ -452,14 +452,14 @@ jobs:
               )
               db.commit()
 
-          try:
-              login(
-                  request,
-                  LoginPayload(username="package4-user", password="Geheim123!"),
-              )
-              raise AssertionError("login without active FLAPAMAMAKU membership was accepted")
-          except HTTPException as exc:
-              assert exc.status_code == 401
+          moved = login(
+              request,
+              LoginPayload(username="package4-user", password="Geheim123!"),
+          )
+          assert moved["user"]["current_club_id"] == foreign_club_id
+          assert moved["user"]["club_role"] == "member"
+          assert moved["requires_club_selection"] is False
+          assert [club["id"] for club in moved["clubs"]] == [foreign_club_id]
 
           print("package 4 user club memberships ok")
           PY
