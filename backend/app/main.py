@@ -3489,15 +3489,11 @@ def accessible_clubs(
         else:
             rows = db.execute(
                 """
-                SELECT c.id, c.slug, c.name, c.short_name, c.active, c.primary_color
-                FROM clubs c
-                JOIN user_clubs uc ON uc.club_id = c.id
-                WHERE uc.user_id = ?
-                  AND uc.active = 1
-                  AND c.active = 1
-                ORDER BY c.name COLLATE NOCASE, c.id
+                SELECT id, slug, name, short_name, active, primary_color
+                FROM clubs
+                WHERE id = ? AND active = 1
                 """,
-                (user["id"],),
+                (user["current_club_id"],),
             ).fetchall()
     return [
         {
@@ -3514,6 +3510,11 @@ def switch_active_club(
     authorization: str | None = Header(default=None),
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur Super-Admins dürfen den Verein wechseln",
+        )
     token = _extract_token(authorization)
     with connect() as db:
         club = db.execute(
