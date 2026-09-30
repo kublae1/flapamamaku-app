@@ -448,7 +448,7 @@
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
       <button data-panel="content" id="content-nav">Medien & Inhalte</button>
       <button data-panel="push" id="push-nav" data-permission="can_manage_users">Push</button>
-      <button data-panel="system" id="system-nav" data-permission="can_manage_users">System</button>
+      <button data-panel="system" id="system-nav" data-permission="can_manage_settings">Verein & System</button>
       <button id="logout-button">Abmelden</button>
     </nav>
 
@@ -1034,7 +1034,7 @@
           </p>
           <p><button class="primary" type="submit">Branding speichern</button></p>
         </form>
-        <div class="card">
+        <div class="card" id="system-admin-status-card">
           <div class="preview-heading">
             <h2>Systemstatus</h2>
             <button type="button" id="system-refresh">Aktualisieren</button>
@@ -1043,7 +1043,7 @@
           <div id="system-health-details" style="margin-top:14px"></div>
           <div id="system-readiness" style="margin-top:14px"></div>
         </div>
-        <div class="card">
+        <div class="card" id="system-admin-backup-card">
           <div class="preview-heading">
             <h2>Datenbank-Backups</h2>
             <button type="button" id="system-backup-create">+ Backup jetzt erstellen</button>
@@ -1084,7 +1084,7 @@ let roleDefinitions = [];
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
   "can_gallery_upload","can_polls","can_links","can_contact","can_about",
-  "can_admin_page","can_manage_users"
+  "can_admin_page","can_manage_settings","can_manage_users"
 ];
 
 const contentPermissions = {
@@ -1146,6 +1146,10 @@ function showAdmin() {
 function applyPermissions() {
   document.getElementById("member-account-block")
     .classList.toggle("hidden", !currentUser?.can_manage_users);
+  document.getElementById("system-admin-status-card")
+    ?.classList.toggle("hidden", !currentUser?.can_manage_users);
+  document.getElementById("system-admin-backup-card")
+    ?.classList.toggle("hidden", !currentUser?.can_manage_users);
 
   document.querySelectorAll("[data-permission]").forEach(button => {
     button.classList.toggle("hidden", !currentUser?.[button.dataset.permission]);
@@ -2408,7 +2412,7 @@ async function restoreSystemBackup(file) {
 }
 
 async function loadAppConfig() {
-  if (!currentUser?.can_manage_users) return;
+  if (!(currentUser?.can_manage_settings || currentUser?.can_manage_users)) return;
   try {
     const config = await api("/api/app-config");
     const form = document.getElementById("app-config-form");
@@ -2547,17 +2551,12 @@ document.getElementById("push-nav").addEventListener("click", loadPushAdmin);
 document.getElementById("push-refresh").addEventListener("click", loadPushAdmin);
 
 async function loadSystem() {
-  if (!currentUser?.can_manage_users) return;
+  if (!(currentUser?.can_manage_settings || currentUser?.can_manage_users)) return;
   await loadAppConfig();
   const statusBox = document.getElementById("system-status");
   const backupList = document.getElementById("system-backup-list");
   try {
-    const [status, backups, readiness, setup] = await Promise.all([
-      api("/api/system/status"),
-      api("/api/system/backups"),
-      api("/api/system/readiness"),
-      api("/api/system/setup-status"),
-    ]);
+    const setup = await api("/api/system/setup-status");
 
     const setupSummary = document.getElementById("setup-status-summary");
     const requiredBox = document.getElementById("setup-status-required");
@@ -2576,6 +2575,15 @@ async function loadSystem() {
       recommendedBox.innerHTML =
         '<h3>Empfohlen</h3>' + renderSetupItems(setup.recommended);
     }
+
+    if (!currentUser?.can_manage_users) return;
+
+    const [status, backups, readiness] = await Promise.all([
+      api("/api/system/status"),
+      api("/api/system/backups"),
+      api("/api/system/readiness"),
+    ]);
+
     const latest = status.latest_backup
       ? `${formatDateTimeCH(status.latest_backup.created_at)} · ${formatBytes(status.latest_backup.size_bytes)}`
       : "Noch kein Backup vorhanden";
@@ -2835,7 +2843,11 @@ document.getElementById("auth-form").addEventListener("submit", async event => {
 
 async function startAdmin() {
   if (!currentUser) currentUser = await api("/api/auth/me");
-  if (!currentUser.can_admin_page && !currentUser.can_manage_users) {
+  if (
+    !currentUser.can_admin_page &&
+    !currentUser.can_manage_settings &&
+    !currentUser.can_manage_users
+  ) {
     throw new Error("Keine Berechtigung für die PC-Adminseite");
   }
   showAdmin();
