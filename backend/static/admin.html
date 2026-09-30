@@ -952,6 +952,23 @@
     </section>
 
     <section id="system" class="panel">
+      <div id="onboarding-card" class="card hidden" style="margin-bottom:16px">
+        <h2>Verein jetzt einrichten</h2>
+        <p class="meta">
+          Der Hauptadministrator ist erstellt. Richte jetzt die Vereinsinstanz ein.
+          Diese Schritte können vollständig hier im Browser erledigt werden.
+        </p>
+        <ol style="line-height:1.7">
+          <li>Vereinsname und Untertitel prüfen</li>
+          <li>Hauptfarbe und Vereinslogo festlegen</li>
+          <li>Kontaktangaben und Vereinsbeschreibung erfassen</li>
+          <li>Benötigte Inhaltsmodule aktivieren und benennen</li>
+          <li>Danach unter „Benutzer & Rechte“ weitere Konten anlegen</li>
+        </ol>
+        <p class="meta">
+          Für diese Vereinsverwaltung sind weder GitHub noch Docker-Kenntnisse erforderlich.
+        </p>
+      </div>
       <div class="grid">
         <form class="card" id="app-config-form">
           <div class="preview-heading">
@@ -1051,6 +1068,7 @@ let token = sessionStorage.getItem("flapamamaku_token") || "";
 let apiVersion = "";
 let currentUser = null;
 let bootstrapRequired = false;
+let justBootstrapped = false;
 let userAccounts = [];
 let memberFilters = [];
 let roleDefinitions = [];
@@ -2767,6 +2785,8 @@ document.getElementById("auth-form").addEventListener("submit", async event => {
           member_id: form.elements.member_id.value ? Number(form.elements.member_id.value) : null,
         }),
       });
+      justBootstrapped = true;
+      bootstrapRequired = false;
     }
     const result = await api("/api/auth/login", {
       method:"POST",
@@ -2823,6 +2843,18 @@ async function startAdmin() {
   }
   if (Object.values(contentPermissions).some(permission => currentUser?.[permission])) {
     await loadSafely("Inhalte", () => loadContent());
+  }
+
+  if (currentUser.can_manage_users && justBootstrapped) {
+    await loadSafely("System", () => loadSystem());
+    const onboarding = document.getElementById("onboarding-card");
+    if (onboarding) onboarding.classList.remove("hidden");
+    document.querySelectorAll("nav button[data-panel]").forEach(
+      button => button.classList.toggle("active", button.dataset.panel === "system")
+    );
+    document.querySelectorAll(".panel").forEach(
+      panel => panel.classList.toggle("active", panel.id === "system")
+    );
   }
 }
 
