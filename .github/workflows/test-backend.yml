@@ -796,6 +796,9 @@ jobs:
           print("package 7 tenant-aware admin ok")
           PY
 
+      - name: Install package 8 test dependency
+        run: pip install httpx
+
       - name: Test package 8 second club
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-package8-second-club.db
