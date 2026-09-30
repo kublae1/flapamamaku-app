@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 from pydantic import BaseModel, Field
-from PIL import Image, ImageOps, ImageSequence
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageSequence
 
 
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.68"
+API_VERSION = "0.8.69"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -70,7 +70,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 16
+CURRENT_SCHEMA_VERSION = 17
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -82,6 +82,19 @@ PUSH_ICON_URL = os.getenv(
     "FLAPAMAMAKU_PUSH_ICON_URL",
     "https://flapamamaku.kublaecloud.synology.me/flapamamaku-icon.png",
 ).strip()
+BILLING_ISSUER_NAME = (
+    os.getenv("FLAPAMAMAKU_BILLING_ISSUER_NAME", "Vereinsplattform").strip()
+    or "Vereinsplattform"
+)
+BILLING_ISSUER_ADDRESS = os.getenv(
+    "FLAPAMAMAKU_BILLING_ISSUER_ADDRESS",
+    "",
+).strip()
+BILLING_PAYMENT_INFO = os.getenv(
+    "FLAPAMAMAKU_BILLING_PAYMENT_INFO",
+    "",
+).strip()
+
 if not FIREBASE_SERVICE_ACCOUNT_JSON:
     firebase_b64 = os.getenv(
         "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_B64",
@@ -434,6 +447,7 @@ class ClubBillingSettingsPayload(BaseModel):
     amount_rappen: int = Field(default=0, ge=0, le=100000000)
     interval_months: int = Field(default=12, ge=1, le=24)
     due_days: int = Field(default=30, ge=1, le=90)
+    grace_days: int = Field(default=0, ge=0, le=365)
     next_invoice_date: str = Field(default="", max_length=10)
     auto_suspend: bool = True
 
@@ -703,6 +717,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (14, "club-provisioning"),
         (15, "push-tenant-isolation"),
         (16, "club-billing-and-suspension"),
+        (17, "club-billing-pdf-and-grace"),
     ]
     applied = {
         int(row["version"])
@@ -1050,6 +1065,7 @@ def init_db() -> None:
         _ensure_column(db, "clubs", "billing_amount_rappen", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(db, "clubs", "billing_interval_months", "INTEGER NOT NULL DEFAULT 12")
         _ensure_column(db, "clubs", "billing_due_days", "INTEGER NOT NULL DEFAULT 30")
+        _ensure_column(db, "clubs", "billing_grace_days", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(db, "clubs", "billing_next_invoice_date", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "clubs", "billing_auto_suspend", "INTEGER NOT NULL DEFAULT 1")
         _ensure_column(db, "clubs", "billing_suspension_reason", "TEXT NOT NULL DEFAULT ''")
