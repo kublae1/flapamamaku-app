@@ -4883,38 +4883,37 @@ async def upload_content_images(
         prepared.append((data, optimized_mime))
 
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         now = datetime.now(timezone.utc).isoformat()
         max_order = db.execute(
             """
             SELECT COALESCE(MAX(sort_order), 0)
             FROM content_images
-            WHERE content_id = ?
+            WHERE content_id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         ).fetchone()[0]
         db.executemany(
             """
             INSERT INTO content_images (
-                content_id, image_data, image_mime, sort_order, created_at
-            ) VALUES (?, ?, ?, ?, ?)
+                content_id, image_data, image_mime, sort_order, created_at, club_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             [
-                (row_id, data, mime, max_order + index + 1, now)
+                (
+                    row_id,
+                    data,
+                    mime,
+                    max_order + index + 1,
+                    now,
+                    _active_club_id(db),
+                )
                 for index, (data, mime) in enumerate(prepared)
             ],
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -4925,17 +4924,17 @@ def reorder_content_images(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        club_id = _active_club_id(db)
 
         rows = db.execute(
-            "SELECT id FROM content_images WHERE content_id = ?",
-            (row_id,),
+            """
+            SELECT id
+            FROM content_images
+            WHERE content_id = ? AND club_id = ?
+            """,
+            (row_id, club_id),
         ).fetchall()
         current_ids = {row["id"] for row in rows}
         requested_ids = payload.image_ids
@@ -4952,15 +4951,12 @@ def reorder_content_images(
                 """
                 UPDATE content_images
                 SET sort_order = ?
-                WHERE id = ? AND content_id = ?
+                WHERE id = ? AND content_id = ? AND club_id = ?
                 """,
-                (position, image_id, row_id),
+                (position, image_id, row_id, club_id),
             )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -4973,11 +4969,20 @@ def get_content_gallery_image(
     with connect() as db:
         row = db.execute(
             """
-            SELECT image_data, image_mime
-            FROM content_images
-            WHERE id = ? AND content_id = ?
+            SELECT ci.image_data, ci.image_mime
+            FROM content_images ci
+            JOIN content_items c ON c.id = ci.content_id
+            WHERE ci.id = ?
+              AND ci.content_id = ?
+              AND ci.club_id = ?
+              AND c.club_id = ?
             """,
-            (image_id, row_id),
+            (
+                image_id,
+                row_id,
+                _active_club_id(db),
+                _active_club_id(db),
+            ),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -4995,16 +5000,14 @@ def delete_content_gallery_image(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         cursor = db.execute(
-            "DELETE FROM content_images WHERE id = ? AND content_id = ?",
-            (image_id, row_id),
+            """
+            DELETE FROM content_images
+            WHERE id = ? AND content_id = ? AND club_id = ?
+            """,
+            (image_id, row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Bild nicht gefunden")
@@ -5017,24 +5020,23 @@ def delete_all_content_images(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        club_id = _active_club_id(db)
         db.execute(
-            "DELETE FROM content_images WHERE content_id = ?",
-            (row_id,),
+            """
+            DELETE FROM content_images
+            WHERE content_id = ? AND club_id = ?
+            """,
+            (row_id, club_id),
         )
         db.execute(
             """
             UPDATE content_items
             SET image_data = NULL, image_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, club_id),
         )
         db.commit()
 
@@ -5055,26 +5057,19 @@ async def upload_content_image(
     )
 
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        club_id = _active_club_id(db)
         db.execute(
             """
             UPDATE content_items
             SET image_data = ?, image_mime = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, row_id),
+            (data, optimized_mime, row_id, club_id),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -5085,8 +5080,12 @@ def get_content_image(
 ) -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT image_data, image_mime FROM content_items WHERE id = ?",
-            (row_id,),
+            """
+            SELECT image_data, image_mime
+            FROM content_items
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if row is None or row["image_data"] is None:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -5103,20 +5102,15 @@ def delete_content_image(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         db.execute(
             """
             UPDATE content_items
             SET image_data = NULL, image_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         db.commit()
 
