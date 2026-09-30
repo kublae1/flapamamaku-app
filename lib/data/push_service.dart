@@ -51,8 +51,10 @@ class PushService {
         );
         const androidSettings =
             AndroidInitializationSettings('ic_stat_flapamamaku');
+        const darwinSettings = DarwinInitializationSettings();
         const initializationSettings = InitializationSettings(
           android: androidSettings,
+          iOS: darwinSettings,
         );
         await _localNotifications.initialize(
           initializationSettings,
@@ -125,7 +127,15 @@ class PushService {
           icon: 'ic_stat_flapamamaku',
           largeIcon: const DrawableResourceAndroidBitmap('ic_launcher'),
         );
-        final details = NotificationDetails(android: androidDetails);
+        const darwinDetails = DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        );
+        final details = NotificationDetails(
+          android: Platform.isAndroid ? androidDetails : null,
+          iOS: Platform.isIOS ? darwinDetails : null,
+        );
         await _localNotifications.show(
           message.messageId?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
           title,
