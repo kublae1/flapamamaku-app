@@ -2,20 +2,70 @@ name: Public HTTPS Smoke Test
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "White-label profile to test"
+        required: false
+        default: "flapamamaku"
   push:
-    branches: [ feature/public-smoke-v1, feature/public-instance-guard-v1 ]
+    branches: [ feature/public-smoke-v1, feature/public-instance-guard-v1, feature/profile-public-smoke-v1 ]
     paths:
       - ".github/workflows/public-smoke.yml"
       - "backend/PUBLIC_DEPLOYMENT.md"
+      - "config/white-label/**"
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
     env:
-      PUBLIC_API_BASE_URL: ${{ vars.WHITE_LABEL_API_BASE_URL || vars.FLAPAMAMAKU_API_BASE_URL || 'https://flapamamaku.kublaecloud.synology.me' }}
-      EXPECTED_INSTANCE_ID: ${{ vars.WHITE_LABEL_INSTANCE_ID || vars.FLAPAMAMAKU_INSTANCE_ID || 'flapamamaku' }}
+      BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Load club profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          profile = os.environ["BUILD_PROFILE"].strip()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile):
+              raise SystemExit("Invalid white-label profile name")
+
+          path = Path("config/white-label") / f"{profile}.json"
+          if not path.exists():
+              raise SystemExit(f"White-label profile not found: {path}")
+
+          data = json.loads(path.read_text())
+          required = ["id", "instance_id", "api_base_url"]
+          missing = [key for key in required if key not in data]
+          if missing:
+              raise SystemExit("Missing profile fields: " + ", ".join(missing))
+          if data["id"] != profile:
+              raise SystemExit("Profile id does not match file name")
+
+          instance_id = str(data["instance_id"]).strip().lower()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", instance_id):
+              raise SystemExit("Profile instance_id is invalid")
+
+          api_url = str(data["api_base_url"]).strip().rstrip("/")
+          if not api_url.startswith("https://"):
+              raise SystemExit("Profile api_base_url must use HTTPS")
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a") as handle:
+              handle.write(f"PUBLIC_API_BASE_URL={api_url}\n")
+              handle.write(f"EXPECTED_INSTANCE_ID={instance_id}\n")
+
+          print(f"Loaded profile: {profile}")
+          print(f"Public API: {api_url}")
+          print(f"Expected instance: {instance_id}")
+          PY
+
       - name: Validate configured public URL
         shell: bash
         run: |
