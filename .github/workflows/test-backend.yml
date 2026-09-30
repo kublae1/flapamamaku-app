@@ -208,7 +208,7 @@ jobs:
           init_db()
 
           with connect() as db:
-              assert CURRENT_SCHEMA_VERSION == 15
+              assert CURRENT_SCHEMA_VERSION == 16
               assert db.execute("SELECT id, club_id FROM news WHERE id = 41").fetchone()[:] == (41, 1)
               assert db.execute("SELECT id, club_id FROM events WHERE id = 51").fetchone()[:] == (51, 1)
               assert db.execute("SELECT id, club_id FROM members WHERE id = 61").fetchone()[:] == (61, 1)
@@ -375,7 +375,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 15
+          assert CURRENT_SCHEMA_VERSION == 16
 
           with connect() as db:
               now = datetime.now(timezone.utc).isoformat()
@@ -578,7 +578,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 15
+          assert CURRENT_SCHEMA_VERSION == 16
 
           with connect() as db:
               features = _club_features(db, 1)
@@ -652,7 +652,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 15
+          assert CURRENT_SCHEMA_VERSION == 16
           now = datetime.now(timezone.utc)
           expires = (now + timedelta(days=1)).isoformat()
 
@@ -843,7 +843,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 15
+          assert CURRENT_SCHEMA_VERSION == 16
           now = datetime.now(timezone.utc)
           expires = (now + timedelta(days=1)).isoformat()
 
@@ -1476,7 +1476,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 15
+          assert CURRENT_SCHEMA_VERSION == 16
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
           assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
