@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import base64
 import hashlib
 import hmac
@@ -58,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.67"
+API_VERSION = "0.8.68"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -69,7 +70,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 15
+CURRENT_SCHEMA_VERSION = 16
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -428,6 +429,19 @@ class ClubCreatePayload(BaseModel):
     welcome_text: str = Field(default="", max_length=2000)
 
 
+class ClubBillingSettingsPayload(BaseModel):
+    billing_email: str = Field(default="", max_length=320)
+    amount_rappen: int = Field(default=0, ge=0, le=100000000)
+    interval_months: int = Field(default=12, ge=1, le=24)
+    due_days: int = Field(default=30, ge=1, le=90)
+    next_invoice_date: str = Field(default="", max_length=10)
+    auto_suspend: bool = True
+
+
+class ClubBillingSuspendPayload(BaseModel):
+    reason: str = Field(default="Ausstehende Zahlung", min_length=1, max_length=500)
+
+
 class PollVotePayload(BaseModel):
     option_index: int = Field(ge=0, le=20)
 
@@ -688,6 +702,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (13, "session-active-club"),
         (14, "club-provisioning"),
         (15, "push-tenant-isolation"),
+        (16, "club-billing-and-suspension"),
     ]
     applied = {
         int(row["version"])
@@ -1030,6 +1045,44 @@ def init_db() -> None:
                 )
 
         _ensure_column(db, "clubs", "subtitle", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "clubs", "billing_status", "TEXT NOT NULL DEFAULT 'active'")
+        _ensure_column(db, "clubs", "billing_email", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "clubs", "billing_amount_rappen", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(db, "clubs", "billing_interval_months", "INTEGER NOT NULL DEFAULT 12")
+        _ensure_column(db, "clubs", "billing_due_days", "INTEGER NOT NULL DEFAULT 30")
+        _ensure_column(db, "clubs", "billing_next_invoice_date", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "clubs", "billing_auto_suspend", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "clubs", "billing_suspension_reason", "TEXT NOT NULL DEFAULT ''")
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS club_invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                club_id INTEGER NOT NULL,
+                invoice_number TEXT NOT NULL UNIQUE,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                issue_date TEXT NOT NULL,
+                due_date TEXT NOT NULL,
+                amount_rappen INTEGER NOT NULL CHECK (amount_rappen >= 0),
+                currency TEXT NOT NULL DEFAULT 'CHF',
+                status TEXT NOT NULL DEFAULT 'open',
+                paid_at TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(club_id, period_start),
+                FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_club_invoices_club_id "
+            "ON club_invoices(club_id)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_club_invoices_due_status "
+            "ON club_invoices(due_date, status)"
+        )
         legacy_subtitle = db.execute(
             "SELECT app_subtitle FROM app_config WHERE id = 1"
         ).fetchone()
@@ -1917,6 +1970,155 @@ def _deliver_pending_push() -> None:
         db.commit()
 
 
+
+
+def _require_super_admin(user: dict[str, Any]) -> None:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur Super-Admins dürfen die Vereinsabrechnung verwalten",
+        )
+
+
+def _parse_billing_date(value: str) -> datetime:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Datum muss im Format JJJJ-MM-TT angegeben werden",
+        ) from exc
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _invoice_row(item: sqlite3.Row) -> dict[str, Any]:
+    result = dict(item)
+    result["amount_chf"] = round(int(result["amount_rappen"]) / 100, 2)
+    return result
+
+
+def _run_billing_cycle() -> dict[str, int]:
+    today_dt = datetime.now(timezone.utc)
+    today = today_dt.date().isoformat()
+    created = 0
+    suspended = 0
+
+    with connect() as db:
+        clubs = db.execute(
+            """
+            SELECT
+                id, billing_amount_rappen, billing_interval_months,
+                billing_due_days, billing_next_invoice_date,
+                billing_auto_suspend
+            FROM clubs
+            WHERE active = 1
+              AND billing_amount_rappen > 0
+              AND billing_next_invoice_date != ''
+            """
+        ).fetchall()
+
+        for club in clubs:
+            club_id = int(club["id"])
+            next_date = _parse_billing_date(
+                str(club["billing_next_invoice_date"])
+            )
+            interval = max(1, int(club["billing_interval_months"] or 12))
+            generated_for_club = 0
+            while next_date.date().isoformat() <= today and generated_for_club < 120:
+                period_start = next_date.date().isoformat()
+                next_period = _add_months(next_date, interval)
+                period_end = (next_period - timedelta(days=1)).date().isoformat()
+                issue_date = today
+                due_date = (
+                    today_dt + timedelta(days=max(1, int(club["billing_due_days"] or 30)))
+                ).date().isoformat()
+                invoice_number = (
+                    f"{today_dt.year:04d}-{club_id:04d}-"
+                    f"{period_start.replace('-', '')}"
+                )
+                cursor = db.execute(
+                    """
+                    INSERT OR IGNORE INTO club_invoices (
+                        club_id, invoice_number, period_start, period_end,
+                        issue_date, due_date, amount_rappen, currency,
+                        status, paid_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CHF', 'open', '', ?, ?)
+                    """,
+                    (
+                        club_id,
+                        invoice_number,
+                        period_start,
+                        period_end,
+                        issue_date,
+                        due_date,
+                        int(club["billing_amount_rappen"]),
+                        today_dt.isoformat(),
+                        today_dt.isoformat(),
+                    ),
+                )
+                if cursor.rowcount:
+                    created += 1
+                next_date = next_period
+                generated_for_club += 1
+
+            db.execute(
+                """
+                UPDATE clubs
+                SET billing_next_invoice_date = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (next_date.date().isoformat(), today_dt.isoformat(), club_id),
+            )
+
+        overdue = db.execute(
+            """
+            SELECT DISTINCT c.id
+            FROM clubs c
+            JOIN club_invoices i ON i.club_id = c.id
+            WHERE c.active = 1
+              AND c.billing_auto_suspend = 1
+              AND i.status = 'open'
+              AND i.due_date < ?
+            """,
+            (today,),
+        ).fetchall()
+        for row in overdue:
+            cursor = db.execute(
+                """
+                UPDATE clubs
+                SET
+                    billing_status = 'suspended',
+                    billing_suspension_reason = 'Offene Rechnung überfällig',
+                    updated_at = ?
+                WHERE id = ?
+                  AND billing_status != 'suspended'
+                """,
+                (today_dt.isoformat(), int(row["id"])),
+            )
+            suspended += cursor.rowcount
+
+        db.commit()
+
+    return {"created_invoices": created, "suspended_clubs": suspended}
+
+
+async def _billing_loop() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await asyncio.to_thread(_run_billing_cycle)
+        except Exception:
+            logger.exception("Automatic club billing cycle failed")
+
+
 async def _push_delivery_loop() -> None:
     while True:
         await asyncio.sleep(15)
@@ -1931,9 +2133,14 @@ async def startup() -> None:
         await asyncio.to_thread(_ensure_automatic_backup)
     except Exception:
         logger.exception("Initial automatic database backup failed")
+    try:
+        await asyncio.to_thread(_run_billing_cycle)
+    except Exception:
+        logger.exception("Initial club billing cycle failed")
     asyncio.create_task(_snapshot_cleanup_loop())
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_push_delivery_loop())
+    asyncio.create_task(_billing_loop())
 
 
 def _hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
@@ -2104,7 +2311,9 @@ def _accessible_club_rows(
     if _is_super_admin(db, user_id):
         return db.execute(
             """
-            SELECT id, slug, name, short_name, active, primary_color
+            SELECT
+                id, slug, name, short_name, active, primary_color,
+                billing_status
             FROM clubs
             WHERE active = 1
             ORDER BY name COLLATE NOCASE, id
@@ -2112,12 +2321,15 @@ def _accessible_club_rows(
         ).fetchall()
     return db.execute(
         """
-        SELECT c.id, c.slug, c.name, c.short_name, c.active, c.primary_color
+        SELECT
+            c.id, c.slug, c.name, c.short_name, c.active, c.primary_color,
+            c.billing_status
         FROM clubs c
         JOIN user_clubs uc ON uc.club_id = c.id
         WHERE uc.user_id = ?
           AND uc.active = 1
           AND c.active = 1
+          AND c.billing_status = 'active'
         ORDER BY c.name COLLATE NOCASE, c.id
         """,
         (user_id,),
@@ -2149,12 +2361,22 @@ def current_user(
 
         club_id = int(row["active_club_id"] or _instance_club_id(db))
         club = db.execute(
-            "SELECT id FROM clubs WHERE id = ? AND active = 1",
+            """
+            SELECT id, billing_status, billing_suspension_reason
+            FROM clubs
+            WHERE id = ? AND active = 1
+            """,
             (club_id,),
         ).fetchone()
         club_role = _user_club_access(db, int(row["id"]), club_id)
         if club is None or club_role is None:
             raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+        if str(club["billing_status"] or "active") != "active" and club_role != "super_admin":
+            reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
+            raise HTTPException(
+                status_code=403,
+                detail=f"Verein gesperrt: {reason}",
+            )
 
         item = dict(row)
         item["club_role"] = club_role
@@ -3531,6 +3753,27 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
         user_id = int(row["id"])
         clubs = _accessible_club_rows(db, user_id)
         if not clubs:
+            suspended = db.execute(
+                """
+                SELECT c.billing_suspension_reason
+                FROM clubs c
+                JOIN user_clubs uc ON uc.club_id = c.id
+                WHERE uc.user_id = ?
+                  AND uc.active = 1
+                  AND c.active = 1
+                  AND c.billing_status != 'active'
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if suspended is not None:
+                reason = str(
+                    suspended["billing_suspension_reason"] or "Ausstehende Zahlung"
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Verein gesperrt: {reason}",
+                )
             _record_login_failure(rate_key)
             raise HTTPException(status_code=401, detail="Keinem aktiven Verein zugeordnet")
 
@@ -3701,6 +3944,235 @@ def create_club(
     return dict(row)
 
 
+@app.get("/api/operator/billing/clubs")
+def operator_billing_clubs(
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    _require_super_admin(user)
+    with connect() as db:
+        rows = db.execute(
+            """
+            SELECT
+                c.id, c.slug, c.name, c.short_name, c.active,
+                c.billing_status, c.billing_email,
+                c.billing_amount_rappen, c.billing_interval_months,
+                c.billing_due_days, c.billing_next_invoice_date,
+                c.billing_auto_suspend, c.billing_suspension_reason,
+                COALESCE(SUM(
+                    CASE WHEN i.status = 'open' THEN i.amount_rappen ELSE 0 END
+                ), 0) AS open_amount_rappen,
+                COALESCE(SUM(
+                    CASE WHEN i.status = 'open' THEN 1 ELSE 0 END
+                ), 0) AS open_invoice_count
+            FROM clubs c
+            LEFT JOIN club_invoices i ON i.club_id = c.id
+            GROUP BY c.id
+            ORDER BY c.name COLLATE NOCASE, c.id
+            """
+        ).fetchall()
+    return [
+        {
+            **dict(row),
+            "billing_auto_suspend": bool(row["billing_auto_suspend"]),
+            "open_amount_chf": round(int(row["open_amount_rappen"]) / 100, 2),
+        }
+        for row in rows
+    ]
+
+
+@app.put("/api/operator/billing/clubs/{club_id}")
+def operator_update_billing_settings(
+    club_id: int,
+    payload: ClubBillingSettingsPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    next_invoice_date = payload.next_invoice_date.strip()
+    if next_invoice_date:
+        _parse_billing_date(next_invoice_date)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE clubs
+            SET
+                billing_email = ?,
+                billing_amount_rappen = ?,
+                billing_interval_months = ?,
+                billing_due_days = ?,
+                billing_next_invoice_date = ?,
+                billing_auto_suspend = ?,
+                updated_at = ?
+            WHERE id = ? AND active = 1
+            """,
+            (
+                payload.billing_email.strip(),
+                payload.amount_rappen,
+                payload.interval_months,
+                payload.due_days,
+                next_invoice_date,
+                int(payload.auto_suspend),
+                now,
+                club_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        db.commit()
+        row = db.execute(
+            """
+            SELECT
+                id, slug, name, billing_status, billing_email,
+                billing_amount_rappen, billing_interval_months,
+                billing_due_days, billing_next_invoice_date,
+                billing_auto_suspend, billing_suspension_reason
+            FROM clubs
+            WHERE id = ?
+            """,
+            (club_id,),
+        ).fetchone()
+    result = dict(row)
+    result["billing_auto_suspend"] = bool(result["billing_auto_suspend"])
+    result["billing_amount_chf"] = round(
+        int(result["billing_amount_rappen"]) / 100,
+        2,
+    )
+    return result
+
+
+@app.get("/api/operator/billing/clubs/{club_id}/invoices")
+def operator_club_invoices(
+    club_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    _require_super_admin(user)
+    with connect() as db:
+        club = db.execute("SELECT id FROM clubs WHERE id = ?", (club_id,)).fetchone()
+        if club is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        rows = db.execute(
+            """
+            SELECT *
+            FROM club_invoices
+            WHERE club_id = ?
+            ORDER BY issue_date DESC, id DESC
+            """,
+            (club_id,),
+        ).fetchall()
+    return [_invoice_row(row) for row in rows]
+
+
+@app.post("/api/operator/billing/run")
+def operator_run_billing(
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, int]:
+    _require_super_admin(user)
+    return _run_billing_cycle()
+
+
+@app.post("/api/operator/billing/clubs/{club_id}/suspend")
+def operator_suspend_club(
+    club_id: int,
+    payload: ClubBillingSuspendPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE clubs
+            SET billing_status = 'suspended',
+                billing_suspension_reason = ?,
+                updated_at = ?
+            WHERE id = ? AND active = 1
+            """,
+            (payload.reason.strip(), now, club_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        db.commit()
+    return {"club_id": club_id, "billing_status": "suspended"}
+
+
+@app.post("/api/operator/billing/clubs/{club_id}/reactivate")
+def operator_reactivate_club(
+    club_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE clubs
+            SET billing_status = 'active',
+                billing_suspension_reason = '',
+                updated_at = ?
+            WHERE id = ? AND active = 1
+            """,
+            (now, club_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        db.commit()
+    return {"club_id": club_id, "billing_status": "active"}
+
+
+@app.post("/api/operator/billing/invoices/{invoice_id}/paid")
+def operator_mark_invoice_paid(
+    invoice_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    now_dt = datetime.now(timezone.utc)
+    today = now_dt.date().isoformat()
+    with connect() as db:
+        invoice = db.execute(
+            "SELECT * FROM club_invoices WHERE id = ?",
+            (invoice_id,),
+        ).fetchone()
+        if invoice is None:
+            raise HTTPException(status_code=404, detail="Rechnung nicht gefunden")
+        club_id = int(invoice["club_id"])
+        db.execute(
+            """
+            UPDATE club_invoices
+            SET status = 'paid', paid_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now_dt.isoformat(), now_dt.isoformat(), invoice_id),
+        )
+        overdue = db.execute(
+            """
+            SELECT 1
+            FROM club_invoices
+            WHERE club_id = ?
+              AND status = 'open'
+              AND due_date < ?
+            LIMIT 1
+            """,
+            (club_id, today),
+        ).fetchone()
+        if overdue is None:
+            db.execute(
+                """
+                UPDATE clubs
+                SET billing_status = 'active',
+                    billing_suspension_reason = '',
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now_dt.isoformat(), club_id),
+            )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM club_invoices WHERE id = ?",
+            (invoice_id,),
+        ).fetchone()
+    return _invoice_row(row)
+
+
 @app.post("/api/auth/club")
 def switch_active_club(
     payload: ClubSwitchPayload,
@@ -3710,7 +4182,11 @@ def switch_active_club(
     token = _extract_token(authorization)
     with connect() as db:
         club = db.execute(
-            "SELECT id, slug, name, active FROM clubs WHERE id = ? AND active = 1",
+            """
+            SELECT id, slug, name, active, billing_status, billing_suspension_reason
+            FROM clubs
+            WHERE id = ? AND active = 1
+            """,
             (payload.club_id,),
         ).fetchone()
         if club is None:
@@ -3718,6 +4194,9 @@ def switch_active_club(
         role = _user_club_access(db, int(user["id"]), int(payload.club_id))
         if role is None:
             raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Verein")
+        if str(club["billing_status"] or "active") != "active" and role != "super_admin":
+            reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
+            raise HTTPException(status_code=403, detail=f"Verein gesperrt: {reason}")
         cursor = db.execute(
             """
             UPDATE sessions
