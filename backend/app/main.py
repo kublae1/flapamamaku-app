@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.59"
+API_VERSION = "0.8.60"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +68,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -599,6 +599,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (8, "club-settings-permission"),
         (9, "multi-tenant-clubs-foundation"),
         (10, "flapamamaku-club-data-migration"),
+        (11, "user-club-memberships"),
     ]
     applied = {
         int(row["version"])
@@ -1089,6 +1090,47 @@ def init_db() -> None:
             )
             """
         )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_clubs (
+                user_id INTEGER NOT NULL,
+                club_id INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'member'
+                    CHECK (role IN ('super_admin', 'club_admin', 'member')),
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, club_id),
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_clubs_club_id ON user_clubs(club_id)"
+        )
+        membership_now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT OR IGNORE INTO user_clubs (
+                user_id, club_id, role, active, created_at, updated_at
+            )
+            SELECT
+                u.id,
+                1,
+                CASE
+                    WHEN u.role_key = 'admin' OR u.can_manage_users = 1
+                    THEN 'club_admin'
+                    ELSE 'member'
+                END,
+                u.active,
+                ?,
+                ?
+            FROM users u
+            """,
+            (membership_now, membership_now),
+        )
+
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS event_registrations (
@@ -1744,12 +1786,22 @@ def _user_profile(user_id: int) -> dict[str, Any]:
     with connect() as db:
         row = db.execute(
             """
-            SELECT u.*, m.name AS member_name
+            SELECT
+                u.*,
+                m.name AS member_name,
+                uc.role AS club_role,
+                uc.club_id AS current_club_id
             FROM users u
-            LEFT JOIN members m ON m.id = u.member_id
+            JOIN user_clubs uc
+              ON uc.user_id = u.id
+             AND uc.club_id = ?
+             AND uc.active = 1
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = uc.club_id
             WHERE u.id = ?
             """,
-            (user_id,),
+            (_active_club_id(db), user_id),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
@@ -1773,12 +1825,17 @@ def current_user(
     with connect() as db:
         row = db.execute(
             """
-            SELECT u.*
+            SELECT u.*, uc.role AS club_role, uc.club_id AS current_club_id
             FROM sessions s
             JOIN users u ON u.id = s.user_id
-            WHERE s.token_hash = ? AND s.expires_at > ? AND u.active = 1
+            JOIN user_clubs uc ON uc.user_id = u.id
+            WHERE s.token_hash = ?
+              AND s.expires_at > ?
+              AND u.active = 1
+              AND uc.club_id = ?
+              AND uc.active = 1
             """,
-            (_token_hash(token), now),
+            (_token_hash(token), now, _active_club_id(db)),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
@@ -1809,6 +1866,22 @@ def _active_club_id(db: sqlite3.Connection) -> int:
     if row is None:
         raise RuntimeError(f"Active club not found for instance '{INSTANCE_ID}'")
     return int(row["id"])
+
+
+def _active_club_membership(
+    db: sqlite3.Connection,
+    user_id: int,
+) -> sqlite3.Row | None:
+    return db.execute(
+        """
+        SELECT uc.user_id, uc.club_id, uc.role, uc.active
+        FROM user_clubs uc
+        WHERE uc.user_id = ?
+          AND uc.club_id = ?
+          AND uc.active = 1
+        """,
+        (user_id, _active_club_id(db)),
+    ).fetchone()
 
 
 def _require_active_club_row(
@@ -2845,8 +2918,16 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
                 now,
             ],
         )
-        db.commit()
         user_id = cursor.lastrowid
+        db.execute(
+            """
+            INSERT INTO user_clubs (
+                user_id, club_id, role, active, created_at, updated_at
+            ) VALUES (?, ?, 'club_admin', 1, ?, ?)
+            """,
+            (user_id, _active_club_id(db), now, now),
+        )
+        db.commit()
     return _user_profile(user_id)
 
 
@@ -2857,8 +2938,16 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
 
     with connect() as db:
         row = db.execute(
-            "SELECT * FROM users WHERE username = ? COLLATE NOCASE AND active = 1",
-            (payload.username.strip(),),
+            """
+            SELECT u.*
+            FROM users u
+            JOIN user_clubs uc ON uc.user_id = u.id
+            WHERE u.username = ? COLLATE NOCASE
+              AND u.active = 1
+              AND uc.club_id = ?
+              AND uc.active = 1
+            """,
+            (payload.username.strip(), _active_club_id(db)),
         ).fetchone()
         if row is None or not _check_password(
             payload.password,
@@ -2935,11 +3024,22 @@ def get_users(
     with connect() as db:
         rows = db.execute(
             """
-            SELECT u.*, m.name AS member_name
+            SELECT
+                u.*,
+                m.name AS member_name,
+                uc.role AS club_role,
+                uc.club_id AS current_club_id
             FROM users u
-            LEFT JOIN members m ON m.id = u.member_id
+            JOIN user_clubs uc
+              ON uc.user_id = u.id
+             AND uc.club_id = ?
+             AND uc.active = 1
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = uc.club_id
             ORDER BY u.username COLLATE NOCASE
-            """
+            """,
+            (_active_club_id(db),),
         ).fetchall()
     return [_serialize_user(row) for row in rows]
 
@@ -2985,10 +3085,27 @@ def post_user(
                     now,
                 ],
             )
+            user_id = cursor.lastrowid
+            club_role = "club_admin" if effective["can_manage_users"] else "member"
+            db.execute(
+                """
+                INSERT INTO user_clubs (
+                    user_id, club_id, role, active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    _active_club_id(db),
+                    club_role,
+                    int(payload.active),
+                    now,
+                    now,
+                ),
+            )
             db.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Benutzername bereits vorhanden")
-    return _user_profile(cursor.lastrowid)
+    return _user_profile(user_id)
 
 
 @app.put("/api/users/{user_id}")
