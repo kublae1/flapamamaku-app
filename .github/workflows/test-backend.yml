@@ -1138,7 +1138,6 @@ jobs:
       - name: Test white-label onboarding end-to-end
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-white-label-onboarding.db
-        working-directory: backend
         run: python tests/test_white_label_onboarding.py
 
       - name: Test backup and restore
