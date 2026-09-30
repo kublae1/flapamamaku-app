@@ -100,9 +100,9 @@ def main() -> None:
             json={"features": features, "labels": labels},
         )
     ).json()
-    assert updated_features["features"]["polls"]["enabled"] is False
-    assert updated_features["features"]["push_notifications"]["enabled"] is True
-    assert updated_features["features"]["participant_lists"]["enabled"] is True
+    assert updated_features["polls"]["enabled"] is False
+    assert updated_features["push_notifications"]["enabled"] is True
+    assert updated_features["participant_lists"]["enabled"] is True
 
     ok(
         client.post(
