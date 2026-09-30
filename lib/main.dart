@@ -3,6 +3,7 @@ import 'data/app_store.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'screens/biometric_lock_screen.dart';
+import 'screens/club_selection_screen.dart';
 import 'theme/flap_brand.dart';
 
 void main() {
@@ -49,6 +50,9 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
                 }
                 if (!store.serverConfigured || !store.isAuthenticated) {
                   return const LoginScreen();
+                }
+                if (store.clubSelectionRequired) {
+                  return const ClubSelectionScreen();
                 }
                 return const HomeShell();
               },
