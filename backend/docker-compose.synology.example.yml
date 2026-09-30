@@ -1,0 +1,20 @@
+services:
+  flapamamaku-backend:
+    image: ghcr.io/kublae1/flapamamaku-backend:latest
+    pull_policy: always
+    container_name: flapamamaku-backend
+    restart: unless-stopped
+    ports:
+      # Nur auf der Synology selbst erreichbar.
+      # Externer Zugriff erfolgt ausschliesslich via DSM Reverse Proxy / HTTPS.
+      - "127.0.0.1:8087:8000"
+    environment:
+      FLAPAMAMAKU_DB: /data/flapamamaku.db
+      FLAPAMAMAKU_ENV: production
+      FLAPAMAMAKU_ALLOWED_ORIGINS: ${FLAPAMAMAKU_ALLOWED_ORIGINS}
+    volumes:
+      # Beispielpfad; bei Bedarf an das verwendete Synology-Volume anpassen.
+      - /volume1/docker/flapamamaku/data:/data
+
+# Diese Datei ist bewusst nur ein Synology-Beispiel.
+# Die bestehende produktive Portainer-/Compose-Konfiguration wird dadurch nicht verändert.
