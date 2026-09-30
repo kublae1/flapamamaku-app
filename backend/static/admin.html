@@ -2861,31 +2861,65 @@ document.getElementById("app-config-form").addEventListener("submit", async even
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
   try {
+    const features = {};
+    const labels = {};
+    document.querySelectorAll("#club-feature-list [data-feature-key]").forEach(input => {
+      features[input.dataset.featureKey] = input.checked;
+    });
+    document.querySelectorAll("#club-feature-list [data-feature-label]").forEach(input => {
+      labels[input.dataset.featureLabel] = input.value.trim();
+    });
+
+    const legacy = {
+      sujet: "sujet_next",
+      archive: "sujet_archive",
+      photos: "photos",
+      documents: "documents",
+      polls: "polls",
+      links: "links",
+    };
+    for (const [legacyKey, featureKey] of Object.entries(legacy)) {
+      form.elements[`show_${legacyKey}`].checked = features[featureKey] !== false;
+      form.elements[`label_${legacyKey}`].value = labels[featureKey] || "";
+    }
+
     await api("/api/app-config", {
       method: "PUT",
       body: JSON.stringify({
         app_name: form.elements.app_name.value.trim(),
+        short_name: form.elements.short_name.value.trim(),
         app_subtitle: form.elements.app_subtitle.value.trim(),
+        app_title: form.elements.app_title.value.trim(),
         primary_color: form.elements.primary_color.value.toUpperCase(),
+        secondary_color: form.elements.secondary_color.value.toUpperCase(),
         club_description: form.elements.club_description.value.trim(),
+        welcome_text: form.elements.welcome_text.value.trim(),
         website_url: form.elements.website_url.value.trim(),
         contact_email: form.elements.contact_email.value.trim(),
         contact_phone: form.elements.contact_phone.value.trim(),
         club_address: form.elements.club_address.value.trim(),
+        city: form.elements.city.value.trim(),
+        country: form.elements.country.value.trim(),
         show_sujet: form.elements.show_sujet.checked,
-        label_sujet: form.elements.label_sujet.value.trim(),
+        label_sujet: form.elements.label_sujet.value.trim() || "Sujet nächstes Jahr",
         show_archive: form.elements.show_archive.checked,
-        label_archive: form.elements.label_archive.value.trim(),
+        label_archive: form.elements.label_archive.value.trim() || "Vergangene Sujet",
         show_photos: form.elements.show_photos.checked,
-        label_photos: form.elements.label_photos.value.trim(),
+        label_photos: form.elements.label_photos.value.trim() || "Fotoalben",
         show_documents: form.elements.show_documents.checked,
-        label_documents: form.elements.label_documents.value.trim(),
+        label_documents: form.elements.label_documents.value.trim() || "Dokumente",
         show_polls: form.elements.show_polls.checked,
-        label_polls: form.elements.label_polls.value.trim(),
+        label_polls: form.elements.label_polls.value.trim() || "Umfragen",
         show_links: form.elements.show_links.checked,
-        label_links: form.elements.label_links.value.trim(),
+        label_links: form.elements.label_links.value.trim() || "Links",
       }),
     });
+
+    await api("/api/app-config/features", {
+      method: "PUT",
+      body: JSON.stringify({features, labels}),
+    });
+
     const logoFile = form.elements.logo_file.files[0];
     if (logoFile) {
       const upload = new FormData();
@@ -2896,10 +2930,12 @@ document.getElementById("app-config-form").addEventListener("submit", async even
       });
       form.elements.logo_file.value = "";
     }
+
+    currentUser = await api("/api/auth/me");
     await loadAppConfig();
-    alert("Branding wurde gespeichert.");
+    alert("Vereinskonfiguration wurde gespeichert.");
   } catch (error) {
-    alert("Branding konnte nicht gespeichert werden.");
+    alert("Vereinskonfiguration konnte nicht gespeichert werden.");
     console.error(error);
   } finally {
     button.disabled = false;
