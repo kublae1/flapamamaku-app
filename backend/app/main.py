@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.51"
+API_VERSION = "0.8.52"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2078,6 +2078,97 @@ def _app_config() -> dict[str, Any]:
     }
 
 
+def _club_setup_status() -> dict[str, Any]:
+    config = _app_config()
+    with connect() as db:
+        administrator_ready = bool(
+            db.execute(
+                """
+                SELECT 1
+                FROM users
+                WHERE active = 1 AND can_manage_users = 1
+                LIMIT 1
+                """
+            ).fetchone()
+        )
+
+    app_name = str(config.get("app_name") or "").strip()
+    identity_ready = bool(app_name)
+    if INSTANCE_ID != "flapamamaku" and app_name.upper() == "FLAPAMAMAKU":
+        identity_ready = False
+
+    contact_ready = any(
+        str(config.get(key) or "").strip()
+        for key in ("contact_email", "contact_phone", "website_url")
+    )
+    modules_ready = any(
+        bool(config.get(key))
+        for key in (
+            "show_sujet",
+            "show_archive",
+            "show_photos",
+            "show_documents",
+            "show_polls",
+            "show_links",
+        )
+    )
+
+    required = {
+        "administrator": {
+            "ok": administrator_ready,
+            "label": "Hauptadministrator vorhanden",
+        },
+        "identity": {
+            "ok": identity_ready,
+            "label": "Vereinsname eingerichtet",
+        },
+        "contact": {
+            "ok": contact_ready,
+            "label": "Mindestens eine Kontaktmöglichkeit erfasst",
+        },
+        "modules": {
+            "ok": modules_ready,
+            "label": "Mindestens ein Inhaltsmodul aktiviert",
+        },
+    }
+
+    recommended = {
+        "logo": {
+            "ok": bool(str(config.get("logo_url") or "").strip()),
+            "label": "Vereinslogo hinterlegt",
+        },
+        "description": {
+            "ok": bool(str(config.get("club_description") or "").strip()),
+            "label": "Vereinsbeschreibung erfasst",
+        },
+        "backup": {
+            "ok": bool(_backup_files()),
+            "label": "Mindestens ein Backup vorhanden",
+        },
+        "push": {
+            "ok": bool(FIREBASE_SERVICE_ACCOUNT_JSON),
+            "label": "Push-Zustellung konfiguriert",
+        },
+        "production": {
+            "ok": bool(_production_readiness()["ready"]),
+            "label": "Öffentlicher Produktionsbetrieb bereit",
+        },
+    }
+
+    required_done = sum(1 for item in required.values() if item["ok"])
+    recommended_done = sum(1 for item in recommended.values() if item["ok"])
+    return {
+        "instance_id": INSTANCE_ID,
+        "required_complete": required_done == len(required),
+        "required_done": required_done,
+        "required_total": len(required),
+        "recommended_done": recommended_done,
+        "recommended_total": len(recommended),
+        "required": required,
+        "recommended": recommended,
+    }
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {
@@ -2376,6 +2467,13 @@ def system_readiness(
         "session_lifetime_days": SESSION_LIFETIME_DAYS,
         "expected_schema_version": CURRENT_SCHEMA_VERSION,
     }
+
+
+@app.get("/api/system/setup-status")
+def system_setup_status(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    return _club_setup_status()
 
 
 @app.get("/api/system/backups")
