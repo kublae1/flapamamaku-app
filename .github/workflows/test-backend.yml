@@ -82,7 +82,7 @@ jobs:
               ).fetchone()
               assert migration is not None
               assert migration["name"] == "multi-tenant-clubs-foundation"
-              assert CURRENT_SCHEMA_VERSION == 15
+              assert CURRENT_SCHEMA_VERSION == 16
 
               member = db.execute(
                   """
