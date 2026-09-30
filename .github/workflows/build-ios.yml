@@ -1,0 +1,185 @@
+name: Build iOS Foundation
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "White-label build profile"
+        required: false
+        default: "flapamamaku"
+  push:
+    branches: [ feature/ios-foundation-v1 ]
+    paths:
+      - "lib/**"
+      - "pubspec.yaml"
+      - "config/white-label/**"
+      - ".github/workflows/build-ios.yml"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
+      IOS_BUNDLE_ID: ${{ vars.FLAPAMAMAKU_IOS_BUNDLE_ID || 'ch.flapamamaku.app' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load white label profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          profile = os.environ["BUILD_PROFILE"].strip()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile):
+              raise SystemExit("Invalid white-label profile name")
+
+          path = Path("config/white-label") / f"{profile}.json"
+          if not path.exists():
+              raise SystemExit(f"White-label profile not found: {path}")
+
+          data = json.loads(path.read_text())
+          required = [
+              "id",
+              "instance_id",
+              "app_name",
+              "app_subtitle",
+              "api_base_url",
+              "allow_server_change",
+          ]
+          missing = [key for key in required if key not in data]
+          if missing:
+              raise SystemExit("Missing profile fields: " + ", ".join(missing))
+          if data["id"] != profile:
+              raise SystemExit("Profile id does not match file name")
+          if not isinstance(data["allow_server_change"], bool):
+              raise SystemExit("allow_server_change must be true or false")
+
+          instance_id = str(data["instance_id"]).strip().lower()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", instance_id):
+              raise SystemExit("Profile instance_id is invalid")
+
+          values = {
+              "CLUB_INSTANCE_ID": instance_id,
+              "APP_DISPLAY_NAME": str(data["app_name"]).strip(),
+              "APP_DISPLAY_SUBTITLE": str(data["app_subtitle"]).strip(),
+              "API_BASE_URL": str(data["api_base_url"]).rstrip("/"),
+              "ALLOW_SERVER_CHANGE": "true" if data["allow_server_change"] else "false",
+          }
+          if not values["APP_DISPLAY_NAME"]:
+              raise SystemExit("Profile app_name must not be empty")
+          if not values["API_BASE_URL"].startswith("https://"):
+              raise SystemExit("Profile api_base_url must use HTTPS")
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a") as handle:
+              for key, value in values.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit(f"{key} must be a single line")
+                  handle.write(f"{key}={value}\n")
+
+          print(f"Loaded profile: {profile}")
+          print(f"App: {values['APP_DISPLAY_NAME']}")
+          print(f"Instance: {values['CLUB_INSTANCE_ID']}")
+          print(f"API: {values['API_BASE_URL']}")
+          PY
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate iOS platform files
+        run: |
+          if [ ! -d ios ]; then
+            flutter create --platforms=ios --project-name flapamamaku_app .
+          fi
+
+      - name: Configure iOS application
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import plistlib
+          import re
+          from pathlib import Path
+
+          bundle_id = os.environ["IOS_BUNDLE_ID"].strip()
+          if not re.fullmatch(r"[A-Za-z0-9.-]+", bundle_id) or "." not in bundle_id:
+              raise SystemExit("Invalid iOS bundle identifier")
+
+          app_name = os.environ["APP_DISPLAY_NAME"].strip()
+          project = Path("ios/Runner.xcodeproj/project.pbxproj")
+          text = project.read_text()
+          text, count = re.subn(
+              r"PRODUCT_BUNDLE_IDENTIFIER = [^;]+;",
+              f"PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};",
+              text,
+          )
+          if count == 0:
+              raise SystemExit("Could not configure iOS bundle identifier")
+          project.write_text(text)
+
+          plist_path = Path("ios/Runner/Info.plist")
+          with plist_path.open("rb") as handle:
+              plist = plistlib.load(handle)
+
+          plist["CFBundleDisplayName"] = app_name
+          plist["NSFaceIDUsageDescription"] = (
+              f"{app_name} verwendet Face ID zum sicheren Entsperren der App."
+          )
+          plist["NSCameraUsageDescription"] = (
+              f"{app_name} benötigt die Kamera zum Aufnehmen von Vereinsfotos."
+          )
+          plist["NSPhotoLibraryUsageDescription"] = (
+              f"{app_name} benötigt Zugriff auf Fotos für Vereinsinhalte."
+          )
+          plist["NSPhotoLibraryAddUsageDescription"] = (
+              f"{app_name} darf Bilder in deiner Fotomediathek speichern."
+          )
+
+          with plist_path.open("wb") as handle:
+              plistlib.dump(plist, handle)
+
+          print(f"Configured iOS bundle id: {bundle_id}")
+          print(f"Configured iOS display name: {app_name}")
+          PY
+
+      - name: Verify iOS configuration
+        shell: bash
+        run: |
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :NSFaceIDUsageDescription" ios/Runner/Info.plist
+          grep -q "$IOS_BUNDLE_ID" ios/Runner.xcodeproj/project.pbxproj
+
+      - name: Flutter analyze
+        run: flutter analyze
+
+      - name: Flutter tests
+        run: flutter test
+
+      - name: Build unsigned iOS release
+        shell: bash
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_NAME="$APP_DISPLAY_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_DISPLAY_SUBTITLE" \
+            --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE"
+
+      - name: Verify iOS app bundle
+        shell: bash
+        run: |
+          test -d build/ios/iphoneos/Runner.app
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" build/ios/iphoneos/Runner.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/ios/iphoneos/Runner.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/ios/iphoneos/Runner.app/Info.plist
+          echo "Unsigned iOS foundation build passed."
