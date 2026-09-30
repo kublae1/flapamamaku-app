@@ -57,7 +57,15 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.50"
+API_VERSION = "0.8.51"
+# Stable identifier for one autonomous club instance. It is public metadata and
+# lets a white-label app reject an accidentally configured server of another club.
+INSTANCE_ID = (
+    os.getenv("FLAPAMAMAKU_INSTANCE_ID", "flapamamaku").strip().lower()
+    or "flapamamaku"
+)
+if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
+    raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
 CURRENT_SCHEMA_VERSION = 6
@@ -2021,6 +2029,7 @@ def _app_config() -> dict[str, Any]:
         ).fetchone()
     if row is None:
         return {
+            "instance_id": INSTANCE_ID,
             "app_name": "FLAPAMAMAKU",
             "app_subtitle": "Fasnachtsgruppe Luzern",
             "primary_color": "#8A101B",
@@ -2044,6 +2053,7 @@ def _app_config() -> dict[str, Any]:
             "label_links": "Links",
         }
     return {
+        "instance_id": INSTANCE_ID,
         "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
         "app_subtitle": str(row["app_subtitle"] or ""),
         "primary_color": str(row["primary_color"] or "#8A101B"),
@@ -2082,6 +2092,7 @@ def health() -> dict[str, Any]:
     readiness = _production_readiness()
     return {
         "status": "ok",
+        "instance_id": INSTANCE_ID,
         "version": API_VERSION,
         "build_sha": BUILD_SHA,
         "schema_version": _schema_version(),
