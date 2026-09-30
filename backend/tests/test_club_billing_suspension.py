@@ -91,12 +91,14 @@ def main() -> None:
                 "amount_rappen": 12000,
                 "interval_months": 12,
                 "due_days": 30,
+                "grace_days": 2,
                 "next_invoice_date": yesterday,
                 "auto_suspend": True,
             },
         )
     ).json()
     assert settings["billing_amount_rappen"] == 12000
+    assert settings["billing_grace_days"] == 2
     assert settings["billing_status"] == "active"
 
     first_run = ok(
@@ -115,10 +117,40 @@ def main() -> None:
     assert invoices[0]["status"] == "open"
     assert invoices[0]["amount_rappen"] == 12000
 
+    pdf = ok(
+        client.get(
+            f"/api/operator/billing/invoices/{invoice_id}/pdf",
+            headers=super_headers,
+        )
+    )
+    assert pdf.headers["content-type"].startswith("application/pdf")
+    assert pdf.content.startswith(b"%PDF")
+    assert len(pdf.content) > 1000
+    assert "vereinsrechnung-" in pdf.headers["content-disposition"]
+
+    # One day overdue is still inside the configured two-day grace period.
     with connect() as db:
         db.execute(
             "UPDATE club_invoices SET due_date = ? WHERE id = ?",
             (yesterday, invoice_id),
+        )
+        db.commit()
+
+    grace_run = ok(
+        client.post("/api/operator/billing/run", headers=super_headers)
+    ).json()
+    assert grace_run["suspended_clubs"] == 0
+    still_allowed = ok(login(client, "ztv-admin")).json()
+    assert still_allowed["user"]["current_club_id"] == club_id
+
+    # After the grace period has elapsed, automatic suspension takes effect.
+    overdue_date = (
+        datetime.now(timezone.utc) - timedelta(days=3)
+    ).date().isoformat()
+    with connect() as db:
+        db.execute(
+            "UPDATE club_invoices SET due_date = ? WHERE id = ?",
+            (overdue_date, invoice_id),
         )
         db.commit()
 
@@ -163,6 +195,7 @@ def main() -> None:
     ).json()
     club = next(item for item in billing if int(item["id"]) == club_id)
     assert club["billing_status"] == "active"
+    assert club["billing_grace_days"] == 2
     assert club["open_invoice_count"] == 0
 
     flapa = next(item for item in billing if int(item["id"]) == 1)
