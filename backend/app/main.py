@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.55"
+API_VERSION = "0.8.56"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -208,6 +208,13 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "Vorstand",
         "permissions": {
             key: key != "can_manage_users"
+            for key in PERMISSION_FIELDS
+        },
+    },
+    "club_manager": {
+        "label": "Vereinsverwaltung",
+        "permissions": {
+            key: key in {"can_admin_page", "can_manage_settings"}
             for key in PERMISSION_FIELDS
         },
     },
