@@ -824,6 +824,7 @@ jobs:
               MemberPayload,
               NewsPayload,
               UserPayload,
+              _REQUEST_CLUB_ID,
               _app_config,
               _token_hash,
               accessible_clubs,
@@ -952,6 +953,7 @@ jobs:
           test_user = current_user(authorization=headers)
           assert test_user["current_club_id"] == test_club_id
           assert test_user["is_super_admin"] is True
+          tenant_context = _REQUEST_CLUB_ID.set(test_club_id)
 
           config = put_app_config(
               AppConfigPayload(
@@ -1041,6 +1043,7 @@ jobs:
               authorization=headers,
               user=test_user,
           )
+          _REQUEST_CLUB_ID.reset(tenant_context)
           flapa_user = current_user(authorization=headers)
           assert flapa_user["current_club_id"] == 1
 
