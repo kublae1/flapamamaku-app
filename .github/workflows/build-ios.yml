@@ -21,6 +21,10 @@ jobs:
     env:
       BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
       IOS_BUNDLE_ID: ${{ vars.FLAPAMAMAKU_IOS_BUNDLE_ID || 'ch.flapamamaku.app' }}
+      FIREBASE_API_KEY_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_API_KEY || secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+      FIREBASE_APP_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_IOS_APP_ID || secrets.FLAPAMAMAKU_FIREBASE_IOS_APP_ID }}
+      FIREBASE_MESSAGING_SENDER_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_MESSAGING_SENDER_ID || secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_PROJECT_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_PROJECT_ID || secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -173,7 +177,11 @@ jobs:
             --dart-define=APP_NAME="$APP_DISPLAY_NAME" \
             --dart-define=APP_SUBTITLE="$APP_DISPLAY_SUBTITLE" \
             --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
-            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE"
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY_VALUE" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID_VALUE" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID_VALUE" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID_VALUE"
 
       - name: Verify iOS app bundle
         shell: bash
