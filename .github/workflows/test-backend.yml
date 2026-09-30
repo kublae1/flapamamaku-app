@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -82,7 +82,7 @@ jobs:
               ).fetchone()
               assert migration is not None
               assert migration["name"] == "multi-tenant-clubs-foundation"
-              assert CURRENT_SCHEMA_VERSION == 11
+              assert CURRENT_SCHEMA_VERSION == 12
 
               member = db.execute(
                   """
@@ -208,7 +208,7 @@ jobs:
           init_db()
 
           with connect() as db:
-              assert CURRENT_SCHEMA_VERSION == 11
+              assert CURRENT_SCHEMA_VERSION == 12
               assert db.execute("SELECT id, club_id FROM news WHERE id = 41").fetchone()[:] == (41, 1)
               assert db.execute("SELECT id, club_id FROM events WHERE id = 51").fetchone()[:] == (51, 1)
               assert db.execute("SELECT id, club_id FROM members WHERE id = 61").fetchone()[:] == (61, 1)
@@ -375,7 +375,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 11
+          assert CURRENT_SCHEMA_VERSION == 12
 
           with connect() as db:
               now = datetime.now(timezone.utc).isoformat()
@@ -553,6 +553,79 @@ jobs:
               assert foreign["secondary_color"] == "#EEEEEE"
 
           print("package 5 club configuration ok")
+          PY
+
+      - name: Test package 6 club feature flags
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-package6-features.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-package6-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-package6-features.db
+          rm -rf /tmp/flapamamaku-package6-backups
+          python - <<'PY'
+          from fastapi import HTTPException
+          from app.main import (
+              CLUB_FEATURE_DEFAULTS,
+              CURRENT_SCHEMA_VERSION,
+              _app_config,
+              _club_feature_enabled,
+              _club_features,
+              _set_club_features,
+              connect,
+              init_db,
+              list_rows,
+          )
+
+          init_db()
+          assert CURRENT_SCHEMA_VERSION == 12
+
+          with connect() as db:
+              features = _club_features(db, 1)
+              assert set(CLUB_FEATURE_DEFAULTS).issubset(features)
+              assert all(features[key]["enabled"] for key in CLUB_FEATURE_DEFAULTS)
+              assert features["sujet_next"]["label"] == "Sujet nächstes Jahr"
+              assert features["sujet_archive"]["label"] == "Vergangene Sujet"
+
+              _set_club_features(
+                  db,
+                  1,
+                  {
+                      "news": False,
+                      "gallery": False,
+                      "sujet_next": False,
+                  },
+                  {"sujet_next": "Eigenes Sujet"},
+              )
+              db.commit()
+
+              assert _club_feature_enabled(db, "news", 1) is False
+              assert _club_feature_enabled(db, "gallery", 1) is False
+              assert _club_feature_enabled(db, "events", 1) is True
+
+          config = _app_config()
+          assert config["show_news"] is False
+          assert config["show_gallery"] is False
+          assert config["show_sujet"] is False
+          assert config["label_sujet"] == "Eigenes Sujet"
+          assert config["show_events"] is True
+          assert config["show_members"] is True
+
+          try:
+              list_rows("news")
+              raise AssertionError("disabled news module remained API-accessible")
+          except HTTPException as exc:
+              assert exc.status_code == 404
+
+          events = list_rows("events")
+          assert isinstance(events, list)
+
+          with connect() as db:
+              _set_club_features(db, 1, {"news": True, "gallery": True, "sujet_next": True})
+              db.commit()
+
+          assert _app_config()["show_news"] is True
+          print("package 6 club feature flags ok")
           PY
 
       - name: Test backup and restore
@@ -886,7 +959,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 11
+          assert CURRENT_SCHEMA_VERSION == 12
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
           assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
