@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -464,6 +464,97 @@ jobs:
           print("package 4 user club memberships ok")
           PY
 
+      - name: Test package 5 club configuration
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-package5-config.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-package5-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-package5-config.db
+          rm -rf /tmp/flapamamaku-package5-backups
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from app.main import (
+              AppConfigPayload,
+              _app_config,
+              connect,
+              init_db,
+              put_app_config,
+          )
+
+          init_db()
+          initial = _app_config()
+          assert initial["club_id"] == 1
+          assert initial["slug"] == "flapamamaku"
+          assert initial["app_name"] == "FLAPAMAMAKU"
+          assert initial["primary_color"] == "#8A101B"
+
+          now = datetime.now(timezone.utc).isoformat()
+          with connect() as db:
+              db.execute(
+                  """
+                  INSERT INTO clubs (
+                      slug, name, short_name, active,
+                      primary_color, secondary_color,
+                      created_at, updated_at
+                  ) VALUES (
+                      'fremdverein', 'Fremdverein', 'Fremd', 1,
+                      '#111111', '#EEEEEE', ?, ?
+                  )
+                  """,
+                  (now, now),
+              )
+              foreign_id = db.execute(
+                  "SELECT id FROM clubs WHERE slug = 'fremdverein'"
+              ).fetchone()[0]
+              db.commit()
+
+          updated = put_app_config(
+              AppConfigPayload(
+                  app_name="FLAPAMAMAKU",
+                  short_name="FLAPA",
+                  app_subtitle="Fasnachtsgruppe Luzern",
+                  primary_color="#8A101B",
+                  secondary_color="#FAFAFA",
+                  club_description="Referenzverein",
+                  website_url="https://example.invalid",
+                  contact_email="kontakt@example.invalid",
+                  contact_phone="+41 00 000 00 00",
+                  club_address="Luzern",
+                  city="Luzern",
+                  country="CH",
+                  app_title="FLAPAMAMAKU",
+                  welcome_text="Willkommen",
+              ),
+              _={"id": 1},
+          )
+
+          assert updated["app_name"] == "FLAPAMAMAKU"
+          assert updated["short_name"] == "FLAPA"
+          assert updated["secondary_color"] == "#FAFAFA"
+          assert updated["club_description"] == "Referenzverein"
+          assert updated["city"] == "Luzern"
+          assert updated["country"] == "CH"
+
+          with connect() as db:
+              own = db.execute(
+                  "SELECT * FROM clubs WHERE id = 1"
+              ).fetchone()
+              foreign = db.execute(
+                  "SELECT * FROM clubs WHERE id = ?",
+                  (foreign_id,),
+              ).fetchone()
+
+              assert own["short_name"] == "FLAPA"
+              assert own["email"] == "kontakt@example.invalid"
+              assert own["secondary_color"] == "#FAFAFA"
+              assert foreign["name"] == "Fremdverein"
+              assert foreign["primary_color"] == "#111111"
+              assert foreign["secondary_color"] == "#EEEEEE"
+
+          print("package 5 club configuration ok")
+          PY
+
       - name: Test backup and restore
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-test.db
@@ -662,11 +753,16 @@ jobs:
           with connect() as db:
               db.execute(
                   """
-                  UPDATE app_config
-                  SET app_name = ?, contact_email = ?, club_description = ?
+                  UPDATE clubs
+                  SET name = ?, email = ?, description = ?, updated_at = ?
                   WHERE id = 1
                   """,
-                  ("Test Verein", "admin@test.invalid", "Testbeschreibung"),
+                  (
+                      "Test Verein",
+                      "admin@test.invalid",
+                      "Testbeschreibung",
+                      "2026-09-30T00:00:00+00:00",
+                  ),
               )
               db.commit()
 
