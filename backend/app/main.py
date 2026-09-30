@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.58"
+API_VERSION = "0.8.59"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -1800,6 +1800,32 @@ def table_or_404(name: str) -> tuple[str, type[BaseModel]]:
     return table
 
 
+def _active_club_id(db: sqlite3.Connection) -> int:
+    """Resolve the server-side tenant from the configured instance identity."""
+    row = db.execute(
+        "SELECT id FROM clubs WHERE slug = ? AND active = 1",
+        (INSTANCE_ID,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"Active club not found for instance '{INSTANCE_ID}'")
+    return int(row["id"])
+
+
+def _require_active_club_row(
+    db: sqlite3.Connection,
+    table: str,
+    row_id: int,
+) -> sqlite3.Row:
+    club_id = _active_club_id(db)
+    row = db.execute(
+        f"SELECT * FROM {table} WHERE id = ? AND club_id = ?",
+        (row_id, club_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return row
+
+
 def _serialize_news(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     has_image = bool(item.pop("image_data", None))
@@ -1823,10 +1849,10 @@ def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
                 """
                 SELECT filter_id
                 FROM member_filter_links
-                WHERE member_id = ?
+                WHERE member_id = ? AND club_id = ?
                 ORDER BY filter_id ASC
                 """,
-                (item["id"],),
+                (item["id"], _active_club_id(db)),
             ).fetchall()
         ]
     return item
@@ -1853,8 +1879,8 @@ def _queue_push_notification(
     db.execute(
         """
         INSERT INTO push_notifications (
-            kind, title, body, route, created_at
-        ) VALUES (?, ?, ?, ?, ?)
+            kind, title, body, route, created_at, club_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             kind,
@@ -1862,6 +1888,7 @@ def _queue_push_notification(
             body[:500],
             route,
             datetime.now(timezone.utc).isoformat(),
+            _active_club_id(db),
         ),
     )
 
@@ -1881,8 +1908,10 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
         order = "name COLLATE NOCASE ASC, id ASC"
 
     with connect() as db:
+        club_id = _active_club_id(db)
         rows = db.execute(
-            f"SELECT * FROM {resource} ORDER BY {order}"
+            f"SELECT * FROM {resource} WHERE club_id = ? ORDER BY {order}",
+            (club_id,),
         ).fetchall()
 
     if resource == "news":
@@ -1897,10 +1926,12 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     data = payload.model_dump()
     member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     data["created_at"] = datetime.now(timezone.utc).isoformat()
-    if resource in {"members", "news"}:
-        with connect() as db:
+    with connect() as db:
+        data["club_id"] = _active_club_id(db)
+        if resource in {"members", "news"}:
             data["sort_order"] = db.execute(
-                f"SELECT COALESCE(MAX(sort_order), 0) + 1 FROM {resource}"
+                f"SELECT COALESCE(MAX(sort_order), 0) + 1 FROM {resource} WHERE club_id = ?",
+                (data["club_id"],),
             ).fetchone()[0]
     columns = list(data.keys())
     placeholders = ", ".join("?" for _ in columns)
@@ -1913,8 +1944,8 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
         if resource == "members":
             for filter_id in sorted(set(member_filter_ids)):
                 db.execute(
-                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
-                    (cursor.lastrowid, filter_id),
+                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id, club_id) VALUES (?, ?, ?)",
+                    (cursor.lastrowid, filter_id, _active_club_id(db)),
                 )
         db.commit()
         row = db.execute(
@@ -1935,13 +1966,16 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
     assignments = ", ".join(f"{column} = ?" for column in data)
     with connect() as db:
         cursor = db.execute(
-            f"UPDATE {resource} SET {assignments} WHERE id = ?",
-            [*data.values(), row_id],
+            f"UPDATE {resource} SET {assignments} WHERE id = ? AND club_id = ?",
+            [*data.values(), row_id, _active_club_id(db)],
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
         if resource == "members":
-            db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+            db.execute(
+                "DELETE FROM member_filter_links WHERE member_id = ? AND club_id = ?",
+                (row_id, _active_club_id(db)),
+            )
             for filter_id in sorted(set(member_filter_ids)):
                 db.execute(
                     "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
@@ -1949,8 +1983,8 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
                 )
         db.commit()
         row = db.execute(
-            f"SELECT * FROM {resource} WHERE id = ?",
-            (row_id,),
+            f"SELECT * FROM {resource} WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if resource == "news":
         return _serialize_news(row)
@@ -1963,8 +1997,8 @@ def delete_row(resource: str, row_id: int) -> None:
     table_or_404(resource)
     with connect() as db:
         cursor = db.execute(
-            f"DELETE FROM {resource} WHERE id = ?",
-            (row_id,),
+            f"DELETE FROM {resource} WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
