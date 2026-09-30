@@ -4114,7 +4114,8 @@ def operator_billing_clubs(
                 c.id, c.slug, c.name, c.short_name, c.active,
                 c.billing_status, c.billing_email,
                 c.billing_amount_rappen, c.billing_interval_months,
-                c.billing_due_days, c.billing_next_invoice_date,
+                c.billing_due_days, c.billing_grace_days,
+                c.billing_next_invoice_date,
                 c.billing_auto_suspend, c.billing_suspension_reason,
                 COALESCE(SUM(
                     CASE WHEN i.status = 'open' THEN i.amount_rappen ELSE 0 END
@@ -4158,6 +4159,7 @@ def operator_update_billing_settings(
                 billing_amount_rappen = ?,
                 billing_interval_months = ?,
                 billing_due_days = ?,
+                billing_grace_days = ?,
                 billing_next_invoice_date = ?,
                 billing_auto_suspend = ?,
                 updated_at = ?
@@ -4168,6 +4170,7 @@ def operator_update_billing_settings(
                 payload.amount_rappen,
                 payload.interval_months,
                 payload.due_days,
+                payload.grace_days,
                 next_invoice_date,
                 int(payload.auto_suspend),
                 now,
@@ -4182,7 +4185,8 @@ def operator_update_billing_settings(
             SELECT
                 id, slug, name, billing_status, billing_email,
                 billing_amount_rappen, billing_interval_months,
-                billing_due_days, billing_next_invoice_date,
+                billing_due_days, billing_grace_days,
+                billing_next_invoice_date,
                 billing_auto_suspend, billing_suspension_reason
             FROM clubs
             WHERE id = ?
@@ -4218,6 +4222,45 @@ def operator_club_invoices(
             (club_id,),
         ).fetchall()
     return [_invoice_row(row) for row in rows]
+
+
+@app.get("/api/operator/billing/invoices/{invoice_id}/pdf")
+def operator_invoice_pdf(
+    invoice_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> Response:
+    _require_super_admin(user)
+    with connect() as db:
+        invoice_row = db.execute(
+            "SELECT * FROM club_invoices WHERE id = ?",
+            (invoice_id,),
+        ).fetchone()
+        if invoice_row is None:
+            raise HTTPException(status_code=404, detail="Rechnung nicht gefunden")
+        club_row = db.execute(
+            """
+            SELECT
+                id, slug, name, address, city, country, billing_email
+            FROM clubs
+            WHERE id = ?
+            """,
+            (int(invoice_row["club_id"]),),
+        ).fetchone()
+        if club_row is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+
+    invoice = _invoice_row(invoice_row)
+    club = dict(club_row)
+    pdf_bytes = _invoice_pdf_bytes(invoice, club)
+    filename = f"vereinsrechnung-{invoice['invoice_number']}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.post("/api/operator/billing/run")
@@ -4301,16 +4344,24 @@ def operator_mark_invoice_paid(
             """,
             (now_dt.isoformat(), now_dt.isoformat(), invoice_id),
         )
+        club_billing = db.execute(
+            "SELECT billing_grace_days FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        grace_days = max(
+            0,
+            int(club_billing["billing_grace_days"] if club_billing else 0),
+        )
         overdue = db.execute(
             """
             SELECT 1
             FROM club_invoices
             WHERE club_id = ?
               AND status = 'open'
-              AND due_date < ?
+              AND date(due_date, '+' || ? || ' days') < ?
             LIMIT 1
             """,
-            (club_id, today),
+            (club_id, grace_days, today),
         ).fetchone()
         if overdue is None:
             db.execute(
