@@ -75,7 +75,16 @@ Geprüft werden:
 - öffentliche API-Dokumentation ist im Produktionsmodus deaktiviert
 - Auth-Status-Endpunkt ist erreichbar
 
-Damit kann derselbe Test für jede White-Label-Instanz verwendet werden. Es muss nur deren `WHITE_LABEL_API_BASE_URL` gesetzt werden.
+Damit kann derselbe Test für jede White-Label-Instanz verwendet werden.
+
+Der Public-Smoke-Workflow verwendet dieselben Profile wie der Android-Build:
+`config/white-label/<profil>.json`.
+
+Beim manuellen Start des Workflows wird nur noch das Profil gewählt. Der Test liest daraus automatisch:
+- `api_base_url`
+- `instance_id`
+
+Damit gibt es für Verein 1 bis Verein 10 keine separate zweite Pflege der öffentlichen URL und der erwarteten Vereinsinstanz.
 
 ## Reverse Proxy
 
