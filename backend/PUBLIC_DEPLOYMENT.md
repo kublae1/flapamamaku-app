@@ -17,6 +17,11 @@ Für Builds und externe Prüfungen wird bevorzugt die Repository-Variable
 Für die bestehende FLAPAMAMAKU-Instanz bleibt
 `FLAPAMAMAKU_API_BASE_URL` als kompatibler Fallback erhalten.
 
+Zusätzlich wird die erwartete Vereinsinstanz geprüft. Dafür kann
+`WHITE_LABEL_INSTANCE_ID` gesetzt werden. Für FLAPAMAMAKU bleibt
+`FLAPAMAMAKU_INSTANCE_ID` als Fallback erhalten; ohne Variable wird
+`flapamamaku` erwartet.
+
 Ohne gesetzte Variable verwendet dieses Repository weiterhin:
 
 ```
@@ -47,6 +52,7 @@ Für jede Vereinsinstanz gelten dieselben Anforderungen:
 - gültiges TLS-Zertifikat
 - Backend nur hinter Reverse Proxy erreichbar
 - `FLAPAMAMAKU_ENV=production`
+- eindeutige `FLAPAMAMAKU_INSTANCE_ID` pro Vereinsinstanz
 - `FLAPAMAMAKU_ALLOWED_ORIGINS` auf die konkrete HTTPS-Adresse der Instanz beschränken
 - eigene persistente Daten
 - eigenes Backup/Restore
@@ -64,6 +70,7 @@ Geprüft werden:
 - DNS/TLS-Verbindung funktioniert
 - `/api/health` antwortet korrekt
 - Backend-Version, Build-SHA und Schema sind vorhanden
+- die öffentliche URL liefert die erwartete `instance_id`
 - HSTS und weitere Security-Header sind gesetzt
 - öffentliche API-Dokumentation ist im Produktionsmodus deaktiviert
 - Auth-Status-Endpunkt ist erreichbar
