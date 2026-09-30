@@ -441,6 +441,23 @@
   </section>
 
   <div id="admin-view" class="hidden">
+    <div class="card" id="tenant-context-card" style="grid-column:1/-1;margin-bottom:0">
+      <div class="preview-heading" style="align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:12px;min-width:0">
+          <img id="tenant-context-logo" alt="" style="width:54px;height:54px;object-fit:contain;border-radius:12px;background:#24272b;display:none">
+          <div>
+            <div class="meta">Aktueller Mandant</div>
+            <h2 id="tenant-context-name" style="margin:2px 0">Verein wird geladen …</h2>
+            <div class="meta" id="tenant-context-role"></div>
+          </div>
+        </div>
+        <div id="tenant-switch-wrap" class="hidden" style="margin-left:auto;min-width:260px">
+          <label for="tenant-switch">Verein wechseln</label>
+          <select id="tenant-switch"></select>
+        </div>
+      </div>
+      <div class="meta" id="tenant-context-features" style="margin-top:10px">Module werden geladen …</div>
+    </div>
     <nav>
       <button class="active" data-panel="news" data-permission="can_news">News</button>
       <button data-panel="events" data-permission="can_events">Termine</button>
@@ -1094,6 +1111,8 @@ let justBootstrapped = false;
 let userAccounts = [];
 let memberFilters = [];
 let roleDefinitions = [];
+let accessibleClubs = [];
+let activeClubConfig = null;
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
@@ -1146,6 +1165,95 @@ async function api(path, options = {}) {
   if (response.status === 204) return null;
   return response.json();
 }
+
+async function loadTenantContext() {
+  if (!currentUser) return;
+
+  const [clubs, config] = await Promise.all([
+    api("/api/clubs/accessible"),
+    api("/api/app-config"),
+  ]);
+  accessibleClubs = clubs || [];
+  activeClubConfig = config || {};
+
+  const name = activeClubConfig.app_name || "Vereins-App";
+  document.getElementById("tenant-context-name").textContent = name;
+  document.getElementById("tenant-context-role").textContent =
+    currentUser.is_super_admin
+      ? "Rolle: Super-Admin"
+      : `Rolle: ${currentUser.club_role === "club_admin" ? "Vereinsadmin" : "Mitglied"}`;
+
+  const logo = document.getElementById("tenant-context-logo");
+  if (activeClubConfig.logo_url) {
+    logo.src = activeClubConfig.logo_url + "?v=" + Date.now();
+    logo.style.display = "block";
+  } else {
+    logo.removeAttribute("src");
+    logo.style.display = "none";
+  }
+
+  const enabledFeatures = Object.entries(activeClubConfig.features || {})
+    .filter(([, value]) => value?.enabled !== false)
+    .map(([, value]) => value?.label || "")
+    .filter(Boolean);
+  document.getElementById("tenant-context-features").textContent =
+    enabledFeatures.length
+      ? "Aktive Module: " + enabledFeatures.join(", ")
+      : "Keine Module aktiviert";
+
+  const wrap = document.getElementById("tenant-switch-wrap");
+  const select = document.getElementById("tenant-switch");
+  wrap.classList.toggle("hidden", !currentUser.is_super_admin);
+  select.innerHTML = "";
+  accessibleClubs.forEach(club => {
+    const option = document.createElement("option");
+    option.value = club.id;
+    option.textContent = club.name || club.slug;
+    option.selected = !!club.current;
+    select.appendChild(option);
+  });
+
+  const featureVisibility = {
+    news: activeClubConfig.show_news !== false,
+    events: activeClubConfig.show_events !== false,
+    members: activeClubConfig.show_members !== false,
+    push: activeClubConfig.show_push_notifications !== false,
+  };
+  document.querySelector('nav button[data-panel="news"]')
+    ?.classList.toggle("hidden", !featureVisibility.news || !currentUser.can_news);
+  document.querySelector('nav button[data-panel="events"]')
+    ?.classList.toggle("hidden", !featureVisibility.events || !currentUser.can_events);
+  document.getElementById("members-nav")
+    ?.classList.toggle(
+      "hidden",
+      !featureVisibility.members ||
+      !(currentUser.can_members || currentUser.can_manage_users),
+    );
+  document.getElementById("push-nav")
+    ?.classList.toggle(
+      "hidden",
+      !featureVisibility.push || !currentUser.can_manage_users,
+    );
+}
+
+document.getElementById("tenant-switch").addEventListener("change", async event => {
+  if (!currentUser?.is_super_admin) return;
+  const clubId = Number(event.currentTarget.value || 0);
+  if (!clubId || clubId === Number(currentUser.current_club_id || 0)) return;
+  event.currentTarget.disabled = true;
+  try {
+    await api("/api/auth/club", {
+      method: "POST",
+      body: JSON.stringify({club_id: clubId}),
+    });
+    currentUser = await api("/api/auth/me");
+    window.location.reload();
+  } catch (error) {
+    alert("Verein konnte nicht gewechselt werden.");
+    console.error(error);
+    event.currentTarget.disabled = false;
+  }
+});
 
 function showAuth() {
   document.getElementById("auth-view").classList.remove("hidden");
@@ -2867,8 +2975,9 @@ async function startAdmin() {
   }
   showAdmin();
   applyPermissions();
+  await loadTenantContext();
   document.getElementById("status").textContent =
-    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v${apiVersion || "?"}`;
+    `Angemeldet: ${currentUser.member_name || currentUser.username} · ${activeClubConfig?.app_name || "Verein"} · API v${apiVersion || "?"}`;
 
   const loadSafely = async (name, action) => {
     try {
