@@ -558,7 +558,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 9
+          assert CURRENT_SCHEMA_VERSION == 10
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
           assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
