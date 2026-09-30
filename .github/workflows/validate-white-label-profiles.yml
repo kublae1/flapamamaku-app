@@ -1,0 +1,111 @@
+name: Validate White Label Profiles
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, feature/profile-registry-validation-v1 ]
+    paths:
+      - "config/white-label/**"
+      - ".github/workflows/validate-white-label-profiles.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate all club profiles
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          root = Path("config/white-label")
+          files = sorted(root.glob("*.json"))
+          if not files:
+              raise SystemExit("No white-label profiles found")
+
+          seen_ids = {}
+          seen_instances = {}
+          seen_urls = {}
+
+          required = {
+              "id",
+              "instance_id",
+              "app_name",
+              "app_subtitle",
+              "api_base_url",
+              "app_icon_url",
+              "allow_server_change",
+          }
+
+          for path in files:
+              data = json.loads(path.read_text())
+              missing = sorted(required - set(data))
+              if missing:
+                  raise SystemExit(
+                      f"{path}: missing fields: {', '.join(missing)}"
+                  )
+
+              profile_id = str(data["id"]).strip()
+              expected_id = path.stem
+              if profile_id != expected_id:
+                  raise SystemExit(
+                      f"{path}: id '{profile_id}' does not match filename '{expected_id}'"
+                  )
+              if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile_id):
+                  raise SystemExit(f"{path}: invalid profile id")
+
+              instance_id = str(data["instance_id"]).strip().lower()
+              if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", instance_id):
+                  raise SystemExit(f"{path}: invalid instance_id")
+
+              app_name = str(data["app_name"]).strip()
+              if not app_name:
+                  raise SystemExit(f"{path}: app_name must not be empty")
+
+              api_url = str(data["api_base_url"]).strip().rstrip("/")
+              parsed = urlparse(api_url)
+              if parsed.scheme != "https" or not parsed.netloc:
+                  raise SystemExit(f"{path}: api_base_url must be an HTTPS URL")
+              if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+                  raise SystemExit(
+                      f"{path}: api_base_url must contain only scheme and host"
+                  )
+
+              icon_url = str(data["app_icon_url"]).strip()
+              if icon_url:
+                  icon = urlparse(icon_url)
+                  if icon.scheme != "https" or not icon.netloc:
+                      raise SystemExit(
+                          f"{path}: app_icon_url must be HTTPS when set"
+                      )
+
+              if not isinstance(data["allow_server_change"], bool):
+                  raise SystemExit(
+                      f"{path}: allow_server_change must be true or false"
+                  )
+
+              for value, registry, label in (
+                  (profile_id, seen_ids, "profile id"),
+                  (instance_id, seen_instances, "instance_id"),
+                  (api_url.lower(), seen_urls, "api_base_url"),
+              ):
+                  if value in registry:
+                      raise SystemExit(
+                          f"{path}: duplicate {label} also used by {registry[value]}"
+                      )
+                  registry[value] = path
+
+          if len(files) > 10:
+              raise SystemExit(
+                  f"Test registry currently allows at most 10 club profiles; found {len(files)}"
+              )
+
+          print(f"Validated {len(files)} white-label profile(s)")
+          for path in files:
+              print(f"- {path}")
+          PY
