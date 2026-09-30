@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import base64
 import os
+from io import BytesIO
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.main import CLUB_FEATURE_DEFAULTS, app, connect, init_db
 
 
 PASSWORD = "WhiteLabel-Test-2026"
-PNG_1X1 = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z3GQAAAAASUVORK5CYII="
-)
-
 
 def ok(response, expected: int = 200):
     assert response.status_code == expected, (
@@ -104,11 +101,14 @@ def main() -> None:
     assert updated_features["push_notifications"]["enabled"] is True
     assert updated_features["participant_lists"]["enabled"] is True
 
+    logo_buffer = BytesIO()
+    Image.new("RGB", (32, 32), (34, 85, 136)).save(logo_buffer, format="PNG")
+    logo_buffer.seek(0)
     ok(
         client.post(
             "/api/app-config/logo",
             headers=super_headers,
-            files={"logo": ("logo.png", PNG_1X1, "image/png")},
+            files={"logo": ("logo.png", logo_buffer.getvalue(), "image/png")},
         )
     )
 
