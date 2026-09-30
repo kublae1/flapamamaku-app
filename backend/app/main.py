@@ -3545,6 +3545,90 @@ def accessible_clubs(
     ]
 
 
+@app.post("/api/clubs")
+def create_club(
+    payload: ClubCreatePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur Super-Admins dürfen Vereine anlegen",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        try:
+            cursor = db.execute(
+                """
+                INSERT INTO clubs (
+                    slug, name, short_name, subtitle, active,
+                    primary_color, secondary_color,
+                    description, website, email, phone, address,
+                    city, country, app_title, welcome_text,
+                    created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, 1,
+                    ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?
+                )
+                """,
+                (
+                    payload.slug.strip().lower(),
+                    payload.name.strip(),
+                    payload.short_name.strip() or payload.name.strip(),
+                    payload.subtitle.strip(),
+                    payload.primary_color.upper(),
+                    payload.secondary_color.upper(),
+                    payload.description.strip(),
+                    payload.website.strip(),
+                    payload.email.strip(),
+                    payload.phone.strip(),
+                    payload.address.strip(),
+                    payload.city.strip(),
+                    payload.country.strip(),
+                    payload.app_title.strip(),
+                    payload.welcome_text.strip(),
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="Vereins-Slug bereits vorhanden")
+
+        club_id = int(cursor.lastrowid)
+        _set_club_features(
+            db,
+            club_id,
+            {
+                key: default_enabled
+                for key, (_, default_enabled) in CLUB_FEATURE_DEFAULTS.items()
+            },
+            {
+                key: default_label
+                for key, (default_label, _) in CLUB_FEATURE_DEFAULTS.items()
+            },
+        )
+        db.commit()
+
+        row = db.execute(
+            """
+            SELECT
+                id, slug, name, short_name, subtitle, active,
+                primary_color, secondary_color,
+                description, website, email, phone, address,
+                city, country, app_title, welcome_text,
+                created_at, updated_at
+            FROM clubs
+            WHERE id = ?
+            """,
+            (club_id,),
+        ).fetchone()
+    return dict(row)
+
+
 @app.post("/api/auth/club")
 def switch_active_club(
     payload: ClubSwitchPayload,
