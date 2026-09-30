@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FLAPAMAMAKU Admin</title>
+  <title>Vereins-App Administration</title>
   <link rel="icon" type="image/png" href="/favicon.ico">
   <style>
     :root {
@@ -414,8 +414,8 @@
 <body>
 <header>
   <div>
-    <h1>FLAPAMAMAKU App-Verwaltung</h1>
-    <small>Zentrale Docker-Verwaltung für die Inhalte der Handy-App</small>
+    <h1 id="admin-title">Vereins-App Verwaltung</h1>
+    <small id="admin-subtitle">Zentrale Verwaltung für die Inhalte der Vereins-App</small>
   </div>
   <div class="status" id="status">API wird geprüft …</div>
 </header>
@@ -868,7 +868,7 @@
             <span class="meta">Live</span>
           </div>
           <div class="phone-preview hero-preview" id="content-preview">
-            <div class="phone-preview-top">FLAPAMAMAKU</div>
+            <div class="phone-preview-top" id="preview-app-name">Vereins-App</div>
             <div class="phone-preview-section" id="preview-section">Startseite / Hauptbild</div>
             <div class="phone-preview-image" id="preview-image">
               <span id="preview-placeholder">Bild auswählen</span>
@@ -879,7 +879,7 @@
             </div>
           </div>
           <h2>Datenbank-Einträge</h2>
-          <p class="meta">Diese Inhalte werden zentral in Docker gespeichert. Änderungen erscheinen nach der Synchronisierung in der Handy-App; ein neuer APK-Build ist dafür nicht nötig. Bei ausgewähltem Bereich und „Docker-Reihenfolge“ kannst du Einträge mit ↑ / ↓ sortieren.</p>
+          <p class="meta">Diese Inhalte werden zentral auf dem Vereinsserver gespeichert. Änderungen erscheinen nach der Synchronisierung in der Handy-App; ein neuer APK-Build ist dafür nicht nötig. Bei ausgewähltem Bereich und „Manuelle Reihenfolge“ kannst du Einträge mit ↑ / ↓ sortieren.</p>
           <label>Bereich anzeigen</label>
           <select id="content-filter">
             <option value="">Alle Bereiche</option>
@@ -896,7 +896,7 @@
           </select>
           <label>Sortierung</label>
           <select id="content-sort">
-            <option value="manual">Docker-Reihenfolge</option>
+            <option value="manual">Manuelle Reihenfolge</option>
             <option value="newest">Neueste zuerst</option>
             <option value="oldest">Älteste zuerst</option>
             <option value="title-asc">Titel A–Z</option>
@@ -1031,7 +1031,7 @@
           <hr style="margin:18px 0;border:0;border-top:1px solid rgba(255,255,255,.12)">
           <h3>Backup wiederherstellen</h3>
           <p class="meta">
-            Nur vollständige FLAPAMAMAKU-.db-Backups verwenden. Vor der Wiederherstellung
+            Nur vollständige Datenbank-Backups dieser Vereinsinstanz verwenden. Vor der Wiederherstellung
             wird automatisch eine zusätzliche Sicherheitskopie der aktuellen Datenbank erstellt.
             Nach erfolgreichem Restore werden alle Sitzungen abgemeldet.
           </p>
@@ -2386,8 +2386,15 @@ async function loadAppConfig() {
   try {
     const config = await api("/api/app-config");
     const form = document.getElementById("app-config-form");
-    form.elements.app_name.value = config.app_name || "FLAPAMAMAKU";
+    const visibleAppName = config.app_name || "Vereins-App";
+    form.elements.app_name.value = visibleAppName;
     form.elements.app_subtitle.value = config.app_subtitle || "";
+
+    document.title = `${visibleAppName} Admin`;
+    const adminTitle = document.getElementById("admin-title");
+    if (adminTitle) adminTitle.textContent = `${visibleAppName} Verwaltung`;
+    const previewName = document.getElementById("preview-app-name");
+    if (previewName) previewName.textContent = visibleAppName;
     form.elements.club_description.value = config.club_description || "";
     form.elements.website_url.value = config.website_url || "";
     form.elements.contact_email.value = config.contact_email || "";
