@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -82,7 +82,7 @@ jobs:
               ).fetchone()
               assert migration is not None
               assert migration["name"] == "multi-tenant-clubs-foundation"
-              assert CURRENT_SCHEMA_VERSION == 9
+              assert CURRENT_SCHEMA_VERSION == 10
 
               member = db.execute(
                   """
@@ -116,6 +116,129 @@ jobs:
               ).fetchone()[0] == news_id
 
           print("multi-tenant clubs foundation ok")
+          PY
+
+      - name: Test FLAPAMAMAKU club data migration
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-package2-migration.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-package2-backups
+        run: |
+          rm -f /tmp/flapamamaku-package2-migration.db
+          rm -rf /tmp/flapamamaku-package2-backups
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          db_path = Path("/tmp/flapamamaku-package2-migration.db")
+          with sqlite3.connect(db_path) as db:
+              db.executescript(
+                  """
+                  CREATE TABLE news (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      title TEXT NOT NULL,
+                      text TEXT NOT NULL,
+                      date TEXT NOT NULL,
+                      image_url TEXT NOT NULL DEFAULT '',
+                      image_data BLOB,
+                      image_mime TEXT NOT NULL DEFAULT '',
+                      sort_order INTEGER NOT NULL DEFAULT 0,
+                      created_at TEXT NOT NULL
+                  );
+                  CREATE TABLE events (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      event_date TEXT NOT NULL DEFAULT '',
+                      day TEXT NOT NULL,
+                      month TEXT NOT NULL,
+                      title TEXT NOT NULL,
+                      location TEXT NOT NULL DEFAULT '',
+                      time TEXT NOT NULL DEFAULT '',
+                      created_at TEXT NOT NULL
+                  );
+                  CREATE TABLE members (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      name TEXT NOT NULL,
+                      role TEXT NOT NULL DEFAULT 'Präsident',
+                      since TEXT NOT NULL DEFAULT '',
+                      birth_date TEXT NOT NULL DEFAULT '',
+                      status TEXT NOT NULL DEFAULT 'Aktiv',
+                      member_group TEXT NOT NULL DEFAULT '',
+                      engagement TEXT NOT NULL DEFAULT '',
+                      partner_name TEXT NOT NULL DEFAULT '',
+                      phone_mobile TEXT NOT NULL DEFAULT '',
+                      phone_private TEXT NOT NULL DEFAULT '',
+                      phone_work TEXT NOT NULL DEFAULT '',
+                      email TEXT NOT NULL DEFAULT '',
+                      address TEXT NOT NULL DEFAULT '',
+                      occupation TEXT NOT NULL DEFAULT '',
+                      employer TEXT NOT NULL DEFAULT '',
+                      employer_url TEXT NOT NULL DEFAULT '',
+                      sort_order INTEGER NOT NULL DEFAULT 0,
+                      photo_data BLOB,
+                      photo_mime TEXT NOT NULL DEFAULT '',
+                      created_at TEXT NOT NULL
+                  );
+                  CREATE TABLE app_config (
+                      id INTEGER PRIMARY KEY CHECK (id = 1),
+                      app_name TEXT NOT NULL DEFAULT 'FLAPAMAMAKU',
+                      app_subtitle TEXT NOT NULL DEFAULT 'Fasnachtsgruppe Luzern',
+                      primary_color TEXT NOT NULL DEFAULT '#8A101B',
+                      updated_at TEXT NOT NULL
+                  );
+                  """
+              )
+              db.execute(
+                  "INSERT INTO news (id,title,text,date,created_at) VALUES (41,?,?,?,?)",
+                  ("Alt News", "Bestehend", "30.09.2026", "2026-09-30T00:00:00+00:00"),
+              )
+              db.execute(
+                  "INSERT INTO events (id,day,month,title,created_at) VALUES (51,?,?,?,?)",
+                  ("30", "09", "Alt Termin", "2026-09-30T00:00:00+00:00"),
+              )
+              db.execute(
+                  "INSERT INTO members (id,name,role,since,created_at) VALUES (61,?,?,?,?)",
+                  ("Alt Mitglied", "Mitglied", "2020", "2026-09-30T00:00:00+00:00"),
+              )
+              db.execute(
+                  "INSERT INTO app_config (id,app_name,app_subtitle,primary_color,updated_at) VALUES (1,?,?,?,?)",
+                  ("FLAPAMAMAKU", "Fasnachtsgruppe Luzern", "#8A101B", "2026-09-30T00:00:00+00:00"),
+              )
+              db.commit()
+
+          from app.main import CURRENT_SCHEMA_VERSION, connect, init_db
+          init_db()
+
+          with connect() as db:
+              assert CURRENT_SCHEMA_VERSION == 10
+              assert db.execute("SELECT id, club_id FROM news WHERE id = 41").fetchone()[:] == (41, 1)
+              assert db.execute("SELECT id, club_id FROM events WHERE id = 51").fetchone()[:] == (51, 1)
+              assert db.execute("SELECT id, club_id FROM members WHERE id = 61").fetchone()[:] == (61, 1)
+
+              migration = db.execute(
+                  "SELECT name FROM schema_migrations WHERE version = 10"
+              ).fetchone()
+              assert migration is not None
+              assert migration["name"] == "flapamamaku-club-data-migration"
+
+              club = db.execute(
+                  "SELECT id, slug, name, primary_color FROM clubs WHERE id = 1"
+              ).fetchone()
+              assert club["slug"] == "flapamamaku"
+              assert club["name"] == "FLAPAMAMAKU"
+              assert club["primary_color"] == "#8A101B"
+
+              for table in (
+                  "news", "events", "members", "app_config", "member_filters",
+                  "content_items", "content_images", "gallery_snapshots",
+                  "push_notifications", "member_filter_links", "poll_votes",
+                  "poll_suggestions", "push_deliveries", "event_registrations",
+              ):
+                  columns = {
+                      row["name"]
+                      for row in db.execute(f"PRAGMA table_info({table})").fetchall()
+                  }
+                  assert "club_id" in columns, table
+
+          print("FLAPAMAMAKU package 2 migration ok")
           PY
 
       - name: Test backup and restore
