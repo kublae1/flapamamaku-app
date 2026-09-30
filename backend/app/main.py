@@ -5247,15 +5247,21 @@ def get_events(
                 """
                 SELECT event_id, COUNT(*) AS count
                 FROM event_registrations
+                WHERE club_id = ?
                 GROUP BY event_id
-                """
+                """,
+                (_active_club_id(db),),
             ).fetchall()
         }
         mine = {
             row["event_id"]
             for row in db.execute(
-                "SELECT event_id FROM event_registrations WHERE user_id = ?",
-                (user["id"],),
+                """
+                SELECT event_id
+                FROM event_registrations
+                WHERE user_id = ? AND club_id = ?
+                """,
+                (user["id"], _active_club_id(db)),
             ).fetchall()
         }
     for item in items:
@@ -5774,16 +5780,16 @@ async def upload_member_photo(
             """
             UPDATE members
             SET photo_data = ?, photo_mime = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, row_id),
+            (data, optimized_mime, row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
         db.commit()
         row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (row_id,),
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_member(row)
 
@@ -5795,8 +5801,12 @@ def get_member_photo(
 ) -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT photo_data, photo_mime FROM members WHERE id = ?",
-            (row_id,),
+            """
+            SELECT photo_data, photo_mime
+            FROM members
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if row is None or row["photo_data"] is None:
         raise HTTPException(status_code=404, detail="Photo not found")
@@ -5818,9 +5828,9 @@ def delete_member_photo(
             """
             UPDATE members
             SET photo_data = NULL, photo_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
@@ -5833,6 +5843,12 @@ def delete_members(
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> None:
     with connect() as db:
-        db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+        db.execute(
+            """
+            DELETE FROM member_filter_links
+            WHERE member_id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
+        )
         db.commit()
     delete_row("members", row_id)
