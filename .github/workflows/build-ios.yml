@@ -8,7 +8,7 @@ on:
         required: false
         default: "flapamamaku"
   push:
-    branches: [ feature/ios-foundation-v1, feature/ios-push-v1, feature/ios-final-validation-v1 ]
+    branches: [feature/ios-foundation-v1, feature/ios-push-v1, feature/ios-final-validation-v1, feature/final-release-validation-v1 ]
     paths:
       - "lib/**"
       - "pubspec.yaml"
