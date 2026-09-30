@@ -917,26 +917,14 @@ def init_db() -> None:
                 "SELECT id FROM clubs WHERE id = 1 AND slug = 'flapamamaku'"
             ).fetchone()
             if mapped_club is None and club_count == 1 and reference_club is not None:
-                app_name_row = db.execute(
-                    "SELECT app_name FROM app_config WHERE id = 1"
-                ).fetchone()
-                configured_name = (
-                    str(app_name_row["app_name"]).strip()
-                    if app_name_row is not None and app_name_row["app_name"]
-                    else ""
-                )
-                if not configured_name or configured_name.upper() == "FLAPAMAMAKU":
-                    configured_name = INSTANCE_ID
                 db.execute(
                     """
                     UPDATE clubs
-                    SET slug = ?, name = ?, short_name = ?, updated_at = ?
+                    SET slug = ?, updated_at = ?
                     WHERE id = 1
                     """,
                     (
                         INSTANCE_ID,
-                        configured_name,
-                        configured_name,
                         datetime.now(timezone.utc).isoformat(),
                     ),
                 )
