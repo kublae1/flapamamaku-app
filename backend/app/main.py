@@ -3938,8 +3938,8 @@ async def post_gallery_snapshot(
         cursor = db.execute(
             """
             INSERT INTO gallery_snapshots (
-                user_id, image_data, image_mime, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?)
+                user_id, image_data, image_mime, created_at, expires_at, club_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 user["id"],
@@ -3947,6 +3947,7 @@ async def post_gallery_snapshot(
                 mime,
                 now.isoformat(),
                 expires.isoformat(),
+                _active_club_id(db),
             ),
         )
         db.commit()
@@ -3955,10 +3956,12 @@ async def post_gallery_snapshot(
             SELECT gs.*, u.username, m.name AS member_name
             FROM gallery_snapshots gs
             JOIN users u ON u.id = gs.user_id
-            LEFT JOIN members m ON m.id = u.member_id
-            WHERE gs.id = ?
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = gs.club_id
+            WHERE gs.id = ? AND gs.club_id = ?
             """,
-            (cursor.lastrowid,),
+            (cursor.lastrowid, _active_club_id(db)),
         ).fetchone()
     return _serialize_snapshot(row, user)
 
@@ -3974,9 +3977,13 @@ def get_gallery_snapshot_image(
             """
             SELECT image_data, image_mime
             FROM gallery_snapshots
-            WHERE id = ? AND expires_at > ?
+            WHERE id = ? AND club_id = ? AND expires_at > ?
             """,
-            (snapshot_id, datetime.now(timezone.utc).isoformat()),
+            (
+                snapshot_id,
+                _active_club_id(db),
+                datetime.now(timezone.utc).isoformat(),
+            ),
         ).fetchone()
         db.commit()
     if row is None:
@@ -3994,15 +4001,23 @@ def delete_gallery_snapshot(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
+        club_id = _active_club_id(db)
         row = db.execute(
-            "SELECT user_id FROM gallery_snapshots WHERE id = ?",
-            (snapshot_id,),
+            """
+            SELECT user_id
+            FROM gallery_snapshots
+            WHERE id = ? AND club_id = ?
+            """,
+            (snapshot_id, club_id),
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Snapshot nicht gefunden")
         if row["user_id"] != user["id"] and not user.get("can_photos", False):
             raise HTTPException(status_code=403, detail="Keine Berechtigung")
-        db.execute("DELETE FROM gallery_snapshots WHERE id = ?", (snapshot_id,))
+        db.execute(
+            "DELETE FROM gallery_snapshots WHERE id = ? AND club_id = ?",
+            (snapshot_id, club_id),
+        )
         db.commit()
 
 
