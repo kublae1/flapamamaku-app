@@ -7,6 +7,10 @@ on:
         description: "White-label build profile"
         required: false
         default: "flapamamaku"
+  push:
+    branches: [ feature/ios-signing-v1 ]
+    paths:
+      - ".github/workflows/build-ios-signed.yml"
 
 permissions:
   contents: read
