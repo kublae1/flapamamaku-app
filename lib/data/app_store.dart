@@ -57,6 +57,8 @@ class AppStore extends ChangeNotifier {
   bool pushEnabled = false;
   bool pushAvailable = false;
   Map<String, dynamic>? currentUser;
+  final List<Map<String, dynamic>> accessibleClubs = <Map<String, dynamic>>[];
+  bool clubSelectionRequired = false;
   String? authError;
   int themeColorValue = 0xFF8A101B;
   String appName = const String.fromEnvironment(
@@ -435,6 +437,8 @@ class AppStore extends ChangeNotifier {
     await _secureStorage.delete(key: 'flapamamaku_token');
 
     currentUser = null;
+    accessibleClubs.clear();
+    clubSelectionRequired = false;
     isAuthenticated = false;
     biometricUnlockPending = false;
     authError = null;
@@ -455,6 +459,69 @@ class AppStore extends ChangeNotifier {
       currentUser?['member_name']?.toString().isNotEmpty == true
           ? currentUser!['member_name'].toString()
           : currentUser?['username']?.toString() ?? '';
+
+  int? get currentClubId {
+    final value = currentUser?['current_club_id'];
+    return value is int ? value : int.tryParse(value?.toString() ?? '');
+  }
+
+  bool get isSuperAdmin => currentUser?['is_super_admin'] == true;
+
+  bool get canSwitchClub => accessibleClubs.length > 1;
+
+  String get currentClubName {
+    final clubId = currentClubId;
+    for (final club in accessibleClubs) {
+      final rawId = club['id'];
+      final id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+      if (id == clubId) {
+        return club['name']?.toString() ?? appName;
+      }
+    }
+    return appName;
+  }
+
+  Future<void> _loadAccessibleClubs() async {
+    accessibleClubs
+      ..clear()
+      ..addAll(await api.fetchAccessibleClubs());
+  }
+
+  void _clearClubData() {
+    news.clear();
+    events.clear();
+    members.clear();
+    memberFilters.clear();
+    content.clear();
+    syncError = null;
+    lastSuccessfulSync = null;
+  }
+
+  Future<bool> selectClub(int clubId) async {
+    if (!isAuthenticated || !api.isConfigured) return false;
+    try {
+      await api.switchClub(clubId);
+      currentUser = await api.fetchMe();
+      await _loadAccessibleClubs();
+      clubSelectionRequired = false;
+      _clearClubData();
+      final prefs = await SharedPreferences.getInstance();
+      await _loadRemoteBranding(prefs);
+      await refreshFromServer();
+      if (pushEnabled && showPushNotifications) {
+        await pushService.enable();
+      }
+      notifyListeners();
+      return true;
+    } catch (error) {
+      authError = friendlyErrorMessage(
+        error,
+        fallback: 'Verein konnte nicht gewechselt werden.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
 
   Future<void> restoreSession() async {
     authReady = false;
@@ -497,6 +564,8 @@ class AppStore extends ChangeNotifier {
       isAuthenticated = true;
       biometricUnlockPending = false;
       authError = null;
+      clubSelectionRequired = false;
+      await _loadAccessibleClubs();
       await refreshFromServer();
       if (pushEnabled && showPushNotifications) {
         await pushService.enable();
@@ -588,6 +657,8 @@ class AppStore extends ChangeNotifier {
   Future<void> usePasswordInstead() async {
     api.setToken(null);
     currentUser = null;
+    accessibleClubs.clear();
+    clubSelectionRequired = false;
     isAuthenticated = false;
     biometricUnlockPending = false;
     authError = null;
@@ -691,10 +762,23 @@ class AppStore extends ChangeNotifier {
       currentUser = Map<String, dynamic>.from(
         result['user'] as Map<String, dynamic>,
       );
+      accessibleClubs
+        ..clear()
+        ..addAll(
+          (result['clubs'] as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map((value) => Map<String, dynamic>.from(value)),
+        );
       isAuthenticated = true;
-      await refreshFromServer();
-      if (pushEnabled) {
-        await pushService.enable();
+      clubSelectionRequired = result['requires_club_selection'] == true;
+      if (accessibleClubs.isEmpty) {
+        await _loadAccessibleClubs();
+      }
+      if (!clubSelectionRequired) {
+        await refreshFromServer();
+        if (pushEnabled && showPushNotifications) {
+          await pushService.enable();
+        }
       }
       return true;
     } catch (error) {
@@ -706,6 +790,8 @@ class AppStore extends ChangeNotifier {
             );
       isAuthenticated = false;
       currentUser = null;
+      accessibleClubs.clear();
+      clubSelectionRequired = false;
       return false;
     } finally {
       isAuthenticating = false;
