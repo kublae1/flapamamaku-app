@@ -4275,18 +4275,28 @@ def _delete_poll(
     if not user.get("can_polls", False):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
     with connect() as db:
-        existing = db.execute(
-            "SELECT id FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if existing is None:
+        existing = _require_active_club_row(db, "content_items", poll_id)
+        if existing["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
-        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (poll_id,))
-        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (poll_id,))
-        db.execute("DELETE FROM content_images WHERE content_id = ?", (poll_id,))
+        club_id = _active_club_id(db)
         db.execute(
-            "DELETE FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
+            "DELETE FROM poll_votes WHERE poll_id = ? AND club_id = ?",
+            (poll_id, club_id),
+        )
+        db.execute(
+            "DELETE FROM poll_suggestions WHERE poll_id = ? AND club_id = ?",
+            (poll_id, club_id),
+        )
+        db.execute(
+            "DELETE FROM content_images WHERE content_id = ? AND club_id = ?",
+            (poll_id, club_id),
+        )
+        db.execute(
+            """
+            DELETE FROM content_items
+            WHERE id = ? AND section = 'polls' AND club_id = ?
+            """,
+            (poll_id, club_id),
         )
         db.commit()
 
@@ -4651,11 +4661,8 @@ def vote_poll(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
-        poll = db.execute(
-            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if poll is None:
+        poll = _require_active_club_row(db, "content_items", poll_id)
+        if poll["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
         try:
             options = json.loads(poll["poll_options"] or "[]")
@@ -4666,19 +4673,24 @@ def vote_poll(
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO poll_votes (
+                poll_id, user_id, option_index, created_at, club_id
+            )
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(poll_id, user_id) DO UPDATE SET
                 option_index = excluded.option_index,
                 created_at = excluded.created_at
             """,
-            (poll_id, user["id"], payload.option_index, now),
+            (
+                poll_id,
+                user["id"],
+                payload.option_index,
+                now,
+                _active_club_id(db),
+            ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (poll_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", poll_id)
     return _serialize_content(row, user["id"])
 
 
@@ -4693,11 +4705,8 @@ def suggest_and_vote_poll(
         raise HTTPException(status_code=422, detail="Vorschlag darf nicht leer sein")
 
     with connect() as db:
-        poll = db.execute(
-            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if poll is None:
+        poll = _require_active_club_row(db, "content_items", poll_id)
+        if poll["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
         if not bool(poll["poll_allow_suggestions"]):
             raise HTTPException(
@@ -4717,17 +4726,20 @@ def suggest_and_vote_poll(
             """
             SELECT option_index
             FROM poll_suggestions
-            WHERE poll_id = ? AND user_id = ?
+            WHERE poll_id = ? AND user_id = ? AND club_id = ?
             """,
-            (poll_id, user["id"]),
+            (poll_id, user["id"], _active_club_id(db)),
         ).fetchone()
 
         if owned is not None:
             option_index = int(owned["option_index"])
             if not (0 <= option_index < len(options)):
                 db.execute(
-                    "DELETE FROM poll_suggestions WHERE poll_id = ? AND user_id = ?",
-                    (poll_id, user["id"]),
+                    """
+                    DELETE FROM poll_suggestions
+                    WHERE poll_id = ? AND user_id = ? AND club_id = ?
+                    """,
+                    (poll_id, user["id"], _active_club_id(db)),
                 )
                 owned = None
             else:
@@ -4747,17 +4759,31 @@ def suggest_and_vote_poll(
                     )
                 options[option_index] = suggestion
                 db.execute(
-                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
-                    (json.dumps(options, ensure_ascii=False), poll_id),
+                    """
+                    UPDATE content_items
+                    SET poll_options = ?
+                    WHERE id = ? AND club_id = ?
+                    """,
+                    (
+                        json.dumps(options, ensure_ascii=False),
+                        poll_id,
+                        _active_club_id(db),
+                    ),
                 )
                 now = datetime.now(timezone.utc).isoformat()
                 db.execute(
                     """
                     UPDATE poll_suggestions
                     SET suggestion_text = ?, updated_at = ?
-                    WHERE poll_id = ? AND user_id = ?
+                    WHERE poll_id = ? AND user_id = ? AND club_id = ?
                     """,
-                    (suggestion, now, poll_id, user["id"]),
+                    (
+                        suggestion,
+                        now,
+                        poll_id,
+                        user["id"],
+                        _active_club_id(db),
+                    ),
                 )
 
         if owned is None:
@@ -4781,15 +4807,23 @@ def suggest_and_vote_poll(
                 option_index = len(options) - 1
                 now = datetime.now(timezone.utc).isoformat()
                 db.execute(
-                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
-                    (json.dumps(options, ensure_ascii=False), poll_id),
+                    """
+                    UPDATE content_items
+                    SET poll_options = ?
+                    WHERE id = ? AND club_id = ?
+                    """,
+                    (
+                        json.dumps(options, ensure_ascii=False),
+                        poll_id,
+                        _active_club_id(db),
+                    ),
                 )
                 db.execute(
                     """
                     INSERT INTO poll_suggestions (
                         poll_id, user_id, option_index, suggestion_text,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, club_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         poll_id,
@@ -4798,25 +4832,31 @@ def suggest_and_vote_poll(
                         suggestion,
                         now,
                         now,
+                        _active_club_id(db),
                     ),
                 )
 
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO poll_votes (
+                poll_id, user_id, option_index, created_at, club_id
+            )
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(poll_id, user_id) DO UPDATE SET
                 option_index = excluded.option_index,
                 created_at = excluded.created_at
             """,
-            (poll_id, user["id"], option_index, now),
+            (
+                poll_id,
+                user["id"],
+                option_index,
+                now,
+                _active_club_id(db),
+            ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (poll_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", poll_id)
     return _serialize_content(row, user["id"])
 
 
