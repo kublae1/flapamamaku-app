@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7, feature/multi-tenant-package8, feature/multi-tenant-package9, feature/multi-tenant-package10, feature/white-label-onboarding-v1, feature/white-label-onboarding-v2 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7, feature/multi-tenant-package8, feature/multi-tenant-package9, feature/multi-tenant-package10, feature/white-label-onboarding-v1, feature/white-label-onboarding-v2, feature/club-billing-suspension-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -1139,6 +1139,11 @@ jobs:
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-white-label-onboarding.db
         run: PYTHONPATH=. python tests/test_white_label_onboarding.py
+
+      - name: Test club billing and suspension
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-club-billing.db
+        run: PYTHONPATH=. python tests/test_club_billing_suspension.py
 
       - name: Test backup and restore
         env:
