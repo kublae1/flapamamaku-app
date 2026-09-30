@@ -58,7 +58,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.66"
+API_VERSION = "0.8.67"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2097,6 +2097,33 @@ def _user_club_access(
     return str(row["role"]) if row is not None else None
 
 
+def _accessible_club_rows(
+    db: sqlite3.Connection,
+    user_id: int,
+) -> list[sqlite3.Row]:
+    if _is_super_admin(db, user_id):
+        return db.execute(
+            """
+            SELECT id, slug, name, short_name, active, primary_color
+            FROM clubs
+            WHERE active = 1
+            ORDER BY name COLLATE NOCASE, id
+            """
+        ).fetchall()
+    return db.execute(
+        """
+        SELECT c.id, c.slug, c.name, c.short_name, c.active, c.primary_color
+        FROM clubs c
+        JOIN user_clubs uc ON uc.club_id = c.id
+        WHERE uc.user_id = ?
+          AND uc.active = 1
+          AND c.active = 1
+        ORDER BY c.name COLLATE NOCASE, c.id
+        """,
+        (user_id,),
+    ).fetchall()
+
+
 def current_user(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
@@ -3501,20 +3528,29 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
             _record_login_failure(rate_key)
             raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
 
-        instance_club_id = _instance_club_id(db)
-        if _user_club_access(db, int(row["id"]), instance_club_id) is None:
+        user_id = int(row["id"])
+        clubs = _accessible_club_rows(db, user_id)
+        if not clubs:
             _record_login_failure(rate_key)
-            raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+            raise HTTPException(status_code=401, detail="Keinem aktiven Verein zugeordnet")
+
+        instance_club_id = _instance_club_id(db)
+        club_ids = [int(club["id"]) for club in clubs]
+        if _is_super_admin(db, user_id) or instance_club_id in club_ids:
+            initial_club_id = instance_club_id
+        else:
+            initial_club_id = club_ids[0]
+
+        requires_club_selection = (
+            not _is_super_admin(db, user_id) and len(clubs) > 1
+        )
 
         _clear_login_failures(rate_key)
         token = secrets.token_urlsafe(48)
         now_dt = datetime.now(timezone.utc)
         expires = (now_dt + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
         db.execute(
-            """
-            DELETE FROM sessions
-            WHERE expires_at <= ?
-            """,
+            "DELETE FROM sessions WHERE expires_at <= ?",
             (now_dt.isoformat(),),
         )
         db.execute(
@@ -3526,19 +3562,30 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
             """,
             (
                 _token_hash(token),
-                row["id"],
+                user_id,
                 expires,
                 now_dt.isoformat(),
-                instance_club_id,
+                initial_club_id,
             ),
         )
         db.commit()
 
+        club_payload = [
+            {
+                **dict(club),
+                "current": int(club["id"]) == initial_club_id,
+            }
+            for club in clubs
+        ]
+
     return {
         "token": token,
         "expires_at": expires,
-        "user": _user_profile(row["id"]),
+        "user": current_user(authorization=f"Bearer {token}"),
+        "clubs": club_payload,
+        "requires_club_selection": requires_club_selection,
     }
+
 
 @app.post("/api/auth/logout", status_code=204)
 def logout(
@@ -3560,24 +3607,7 @@ def accessible_clubs(
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     with connect() as db:
-        if bool(user.get("is_super_admin")):
-            rows = db.execute(
-                """
-                SELECT id, slug, name, short_name, active, primary_color
-                FROM clubs
-                WHERE active = 1
-                ORDER BY name COLLATE NOCASE, id
-                """
-            ).fetchall()
-        else:
-            rows = db.execute(
-                """
-                SELECT id, slug, name, short_name, active, primary_color
-                FROM clubs
-                WHERE id = ? AND active = 1
-                """,
-                (user["current_club_id"],),
-            ).fetchall()
+        rows = _accessible_club_rows(db, int(user["id"]))
     return [
         {
             **dict(row),
@@ -3677,11 +3707,6 @@ def switch_active_club(
     authorization: str | None = Header(default=None),
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
-    if not bool(user.get("is_super_admin")):
-        raise HTTPException(
-            status_code=403,
-            detail="Nur Super-Admins dürfen den Verein wechseln",
-        )
     token = _extract_token(authorization)
     with connect() as db:
         club = db.execute(
