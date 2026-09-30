@@ -2547,29 +2547,75 @@ async function loadAppConfig() {
   if (!(currentUser?.can_manage_settings || currentUser?.can_manage_users)) return;
   try {
     const config = await api("/api/app-config");
+    activeClubConfig = config;
     const form = document.getElementById("app-config-form");
     const visibleAppName = config.app_name || "Vereins-App";
     form.elements.app_name.value = visibleAppName;
+    form.elements.short_name.value = config.short_name || "";
     form.elements.app_subtitle.value = config.app_subtitle || "";
+    form.elements.app_title.value = config.app_title || "";
+    form.elements.club_description.value = config.club_description || "";
+    form.elements.welcome_text.value = config.welcome_text || "";
+    form.elements.website_url.value = config.website_url || "";
+    form.elements.contact_email.value = config.contact_email || "";
+    form.elements.contact_phone.value = config.contact_phone || "";
+    form.elements.club_address.value = config.club_address || "";
+    form.elements.city.value = config.city || "";
+    form.elements.country.value = config.country || "";
+
+    form.elements.primary_color.value =
+      /^#[0-9A-Fa-f]{6}$/.test(config.primary_color || "")
+        ? config.primary_color
+        : "#8A101B";
+    form.elements.secondary_color.value =
+      /^#[0-9A-Fa-f]{6}$/.test(config.secondary_color || "")
+        ? config.secondary_color
+        : "#FFFFFF";
 
     document.title = `${visibleAppName} Admin`;
     const adminTitle = document.getElementById("admin-title");
     if (adminTitle) adminTitle.textContent = `${visibleAppName} Verwaltung`;
     const previewName = document.getElementById("preview-app-name");
     if (previewName) previewName.textContent = visibleAppName;
-    form.elements.club_description.value = config.club_description || "";
-    form.elements.website_url.value = config.website_url || "";
-    form.elements.contact_email.value = config.contact_email || "";
-    form.elements.contact_phone.value = config.contact_phone || "";
-    form.elements.club_address.value = config.club_address || "";
-    for (const key of ["sujet","archive","photos","documents","polls","links"]) {
-      form.elements[`show_${key}`].checked = config[`show_${key}`] !== false;
-      form.elements[`label_${key}`].value = config[`label_${key}`] || "";
+
+    const featureBox = document.getElementById("club-feature-list");
+    featureBox.innerHTML = "";
+    Object.entries(config.features || {}).forEach(([key, value]) => {
+      const label = document.createElement("label");
+      label.style.display = "grid";
+      label.style.gridTemplateColumns = "auto 1fr";
+      label.style.gap = "8px";
+      label.style.alignItems = "center";
+      label.innerHTML = `
+        <input type="checkbox" data-feature-key="${key}" ${value?.enabled !== false ? "checked" : ""}>
+        <span>${value?.label || key}</span>
+        <input
+          type="text"
+          data-feature-label="${key}"
+          maxlength="80"
+          value="${String(value?.label || "").replaceAll("&","&amp;").replaceAll('"',"&quot;").replaceAll("<","&lt;")}"
+          style="grid-column:2"
+          aria-label="Bezeichnung ${key}"
+        >
+      `;
+      featureBox.appendChild(label);
+    });
+
+    const legacy = {
+      sujet: "sujet_next",
+      archive: "sujet_archive",
+      photos: "photos",
+      documents: "documents",
+      polls: "polls",
+      links: "links",
+    };
+    for (const [legacyKey, featureKey] of Object.entries(legacy)) {
+      const feature = config.features?.[featureKey] || {};
+      form.elements[`show_${legacyKey}`].checked = feature.enabled !== false;
+      form.elements[`label_${legacyKey}`].value =
+        feature.label || config[`label_${legacyKey}`] || "";
     }
-    form.elements.primary_color.value =
-      /^#[0-9A-Fa-f]{6}$/.test(config.primary_color || "")
-        ? config.primary_color
-        : "#8A101B";
+
     const preview = document.getElementById("app-logo-preview");
     const image = document.getElementById("app-logo-image");
     if (config.logo_url) {
@@ -2579,6 +2625,8 @@ async function loadAppConfig() {
       image.removeAttribute("src");
       preview.classList.add("hidden");
     }
+
+    await loadTenantContext();
   } catch (error) {
     console.error(error);
   }
