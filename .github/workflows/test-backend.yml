@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7, feature/multi-tenant-package8 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -82,7 +82,7 @@ jobs:
               ).fetchone()
               assert migration is not None
               assert migration["name"] == "multi-tenant-clubs-foundation"
-              assert CURRENT_SCHEMA_VERSION == 13
+              assert CURRENT_SCHEMA_VERSION == 14
 
               member = db.execute(
                   """
@@ -208,7 +208,7 @@ jobs:
           init_db()
 
           with connect() as db:
-              assert CURRENT_SCHEMA_VERSION == 13
+              assert CURRENT_SCHEMA_VERSION == 14
               assert db.execute("SELECT id, club_id FROM news WHERE id = 41").fetchone()[:] == (41, 1)
               assert db.execute("SELECT id, club_id FROM events WHERE id = 51").fetchone()[:] == (51, 1)
               assert db.execute("SELECT id, club_id FROM members WHERE id = 61").fetchone()[:] == (61, 1)
@@ -375,7 +375,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 13
+          assert CURRENT_SCHEMA_VERSION == 14
 
           with connect() as db:
               now = datetime.now(timezone.utc).isoformat()
@@ -578,7 +578,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 13
+          assert CURRENT_SCHEMA_VERSION == 14
 
           with connect() as db:
               features = _club_features(db, 1)
@@ -652,7 +652,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 13
+          assert CURRENT_SCHEMA_VERSION == 14
           now = datetime.now(timezone.utc)
           expires = (now + timedelta(days=1)).isoformat()
 
@@ -794,6 +794,241 @@ jobs:
               assert marker in admin_html, marker
 
           print("package 7 tenant-aware admin ok")
+          PY
+
+      - name: Test package 8 second club
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-package8-second-club.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-package8-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-package8-second-club.db
+          rm -rf /tmp/flapamamaku-package8-backups
+          python - <<'PY'
+          from io import BytesIO
+
+          from fastapi.testclient import TestClient
+          from PIL import Image
+
+          from app.main import CURRENT_SCHEMA_VERSION, app, connect, init_db
+
+          init_db()
+          assert CURRENT_SCHEMA_VERSION == 14
+          client = TestClient(app)
+
+          bootstrap = client.post(
+              "/api/auth/bootstrap",
+              json={
+                  "username": "platform-admin",
+                  "password": "Testpasswort123!",
+                  "member_id": None,
+              },
+          )
+          assert bootstrap.status_code == 200, bootstrap.text
+
+          login = client.post(
+              "/api/auth/login",
+              json={
+                  "username": "platform-admin",
+                  "password": "Testpasswort123!",
+              },
+          )
+          assert login.status_code == 200, login.text
+          token = login.json()["token"]
+          headers = {"Authorization": f"Bearer {token}"}
+          assert login.json()["user"]["is_super_admin"] is True
+
+          own_news = client.post(
+              "/api/news",
+              headers=headers,
+              json={"title": "FLAPA News", "text": "Nur FLAPAMAMAKU", "date": "30.09.2026"},
+          )
+          assert own_news.status_code == 200, own_news.text
+          own_event = client.post(
+              "/api/events",
+              headers=headers,
+              json={
+                  "event_date": "2026-10-01",
+                  "day": "01",
+                  "month": "OKT",
+                  "title": "FLAPA Termin",
+                  "location": "Luzern",
+                  "time": "19:00",
+              },
+          )
+          assert own_event.status_code == 200, own_event.text
+          own_member = client.post(
+              "/api/members",
+              headers=headers,
+              json={"name": "FLAPA Mitglied", "role": "Mitglied", "since": "2026"},
+          )
+          assert own_member.status_code == 200, own_member.text
+
+          created = client.post(
+              "/api/clubs",
+              headers=headers,
+              json={
+                  "slug": "testverein",
+                  "name": "Testverein",
+                  "short_name": "TEST",
+                  "subtitle": "Neutraler Testverein",
+                  "primary_color": "#225588",
+                  "secondary_color": "#F2F2F2",
+                  "description": "Zweiter Mandant für Isolationstests",
+                  "city": "Teststadt",
+                  "country": "CH",
+                  "app_title": "Testverein App",
+                  "welcome_text": "Willkommen beim Testverein",
+              },
+          )
+          assert created.status_code == 200, created.text
+          test_club = created.json()
+          test_club_id = test_club["id"]
+          assert test_club["slug"] == "testverein"
+          assert test_club["primary_color"] == "#225588"
+
+          switch = client.post(
+              "/api/auth/club",
+              headers=headers,
+              json={"club_id": test_club_id},
+          )
+          assert switch.status_code == 200, switch.text
+
+          me = client.get("/api/auth/me", headers=headers)
+          assert me.status_code == 200
+          assert me.json()["current_club_id"] == test_club_id
+          assert me.json()["is_super_admin"] is True
+
+          config_update = client.put(
+              "/api/app-config",
+              headers=headers,
+              json={
+                  "app_name": "Testverein",
+                  "short_name": "TEST",
+                  "app_subtitle": "Neutraler Testverein",
+                  "primary_color": "#225588",
+                  "secondary_color": "#F2F2F2",
+                  "club_description": "Eigenständige Vereinskonfiguration",
+                  "city": "Teststadt",
+                  "country": "CH",
+                  "app_title": "Testverein App",
+                  "welcome_text": "Willkommen beim Testverein",
+              },
+          )
+          assert config_update.status_code == 200, config_update.text
+          cfg = config_update.json()
+          assert cfg["app_name"] == "Testverein"
+          assert cfg["app_subtitle"] == "Neutraler Testverein"
+          assert cfg["primary_color"] == "#225588"
+          assert cfg["secondary_color"] == "#F2F2F2"
+
+          image = Image.new("RGB", (32, 32), (34, 85, 136))
+          logo_buffer = BytesIO()
+          image.save(logo_buffer, format="PNG")
+          logo_buffer.seek(0)
+          logo = client.post(
+              "/api/app-config/logo",
+              headers=headers,
+              files={"logo": ("testverein.png", logo_buffer.getvalue(), "image/png")},
+          )
+          assert logo.status_code == 200, logo.text
+          logo_get = client.get("/api/app-config/logo", headers=headers)
+          assert logo_get.status_code == 200
+          assert len(logo_get.content) > 0
+
+          test_news = client.post(
+              "/api/news",
+              headers=headers,
+              json={"title": "Testverein News", "text": "Nur Testverein", "date": "30.09.2026"},
+          )
+          assert test_news.status_code == 200, test_news.text
+          test_event = client.post(
+              "/api/events",
+              headers=headers,
+              json={
+                  "event_date": "2026-10-02",
+                  "day": "02",
+                  "month": "OKT",
+                  "title": "Testverein Termin",
+                  "location": "Teststadt",
+                  "time": "20:00",
+              },
+          )
+          assert test_event.status_code == 200, test_event.text
+          test_member = client.post(
+              "/api/members",
+              headers=headers,
+              json={"name": "Testverein Mitglied", "role": "Mitglied", "since": "2026"},
+          )
+          assert test_member.status_code == 200, test_member.text
+
+          club_admin = client.post(
+              "/api/users",
+              headers=headers,
+              json={
+                  "username": "testverein-admin",
+                  "password": "TestvereinPass123!",
+                  "active": True,
+                  "role_key": "admin",
+                  "permission_overrides": {},
+              },
+          )
+          assert club_admin.status_code == 200, club_admin.text
+          assert club_admin.json()["club_role"] == "club_admin"
+          assert club_admin.json()["current_club_id"] == test_club_id
+
+          news_test = client.get("/api/news", headers=headers).json()
+          events_test = client.get("/api/events", headers=headers).json()
+          members_test = client.get("/api/members", headers=headers).json()
+          assert {row["title"] for row in news_test} == {"Testverein News"}
+          assert {row["title"] for row in events_test} == {"Testverein Termin"}
+          assert {row["name"] for row in members_test} == {"Testverein Mitglied"}
+
+          users_test = client.get("/api/users", headers=headers)
+          assert users_test.status_code == 200
+          assert {row["username"] for row in users_test.json()} == {"testverein-admin"}
+
+          switch_back = client.post(
+              "/api/auth/club",
+              headers=headers,
+              json={"club_id": 1},
+          )
+          assert switch_back.status_code == 200, switch_back.text
+
+          flap_config = client.get("/api/app-config", headers=headers).json()
+          assert flap_config["app_name"] == "FLAPAMAMAKU"
+          assert flap_config["primary_color"] == "#8A101B"
+          assert flap_config["app_subtitle"] == "Fasnachtsgruppe Luzern"
+
+          news_flapa = client.get("/api/news", headers=headers).json()
+          events_flapa = client.get("/api/events", headers=headers).json()
+          members_flapa = client.get("/api/members", headers=headers).json()
+          assert {row["title"] for row in news_flapa} == {"FLAPA News"}
+          assert {row["title"] for row in events_flapa} == {"FLAPA Termin"}
+          assert {row["name"] for row in members_flapa} == {"FLAPA Mitglied"}
+
+          with connect() as db:
+              assert db.execute(
+                  "SELECT COUNT(*) FROM news WHERE club_id = ?",
+                  (test_club_id,),
+              ).fetchone()[0] == 1
+              assert db.execute(
+                  "SELECT COUNT(*) FROM members WHERE club_id = ?",
+                  (test_club_id,),
+              ).fetchone()[0] == 1
+              assert db.execute(
+                  "SELECT COUNT(*) FROM events WHERE club_id = ?",
+                  (test_club_id,),
+              ).fetchone()[0] == 1
+              test_row = db.execute(
+                  "SELECT logo, primary_color, secondary_color FROM clubs WHERE id = ?",
+                  (test_club_id,),
+              ).fetchone()
+              assert test_row["logo"] is not None
+              assert test_row["primary_color"] == "#225588"
+              assert test_row["secondary_color"] == "#F2F2F2"
+
+          print("package 8 second club ok")
           PY
 
       - name: Test backup and restore
@@ -1127,7 +1362,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 13
+          assert CURRENT_SCHEMA_VERSION == 14
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
           assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
