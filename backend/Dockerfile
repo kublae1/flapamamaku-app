@@ -8,7 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 
+ARG FLAPAMAMAKU_BUILD_SHA=development
 ENV FLAPAMAMAKU_DB=/data/flapamamaku.db
+ENV FLAPAMAMAKU_BUILD_SHA=$FLAPAMAMAKU_BUILD_SHA
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

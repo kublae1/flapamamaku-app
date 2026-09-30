@@ -41,4 +41,80 @@ void main() {
     expect(member.employer, 'Beispiel AG');
     expect(member.address, 'Luzern');
   });
+  test('maps unified content media payload', () {
+    final item = ContentItem.fromJson({
+      'id': 7,
+      'section': 'photos',
+      'title': 'Ausflug',
+      'created_at': '2026-09-28T10:00:00+00:00',
+      'images': [
+        {
+          'id': 21,
+          'url': 'https://example.test/media/21',
+          'sort_order': 2,
+          'created_at': '2026-09-28T10:01:00+00:00',
+          'legacy': false,
+        },
+        {
+          'id': 20,
+          'url': 'https://example.test/media/20',
+          'sort_order': 1,
+          'created_at': '2026-09-28T10:00:30+00:00',
+          'legacy': false,
+        },
+      ],
+      'image_urls': [
+        'https://example.test/media/21',
+        'https://example.test/media/20',
+      ],
+    });
+
+    expect(item.mediaImages.length, 2);
+    expect(item.mediaImages.first.id, 21);
+    expect(item.mediaImages.first.url, 'https://example.test/media/21');
+    expect(item.imageIds, [21, 20]);
+    expect(item.imageSortOrders, [2, 1]);
+    expect(item.imageUrls, [
+      'https://example.test/media/21',
+      'https://example.test/media/20',
+    ]);
+  });
+
+  test('maps poll domain payload', () {
+    final poll = ContentItem.fromJson({
+      'id': 9,
+      'section': 'polls',
+      'title': 'Treffpunkt',
+      'text': 'Wann treffen wir uns?',
+      'poll_options': ['18:00', '19:00'],
+      'poll_allow_suggestions': true,
+      'poll_counts': [2, 3],
+      'poll_total_votes': 5,
+      'poll_my_vote': 1,
+      'poll_voters': [
+        {'name': 'Max Muster', 'option_index': 1},
+      ],
+      'poll_suggestions': [
+        {
+          'member_name': 'Anna Muster',
+          'text': '20:00',
+          'option_index': 2,
+          'vote_count': 4,
+        },
+      ],
+    });
+
+    expect(poll.section, 'polls');
+    expect(poll.pollOptions, ['18:00', '19:00']);
+    expect(poll.pollAllowSuggestions, isTrue);
+    expect(poll.pollCounts, [2, 3]);
+    expect(poll.pollTotalVotes, 5);
+    expect(poll.pollMyVote, 1);
+    expect(poll.pollVoters.single.name, 'Max Muster');
+    expect(poll.pollSuggestions.single.memberName, 'Anna Muster');
+    expect(poll.pollSuggestions.single.text, '20:00');
+    expect(poll.pollSuggestions.single.optionIndex, 2);
+    expect(poll.pollSuggestions.single.voteCount, 4);
+  });
+
 }

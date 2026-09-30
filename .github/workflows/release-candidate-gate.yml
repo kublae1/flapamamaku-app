@@ -1,0 +1,172 @@
+name: FLAPAMAMAKU Release Candidate Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feature/release-candidate-gate-v1 ]
+    paths:
+      - "backend/**"
+      - "lib/**"
+      - "test/**"
+      - "pubspec.yaml"
+      - "config/white-label/flapamamaku.json"
+      - ".github/workflows/release-candidate-gate.yml"
+
+jobs:
+  release-candidate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate FLAPAMAMAKU release profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          path = Path("config/white-label/flapamamaku.json")
+          data = json.loads(path.read_text())
+
+          required = {
+              "id",
+              "instance_id",
+              "app_name",
+              "app_subtitle",
+              "api_base_url",
+              "app_icon_url",
+              "allow_server_change",
+          }
+          missing = sorted(required - set(data))
+          assert not missing, f"Missing profile fields: {missing}"
+          assert data["id"] == "flapamamaku"
+          assert data["instance_id"] == "flapamamaku"
+          assert str(data["app_name"]).strip() == "FLAPAMAMAKU"
+          assert isinstance(data["allow_server_change"], bool)
+
+          url = str(data["api_base_url"]).rstrip("/")
+          parsed = urlparse(url)
+          assert parsed.scheme == "https" and parsed.netloc
+          assert parsed.path in ("", "/")
+          assert not parsed.query and not parsed.fragment
+
+          print(f"Profile OK: {url}")
+          PY
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Compile and initialize final backend
+        working-directory: backend
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-release-candidate.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-release-candidate-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-release-candidate.db
+          rm -rf /tmp/flapamamaku-release-candidate-backups
+          python -m py_compile app/main.py
+          python - <<'PY'
+          from app.main import API_VERSION, CURRENT_SCHEMA_VERSION, INSTANCE_ID, health, init_db
+
+          init_db()
+          status = health()
+          assert INSTANCE_ID == "flapamamaku"
+          assert status["instance_id"] == "flapamamaku"
+          assert status["version"] == API_VERSION
+          assert status["schema_version"] == CURRENT_SCHEMA_VERSION
+          print(f"Backend OK: API {API_VERSION}, schema {CURRENT_SCHEMA_VERSION}")
+          PY
+
+      - name: Verify public backend matches release candidate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          import subprocess
+          from pathlib import Path
+
+          profile = json.loads(Path("config/white-label/flapamamaku.json").read_text())
+          base = profile["api_base_url"].rstrip("/")
+
+          main = Path("backend/app/main.py").read_text()
+          match = re.search(r'^API_VERSION\s*=\s*"([^"]+)"', main, re.MULTILINE)
+          if not match:
+              raise SystemExit("Could not read backend API_VERSION")
+          expected_version = match.group(1)
+
+          raw = subprocess.check_output(
+              ["curl", "--fail", "--silent", "--show-error",
+               "--connect-timeout", "15", "--max-time", "30",
+               f"{base}/api/health"],
+              text=True,
+          )
+          payload = json.loads(raw)
+
+          assert payload.get("status") == "ok", payload
+          assert payload.get("instance_id") == "flapamamaku", payload
+          assert payload.get("version") == expected_version, (
+              f"Public backend is not on release candidate version: "
+              f"expected {expected_version}, got {payload.get('version')}"
+          )
+          assert payload.get("build_sha"), payload
+          print(
+              f"Public backend matches release candidate: "
+              f"API {payload['version']} / {payload['build_sha']}"
+          )
+          PY
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Flutter analyze
+        run: flutter analyze
+
+      - name: Flutter tests
+        shell: bash
+        run: |
+          if find test -type f -name '*_test.dart' -print -quit 2>/dev/null | grep -q .; then
+            flutter test
+          else
+            echo "No Flutter test files found; analyze completed."
+          fi
+
+      - name: Verify Android release inputs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/build-android.yml").read_text()
+          required = [
+              "CLUB_INSTANCE_ID",
+              "APP_DISPLAY_NAME",
+              "API_BASE_URL",
+              "ALLOW_SERVER_CHANGE",
+              "flutter build apk --release",
+              "flutter build appbundle --release",
+          ]
+          missing = [item for item in required if item not in workflow]
+          if missing:
+              raise SystemExit("Android release workflow incomplete: " + ", ".join(missing))
+
+          print("Android release workflow inputs OK")
+          PY
+
+      - name: Release candidate summary
+        run: |
+          echo "FLAPAMAMAKU release candidate gate passed."
+          echo "Next: manual production smoke test, final Android release build, then iOS."

@@ -2,14 +2,88 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: "White-label build profile"
+        required: false
+        default: "flapamamaku"
   push:
-    branches: [ main ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1, feature/white-label-push-v1, feature/white-label-profiles-v1, feature/club-instance-identity-v1, feature/managed-server-mode-v1 ]
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_APPLICATION_ID: ${{ vars.FLAPAMAMAKU_ANDROID_APPLICATION_ID || 'ch.flapamamaku.app' }}
+      BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
+      FIREBASE_API_KEY_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_API_KEY || secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+      FIREBASE_APP_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_APP_ID || secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
+      FIREBASE_MESSAGING_SENDER_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_MESSAGING_SENDER_ID || secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_PROJECT_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_PROJECT_ID || secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load white label build profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          profile = os.environ["BUILD_PROFILE"].strip()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile):
+              raise SystemExit("Invalid white-label profile name")
+
+          path = Path("config/white-label") / f"{profile}.json"
+          if not path.exists():
+              raise SystemExit(f"White-label profile not found: {path}")
+
+          data = json.loads(path.read_text())
+          required = ["id", "instance_id", "app_name", "app_subtitle", "api_base_url", "app_icon_url", "allow_server_change"]
+          missing = [key for key in required if key not in data]
+          if missing:
+              raise SystemExit("Missing profile fields: " + ", ".join(missing))
+          if data["id"] != profile:
+              raise SystemExit("Profile id does not match file name")
+          instance_id = str(data["instance_id"]).strip().lower()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", instance_id):
+              raise SystemExit("Profile instance_id is invalid")
+          if not str(data["api_base_url"]).startswith("https://"):
+              raise SystemExit("Profile api_base_url must use HTTPS")
+          icon = str(data["app_icon_url"]).strip()
+          if icon and not icon.startswith("https://"):
+              raise SystemExit("Profile app_icon_url must use HTTPS when set")
+
+          values = {
+              "CLUB_INSTANCE_ID": instance_id,
+              "APP_DISPLAY_NAME": str(data["app_name"]).strip(),
+              "APP_DISPLAY_SUBTITLE": str(data["app_subtitle"]).strip(),
+              "API_BASE_URL": str(data["api_base_url"]).rstrip("/"),
+              "WHITE_LABEL_APP_ICON_URL": icon,
+              "ALLOW_SERVER_CHANGE": "true" if bool(data["allow_server_change"]) else "false",
+          }
+          if not values["APP_DISPLAY_NAME"]:
+              raise SystemExit("Profile app_name must not be empty")
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a") as handle:
+              for key, value in values.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit(f"{key} must be a single line")
+                  handle.write(f"{key}={value}\n")
+
+          print(f"Loaded white-label profile: {profile}")
+          print(f"App name: {values['APP_DISPLAY_NAME']}")
+          print(f"API: {values['API_BASE_URL']}")
+          PY
 
       - uses: subosito/flutter-action@v2
         with:
@@ -22,8 +96,156 @@ jobs:
             flutter create --platforms=android --project-name flapamamaku_app .
           fi
 
-      - name: Configure Android permissions and biometrics
+      - name: Configure stable Android application ID
+        shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+
+          app_id = os.environ["ANDROID_APPLICATION_ID"]
+          candidates = [
+              Path("android/app/build.gradle.kts"),
+              Path("android/app/build.gradle"),
+          ]
+          gradle = next((p for p in candidates if p.exists()), None)
+          if gradle is None:
+              raise SystemExit("Android app Gradle file not found")
+
+          text = gradle.read_text()
+
+          if gradle.suffix == ".kts":
+              text = re.sub(
+                  r'namespace\s*=\s*"[^"]+"',
+                  f'namespace = "{app_id}"',
+                  text,
+                  count=1,
+              )
+              text = re.sub(
+                  r'applicationId\s*=\s*"[^"]+"',
+                  f'applicationId = "{app_id}"',
+                  text,
+                  count=1,
+              )
+          else:
+              text = re.sub(
+                  r'namespace\s+["\'][^"\']+["\']',
+                  f'namespace "{app_id}"',
+                  text,
+                  count=1,
+              )
+              text = re.sub(
+                  r'applicationId\s+["\'][^"\']+["\']',
+                  f'applicationId "{app_id}"',
+                  text,
+                  count=1,
+              )
+
+          gradle.write_text(text)
+
+          # Flutter creates MainActivity in the generated project package.
+          # Keep the Kotlin package aligned with the stable application ID,
+          # otherwise Android resolves .MainActivity to a class that does not exist.
+          activity_files = list(Path("android/app/src/main").rglob("MainActivity.kt"))
+          if not activity_files:
+              raise SystemExit("MainActivity.kt not found")
+
+          activity = activity_files[0]
+          activity_text = activity.read_text()
+          activity_text, count = re.subn(
+              r'^package\s+[A-Za-z0-9_.]+',
+              f'package {app_id}',
+              activity_text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit("Could not update MainActivity package declaration")
+
+          target = (
+              Path("android/app/src/main/kotlin")
+              / Path(*app_id.split("."))
+              / "MainActivity.kt"
+          )
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(activity_text)
+          if activity.resolve() != target.resolve():
+              activity.unlink()
+
+          print(f"Configured Android applicationId: {app_id}")
+          print(f"Configured MainActivity package: {app_id}")
+          print(f"MainActivity path: {target}")
+          PY
+
+      - name: Enable Android core library desugaring
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          kts = Path("android/app/build.gradle.kts")
+          groovy = Path("android/app/build.gradle")
+
+          if kts.exists():
+              text = kts.read_text()
+              if "isCoreLibraryDesugaringEnabled = true" not in text:
+                  text = re.sub(
+                      r'(compileOptions\s*\{)',
+                      r'\1\n        isCoreLibraryDesugaringEnabled = true',
+                      text,
+                      count=1,
+                  )
+              if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(
+                          r'(?m)^dependencies\s*\{',
+                          'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+                          text,
+                          count=1,
+                      )
+                  else:
+                      text += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+              kts.write_text(text)
+          elif groovy.exists():
+              text = groovy.read_text()
+              if "coreLibraryDesugaringEnabled true" not in text:
+                  text = re.sub(
+                      r'(compileOptions\s*\{)',
+                      r'\1\n        coreLibraryDesugaringEnabled true',
+                      text,
+                      count=1,
+                  )
+              if "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'" not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(
+                          r'(?m)^dependencies\s*\{',
+                          "dependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'",
+                          text,
+                          count=1,
+                      )
+                  else:
+                      text += "\n\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
+              groovy.write_text(text)
+          else:
+              raise SystemExit("Android Gradle file not found")
+          PY
+
+      - name: Configure Android permissions, biometrics and notification icon
+        run: |
+          mkdir -p android/app/src/main/res/drawable
+          cat > android/app/src/main/res/drawable/ic_stat_flapamamaku.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M5,4 L19,4 L19,7 L9,7 L9,10 L17,10 L17,13 L9,13 L9,20 L5,20 Z"/>
+          </vector>
+          EOF
+
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"
@@ -31,8 +253,38 @@ jobs:
           if ! grep -q 'android.permission.USE_BIOMETRIC' "$MANIFEST"; then
             sed -i '/<manifest/a\    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>' "$MANIFEST"
           fi
+          if ! grep -q 'android.permission.POST_NOTIFICATIONS' "$MANIFEST"; then
+            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' "$MANIFEST"
+          fi
           if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
             sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          label = os.environ["APP_DISPLAY_NAME"].strip() or "FLAPAMAMAKU"
+
+          if re.search(r'android:label="[^"]*"', text):
+              text = re.sub(
+                  r'android:label="[^"]*"',
+                  f'android:label="{label}"',
+                  text,
+                  count=1,
+              )
+          else:
+              text = text.replace(
+                  "<application",
+                  f'<application android:label="{label}"',
+                  1,
+              )
+          manifest.write_text(text)
+          PY
+
+          if ! grep -q 'com.google.firebase.messaging.default_notification_icon' "$MANIFEST"; then
+            sed -i '/<\/application>/i\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_flapamamaku" />' "$MANIFEST"
           fi
 
           MAIN_ACTIVITY=$(find android/app/src/main -name MainActivity.kt | head -n 1)
@@ -41,8 +293,177 @@ jobs:
             sed -i 's/: FlutterActivity()/: FlutterFragmentActivity()/' "$MAIN_ACTIVITY"
           fi
 
+      - name: Configure release signing
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FLAPAMAMAKU_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FLAPAMAMAKU_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.FLAPAMAMAKU_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.FLAPAMAMAKU_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "No permanent release signing secrets configured yet."
+            exit 0
+          fi
+
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          raw = os.environ["KEYSTORE_BASE64"]
+          cleaned = raw.strip().replace("\ufeff", "")
+          compact = "".join(cleaned.split())
+
+          allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+          invalid = [(i, ord(ch)) for i, ch in enumerate(compact) if ch not in allowed]
+          print(f"Keystore secret chars: {len(raw)}")
+          print(f"Keystore compact chars: {len(compact)}")
+          print(f"Keystore length mod 4: {len(compact) % 4}")
+          if invalid:
+              preview = ", ".join(f"pos {i}: U+{code:04X}" for i, code in invalid[:8])
+              raise SystemExit(
+                  f"Keystore Base64 contains {len(invalid)} invalid character(s): {preview}"
+              )
+
+          try:
+              data = base64.b64decode(compact, validate=True)
+          except Exception as exc:
+              raise SystemExit(f"Keystore Base64 could not be decoded: {exc}")
+
+          if not data:
+              raise SystemExit("Decoded keystore is empty")
+
+          Path("android/app/flapamamaku-release.jks").write_bytes(data)
+          print(f"Decoded keystore bytes: {len(data)}")
+          PY
+
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=flapamamaku-release.jks
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          kts = Path("android/app/build.gradle.kts")
+          groovy = Path("android/app/build.gradle")
+
+          if kts.exists():
+              text = kts.read_text()
+              marker = "plugins {"
+              prefix = '''import java.util.Properties
+          import java.io.FileInputStream
+
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          '''
+              if "val keystoreProperties = Properties()" not in text:
+                  text = prefix + text
+
+              android_marker = "android {"
+              signing = '''android {
+              signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+          '''
+              if 'create("release")' not in text:
+                  text = text.replace(android_marker, signing, 1)
+
+              text = text.replace(
+                  'signingConfig = signingConfigs.getByName("debug")',
+                  'signingConfig = signingConfigs.getByName("release")',
+              )
+              kts.write_text(text)
+
+          elif groovy.exists():
+              text = groovy.read_text()
+              prefix = '''def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
+          '''
+              if "def keystoreProperties = new Properties()" not in text:
+                  text = prefix + text
+
+              android_marker = "android {"
+              signing = '''android {
+              signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+          '''
+              if "signingConfigs {" not in text:
+                  text = text.replace(android_marker, signing, 1)
+
+              text = text.replace(
+                  "signingConfig signingConfigs.debug",
+                  "signingConfig signingConfigs.release",
+              )
+              groovy.write_text(text)
+          else:
+              raise SystemExit("Android Gradle file not found")
+          PY
+
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Configure white label app icon
+        shell: bash
+        run: |
+          if [ -z "$WHITE_LABEL_APP_ICON_URL" ]; then
+            echo "Using bundled FLAPAMAMAKU app icon."
+            exit 0
+          fi
+
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          url = os.environ["WHITE_LABEL_APP_ICON_URL"].strip()
+          parsed = urlparse(url)
+          if parsed.scheme != "https" or not parsed.netloc:
+              raise SystemExit("WHITE_LABEL_APP_ICON_URL must be a valid HTTPS URL")
+          print(f"Downloading white-label icon from {parsed.netloc}")
+          PY
+
+          curl --fail --silent --show-error --location             --connect-timeout 15             --max-time 30             "$WHITE_LABEL_APP_ICON_URL"             --output "/tmp/white-label-app-icon.png"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("/tmp/white-label-app-icon.png")
+          data = source.read_bytes()
+          if len(data) < 8 or data[:8] != b"\x89PNG\r\n\x1a\n":
+              raise SystemExit("White-label app icon must be a PNG file")
+          if len(data) > 5 * 1024 * 1024:
+              raise SystemExit("White-label app icon is larger than 5 MiB")
+
+          target = Path("assets/FLAPAMAMAKU App-Icon.png")
+          target.write_bytes(data)
+          print(f"White-label app icon installed: {len(data)} bytes")
+          PY
 
       - name: Generate Android launcher icons
         run: dart run flutter_launcher_icons
@@ -53,12 +474,147 @@ jobs:
       - name: Test
         run: flutter test
 
-      - name: Build release APK
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          APP_VERSION=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path("pubspec.yaml").read_text()
+          match = re.search(r"^version:\s*([^+\s]+)", text, re.MULTILINE)
+          if not match:
+              raise SystemExit("Version not found in pubspec.yaml")
+          print(match.group(1))
+          PY
+          )
+          echo "name=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "number=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Release version: $APP_VERSION+$GITHUB_RUN_NUMBER"
+
+      - name: Verify release tag matches app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          EXPECTED_TAG="v${{ steps.version.outputs.name }}"
+          if [ "${GITHUB_REF_NAME}" != "$EXPECTED_TAG" ]; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not match pubspec version ${EXPECTED_TAG}."
+            exit 1
+          fi
+          echo "Release tag matches app version: ${GITHUB_REF_NAME}"
+
+      - name: Build universal release APK
         env:
-          API_BASE_URL: ${{ vars.FLAPAMAMAKU_API_BASE_URL || 'http://192.168.0.215:8087' }}
-        run: flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
+          APP_VERSION: ${{ steps.version.outputs.name }}
+          APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          APP_NAME: ${{ env.APP_DISPLAY_NAME }}
+          APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
+          FIREBASE_API_KEY: ${{ env.FIREBASE_API_KEY_VALUE }}
+          FIREBASE_APP_ID: ${{ env.FIREBASE_APP_ID_VALUE }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID_VALUE }}
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID_VALUE }}
+        run: |
+          flutter build apk --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$APP_BUILD_NUMBER" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
+            --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
+
+      - name: Build split release APKs
+        env:
+          APP_VERSION: ${{ steps.version.outputs.name }}
+          APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          APP_NAME: ${{ env.APP_DISPLAY_NAME }}
+          APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
+          FIREBASE_API_KEY: ${{ env.FIREBASE_API_KEY_VALUE }}
+          FIREBASE_APP_ID: ${{ env.FIREBASE_APP_ID_VALUE }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID_VALUE }}
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID_VALUE }}
+        run: |
+          flutter build apk --release --split-per-abi \
+            --build-name="$APP_VERSION" \
+            --build-number="$APP_BUILD_NUMBER" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
+            --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
+
+      - name: Build Play Store AAB
+        env:
+          APP_VERSION: ${{ steps.version.outputs.name }}
+          APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+          APP_NAME: ${{ env.APP_DISPLAY_NAME }}
+          APP_SUBTITLE: ${{ env.APP_DISPLAY_SUBTITLE }}
+          FIREBASE_API_KEY: ${{ env.FIREBASE_API_KEY_VALUE }}
+          FIREBASE_APP_ID: ${{ env.FIREBASE_APP_ID_VALUE }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID_VALUE }}
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID_VALUE }}
+        run: |
+          flutter build appbundle --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$APP_BUILD_NUMBER" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
+            --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
+
+      - name: Verify permanent signing is configured for distributable builds
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${{ steps.signing.outputs.configured }}" != "true" ]; then
+            echo "::error::Permanent Android release signing is not configured."
+            exit 1
+          fi
+
+      - name: Create release checksums
+        shell: bash
+        run: |
+          cd build/app/outputs
+          sha256sum flutter-apk/app-release.apk flutter-apk/app-*-release.apk bundle/release/app-release.aab > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: flapamamaku-android-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: flapamamaku-android-release
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-*-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+            build/app/outputs/SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \\
+            build/app/outputs/flutter-apk/app-release.apk \\
+            build/app/outputs/flutter-apk/app-*-release.apk \\
+            build/app/outputs/bundle/release/app-release.aab \\
+            build/app/outputs/SHA256SUMS.txt \\
+            --title "$APP_DISPLAY_NAME $GITHUB_REF_NAME" \\
+            --generate-notes

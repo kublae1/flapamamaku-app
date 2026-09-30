@@ -70,3 +70,8 @@ Verhalten:
 - danach automatische Synchronisation alle 30 Sekunden
 - News können zusätzlich per Ziehen nach unten manuell aktualisiert werden
 - wenn der Server vorübergehend nicht erreichbar ist, bleibt die App mit den zuletzt vorhandenen Daten bedienbar
+
+
+## Release / Store-Vorbereitung
+
+Die Android-Pipeline ist für eine dauerhafte Release-Signierung, APK und Google-Play-AAB vorbereitet. Die eigentlichen privaten Schlüssel bleiben ausserhalb des Repositories in GitHub Secrets. Details: `docs/RELEASE_SETUP.md`.

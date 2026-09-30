@@ -1,7 +1,7 @@
 name: flapamamaku_app
 description: FLAPAMAMAKU Fasnachtsgruppe Luzern - mobile app
 publish_to: 'none'
-version: 0.8.13+28
+version: 0.8.32+34
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -12,10 +12,19 @@ dependencies:
   cupertino_icons: ^1.0.8
   url_launcher: ^6.3.2
   http: ^1.5.0
+  http_parser: ^4.1.2
+  cached_network_image: ^3.4.1
   shared_preferences: ^2.5.3
   local_auth: ^2.3.0
   flutter_secure_storage: ^9.2.4
   share_plus: ^12.0.2
+  image_picker: ^1.1.2
+  flutter_image_compress: ^2.4.0
+  firebase_core: ^4.1.1
+  firebase_messaging: ^16.0.2
+  flutter_local_notifications: ^19.4.2
+  path_provider: ^2.1.5
+  open_filex: ^4.7.0
 
 dev_dependencies:
   flutter_test:
@@ -33,6 +42,8 @@ flutter:
   assets:
     - assets/FLAPAMAMAKU App-Icon.png
     - assets/images/hero_fireworks.jpg
+    - assets/images/hero_wasserturm_saurocker.jpg
+    - assets/images/hero_wasserturm_saurocker.png
     - assets/images/year_motto_pig_rockers.jpg
     - assets/images/archive_top_hats_night.jpg
     - assets/images/archive_top_hats_barrel.jpg

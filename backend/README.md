@@ -58,3 +58,13 @@ Nach einem Backend-Update:
 3. Die Daten im Volume bleiben erhalten.
 
 Zusätzlich wird pro Build ein unveränderlicher SHA-Tag veröffentlicht, z. B. `sha-abcdef1`, damit bei Bedarf auf einen bestimmten Stand zurückgegangen werden kann.
+
+
+## Öffentliche HTTPS-/Produktionsvorbereitung
+
+Für den späteren Mitgliederzugriff gibt es eine separate Produktionsvorlage
+`docker-compose.production.yml`. Sie bindet das Backend nur lokal an Port 8087;
+der Internetzugriff erfolgt über einen HTTPS-Reverse-Proxy. Die Datenbank selbst
+wird nicht veröffentlicht.
+
+Details: `PUBLIC_DEPLOYMENT.md`.

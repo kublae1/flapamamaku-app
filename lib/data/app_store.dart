@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_data.dart';
 import 'api_service.dart';
+import 'push_service.dart';
 
 enum UserRole {
   admin,
@@ -20,30 +23,21 @@ class AppStore extends ChangeNotifier {
         events = List<EventItem>.from(eventItems),
         members = List<MemberItem>.from(initialMembers),
         content = <ContentItem>[] {
+    pushService = PushService(this.api);
     _sortNews();
     _sortEvents();
-    _loadAppearance();
-
-    if (this.api.isConfigured) {
-      restoreSession();
-      _syncTimer = Timer.periodic(
-        const Duration(seconds: 30),
-        (_) {
-          if (isAuthenticated) refreshFromServer();
-        },
-      );
-    } else {
-      authReady = true;
-      isAuthenticated = true;
-    }
+    _initialize();
+  
   }
 
   final ApiService api;
+  late final PushService pushService;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final LocalAuthentication _localAuth = LocalAuthentication();
   final List<NewsItem> news;
   final List<EventItem> events;
   final List<MemberItem> members;
+  final List<MemberFilterItem> memberFilters = <MemberFilterItem>[];
   final List<ContentItem> content;
 
   Timer? _syncTimer;
@@ -60,31 +54,278 @@ class AppStore extends ChangeNotifier {
   bool biometricAvailable = false;
   bool biometricUnlockPending = false;
   bool isBiometricAuthenticating = false;
+  bool pushEnabled = false;
+  bool pushAvailable = false;
   Map<String, dynamic>? currentUser;
   String? authError;
   int themeColorValue = 0xFF8A101B;
+  String appName = const String.fromEnvironment(
+    'APP_NAME',
+    defaultValue: 'FLAPAMAMAKU',
+  );
+  String appSubtitle = const String.fromEnvironment(
+    'APP_SUBTITLE',
+    defaultValue: 'Fasnachtsgruppe Luzern',
+  );
+  String appLogoUrl = '';
+  String clubDescription = '';
+  String websiteUrl = '';
+  String contactEmail = '';
+  String contactPhone = '';
+  String clubAddress = '';
+
+  bool showSujet = true;
+  String labelSujet = 'Sujet nächstes Jahr';
+  bool showArchive = true;
+  String labelArchive = 'Vergangene Sujet';
+  bool showPhotos = true;
+  String labelPhotos = 'Fotoalben';
+  bool showDocuments = true;
+  String labelDocuments = 'Dokumente';
+  bool showPolls = true;
+  String labelPolls = 'Umfragen';
+  bool showLinks = true;
+  String labelLinks = 'Links';
 
   Color get themeColor => Color(themeColorValue);
 
-  Future<void> _loadAppearance() async {
+  String get _offlineCacheKey =>
+      'flapamamaku_offline_cache_${Uri.encodeComponent(api.baseUrl)}';
+
+  Map<String, dynamic> _brandingSnapshot() => {
+        'app_name': appName,
+        'app_subtitle': appSubtitle,
+        'app_logo_url': appLogoUrl,
+        'club_description': clubDescription,
+        'website_url': websiteUrl,
+        'contact_email': contactEmail,
+        'contact_phone': contactPhone,
+        'club_address': clubAddress,
+        'theme_color_value': themeColorValue,
+        'show_sujet': showSujet,
+        'label_sujet': labelSujet,
+        'show_archive': showArchive,
+        'label_archive': labelArchive,
+        'show_photos': showPhotos,
+        'label_photos': labelPhotos,
+        'show_documents': showDocuments,
+        'label_documents': labelDocuments,
+        'show_polls': showPolls,
+        'label_polls': labelPolls,
+        'show_links': showLinks,
+        'label_links': labelLinks,
+      };
+
+  void _applyCachedBranding(Map<String, dynamic> value) {
+    appName = value['app_name']?.toString().trim().isNotEmpty == true
+        ? value['app_name'].toString().trim()
+        : appName;
+    appSubtitle = value['app_subtitle']?.toString() ?? appSubtitle;
+    appLogoUrl = value['app_logo_url']?.toString() ?? appLogoUrl;
+    clubDescription = value['club_description']?.toString() ?? clubDescription;
+    websiteUrl = value['website_url']?.toString() ?? websiteUrl;
+    contactEmail = value['contact_email']?.toString() ?? contactEmail;
+    contactPhone = value['contact_phone']?.toString() ?? contactPhone;
+    clubAddress = value['club_address']?.toString() ?? clubAddress;
+    themeColorValue = value['theme_color_value'] is int
+        ? value['theme_color_value'] as int
+        : themeColorValue;
+    showSujet = value['show_sujet'] != false;
+    labelSujet = value['label_sujet']?.toString() ?? labelSujet;
+    showArchive = value['show_archive'] != false;
+    labelArchive = value['label_archive']?.toString() ?? labelArchive;
+    showPhotos = value['show_photos'] != false;
+    labelPhotos = value['label_photos']?.toString() ?? labelPhotos;
+    showDocuments = value['show_documents'] != false;
+    labelDocuments = value['label_documents']?.toString() ?? labelDocuments;
+    showPolls = value['show_polls'] != false;
+    labelPolls = value['label_polls']?.toString() ?? labelPolls;
+    showLinks = value['show_links'] != false;
+    labelLinks = value['label_links']?.toString() ?? labelLinks;
+  }
+
+  Future<void> _saveOfflineCache() async {
+    if (!api.isConfigured || currentUser == null) return;
     final prefs = await SharedPreferences.getInstance();
+    final syncedAt = lastSuccessfulSync ?? DateTime.now();
+    final payload = {
+      'version': 1,
+      'server_url': api.baseUrl,
+      'saved_at': syncedAt.toIso8601String(),
+      'current_user': currentUser,
+      'branding': _brandingSnapshot(),
+      'news': news.map((item) => item.toJson()).toList(),
+      'events': events.map((item) => item.toJson()).toList(),
+      'members': members.map((item) => item.toJson()).toList(),
+      'member_filters':
+          memberFilters.map((item) => item.toJson()).toList(),
+      'content': content.map((item) => item.toJson()).toList(),
+    };
+    await prefs.setString(_offlineCacheKey, jsonEncode(payload));
+  }
+
+  Future<bool> _loadOfflineCache() async {
+    if (!api.isConfigured) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_offlineCacheKey);
+    if (raw == null || raw.trim().isEmpty) return false;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return false;
+      final data = Map<String, dynamic>.from(decoded);
+      if (data['server_url']?.toString() != api.baseUrl) return false;
+
+      final cachedUser = data['current_user'];
+      if (cachedUser is! Map) return false;
+      currentUser = Map<String, dynamic>.from(cachedUser);
+      isAuthenticated = true;
+
+      final branding = data['branding'];
+      if (branding is Map) {
+        _applyCachedBranding(Map<String, dynamic>.from(branding));
+      }
+
+      List<Map<String, dynamic>> listOfMaps(String key) {
+        return (data[key] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((value) => Map<String, dynamic>.from(value))
+            .toList();
+      }
+
+      news
+        ..clear()
+        ..addAll(listOfMaps('news').map(NewsItem.fromJson));
+      events
+        ..clear()
+        ..addAll(listOfMaps('events').map(EventItem.fromJson));
+      members
+        ..clear()
+        ..addAll(listOfMaps('members').map(MemberItem.fromJson));
+      memberFilters
+        ..clear()
+        ..addAll(listOfMaps('member_filters').map(MemberFilterItem.fromJson));
+      content
+        ..clear()
+        ..addAll(listOfMaps('content').map(ContentItem.fromJson));
+
+      _sortNews();
+      _sortEvents();
+      isUsingServer = false;
+      syncError = 'Offline – gespeicherte Daten werden angezeigt.';
+      lastSuccessfulSync = DateTime.tryParse(
+        data['saved_at']?.toString() ?? '',
+      );
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _initialize() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedServer = prefs.getString('flapamamaku_server_url')?.trim() ?? '';
+    if (savedServer.isNotEmpty) {
+      api.configureBaseUrl(savedServer);
+    }
+
     themeColorValue =
-        prefs.getInt('flapamamaku_theme_color') ?? 0xFF8A101B;
+        prefs.getInt('flapamamaku_brand_color') ?? 0xFF8A101B;
     notifyListeners();
+
+    if (api.isConfigured) {
+      // Branding is public and must be available before the first login so a
+      // white-label instance never shows FLAPAMAMAKU branding to another club.
+      await _loadRemoteBranding(prefs);
+      await restoreSession();
+      _startSyncTimer();
+    } else {
+      authReady = true;
+      isAuthenticated = false;
+      notifyListeners();
+    }
+  }
+
+  void _startSyncTimer() {
+    _syncTimer ??= Timer.periodic(
+      const Duration(seconds: 30),
+      (_) {
+        if (isAuthenticated) refreshFromServer();
+      },
+    );
   }
 
   Future<void> setThemeColor(int value) async {
     themeColorValue = value;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('flapamamaku_theme_color', value);
+    await prefs.setInt('flapamamaku_brand_color', value);
     notifyListeners();
   }
 
+  Future<void> _loadRemoteBranding(SharedPreferences prefs) async {
+    try {
+      final config = await api.fetchAppConfig();
+      final nextName = config['app_name']?.toString().trim() ?? '';
+      final nextSubtitle = config['app_subtitle']?.toString().trim() ?? '';
+      final colorText = config['primary_color']?.toString().trim() ?? '';
+      final nextLogoUrl = config['logo_url']?.toString().trim() ?? '';
+
+      if (nextName.isNotEmpty) appName = nextName;
+      appSubtitle = nextSubtitle;
+      appLogoUrl = nextLogoUrl;
+      clubDescription = config['club_description']?.toString().trim() ?? '';
+      websiteUrl = config['website_url']?.toString().trim() ?? '';
+      contactEmail = config['contact_email']?.toString().trim() ?? '';
+      contactPhone = config['contact_phone']?.toString().trim() ?? '';
+      clubAddress = config['club_address']?.toString().trim() ?? '';
+
+      showSujet = config['show_sujet'] != false;
+      labelSujet = config['label_sujet']?.toString().trim().isNotEmpty == true
+          ? config['label_sujet'].toString().trim()
+          : 'Sujet nächstes Jahr';
+      showArchive = config['show_archive'] != false;
+      labelArchive = config['label_archive']?.toString().trim().isNotEmpty == true
+          ? config['label_archive'].toString().trim()
+          : 'Vergangene Sujet';
+      showPhotos = config['show_photos'] != false;
+      labelPhotos = config['label_photos']?.toString().trim().isNotEmpty == true
+          ? config['label_photos'].toString().trim()
+          : 'Fotoalben';
+      showDocuments = config['show_documents'] != false;
+      labelDocuments =
+          config['label_documents']?.toString().trim().isNotEmpty == true
+              ? config['label_documents'].toString().trim()
+              : 'Dokumente';
+      showPolls = config['show_polls'] != false;
+      labelPolls = config['label_polls']?.toString().trim().isNotEmpty == true
+          ? config['label_polls'].toString().trim()
+          : 'Umfragen';
+      showLinks = config['show_links'] != false;
+      labelLinks = config['label_links']?.toString().trim().isNotEmpty == true
+          ? config['label_links'].toString().trim()
+          : 'Links';
+
+      final match = RegExp(r'^#([0-9A-Fa-f]{6})$').firstMatch(colorText);
+      if (match != null) {
+        themeColorValue = int.parse('FF${match.group(1)!}', radix: 16);
+        await prefs.setInt('flapamamaku_brand_color', themeColorValue);
+      }
+      if (isAuthenticated) {
+        await _saveOfflineCache();
+      }
+      notifyListeners();
+    } catch (_) {
+      // Cached branding remains available when the server is unavailable.
+    }
+  }
   bool get canNews => currentUser?['can_news'] == true;
   bool get canEvents => currentUser?['can_events'] == true;
   bool get canMembers => currentUser?['can_members'] == true;
   bool get canDocuments => currentUser?['can_documents'] == true;
   bool get canPhotos => currentUser?['can_photos'] == true;
+  bool get canGalleryUpload =>
+      currentUser?['can_gallery_upload'] == true || canPhotos;
   bool get canPolls => currentUser?['can_polls'] == true;
   bool get canLinks => currentUser?['can_links'] == true;
   bool get canContact => currentUser?['can_contact'] == true;
@@ -94,15 +335,18 @@ class AppStore extends ChangeNotifier {
 
   bool canEditContentSection(String section) {
     switch (section) {
+      case 'hero':
       case 'sujet':
       case 'archive':
       case 'photos':
+      case 'gallery':
         return canPhotos;
       case 'documents':
         return canDocuments;
       case 'polls':
         return canPolls;
       case 'links':
+      case 'whatsapp':
         return canLinks;
       default:
         return false;
@@ -111,7 +355,72 @@ class AppStore extends ChangeNotifier {
 
   bool get canAdminister =>
       !api.isConfigured || canNews || canEvents || canMembers;
+  static const bool _allowServerChange = bool.fromEnvironment(
+    'ALLOW_SERVER_CHANGE',
+    defaultValue: true,
+  );
+
   bool get serverConfigured => api.isConfigured;
+  String get serverUrl => api.baseUrl;
+  bool get canChangeServer => _allowServerChange;
+
+  String userMessageForError(
+    Object error, {
+    String fallback = 'Die Aktion konnte nicht abgeschlossen werden.',
+  }) =>
+      friendlyErrorMessage(error, fallback: fallback);
+
+  Future<bool> changeServerUrl(String value) async {
+    var candidate = value.trim();
+    while (candidate.endsWith('/')) {
+      candidate = candidate.substring(0, candidate.length - 1);
+    }
+
+    final uri = Uri.tryParse(candidate);
+    if (candidate.isEmpty ||
+        uri == null ||
+        !(uri.scheme == 'https' || uri.scheme == 'http') ||
+        uri.host.isEmpty) {
+      authError =
+          'Bitte eine gültige Serveradresse mit https:// oder http:// eingeben.';
+      notifyListeners();
+      return false;
+    }
+
+    final previousUrl = api.baseUrl;
+    api.configureBaseUrl(candidate);
+    try {
+      await api.fetchAppConfig();
+    } catch (error) {
+      api.configureBaseUrl(previousUrl);
+      authError = friendlyErrorMessage(
+        error,
+        fallback: 'Der Server ist nicht erreichbar oder keine gültige Vereins-App.',
+      );
+      notifyListeners();
+      return false;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('flapamamaku_server_url', candidate);
+    await _secureStorage.delete(key: 'flapamamaku_token');
+
+    currentUser = null;
+    isAuthenticated = false;
+    biometricUnlockPending = false;
+    authError = null;
+    authReady = true;
+    news.clear();
+    events.clear();
+    members.clear();
+    memberFilters.clear();
+    content.clear();
+
+    await _loadRemoteBranding(prefs);
+    _startSyncTimer();
+    notifyListeners();
+    return true;
+  }
 
   String get signedInName =>
       currentUser?['member_name']?.toString().isNotEmpty == true
@@ -125,6 +434,8 @@ class AppStore extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     biometricEnabled =
         prefs.getBool('flapamamaku_biometric_enabled') ?? false;
+    pushEnabled = prefs.getBool('flapamamaku_push_enabled') ?? false;
+    pushAvailable = pushService.isConfigured;
 
     try {
       biometricAvailable =
@@ -144,15 +455,9 @@ class AppStore extends ChangeNotifier {
       return;
     }
 
-    if (biometricEnabled && biometricAvailable) {
-      api.setToken(null);
-      biometricUnlockPending = true;
-      authReady = true;
-      isAuthenticated = false;
-      notifyListeners();
-      return;
-    }
-
+    // A valid secure session token keeps the member signed in until
+    // they explicitly log out or an administrator revokes the session.
+    biometricUnlockPending = false;
     await _restoreWithToken(token);
   }
 
@@ -164,12 +469,21 @@ class AppStore extends ChangeNotifier {
       biometricUnlockPending = false;
       authError = null;
       await refreshFromServer();
+      if (pushEnabled) {
+        await pushService.enable();
+      }
     } catch (_) {
-      api.setToken(null);
-      currentUser = null;
-      isAuthenticated = false;
-      biometricUnlockPending = false;
-      await _secureStorage.delete(key: 'flapamamaku_token');
+      final restored = await _loadOfflineCache();
+      if (restored) {
+        biometricUnlockPending = false;
+        authError = null;
+      } else {
+        api.setToken(null);
+        currentUser = null;
+        isAuthenticated = false;
+        biometricUnlockPending = false;
+        await _secureStorage.delete(key: 'flapamamaku_token');
+      }
     } finally {
       authReady = true;
       notifyListeners();
@@ -185,7 +499,7 @@ class AppStore extends ChangeNotifier {
 
     try {
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'FLAPAMAMAKU entsperren',
+        localizedReason: '$appName entsperren',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
@@ -212,6 +526,36 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  Future<bool> loginWithBiometrics() async {
+    if (isBiometricAuthenticating) return false;
+
+    try {
+      biometricAvailable =
+          await _localAuth.canCheckBiometrics &&
+          await _localAuth.isDeviceSupported();
+    } catch (_) {
+      biometricAvailable = false;
+    }
+
+    if (!biometricAvailable) {
+      authError = 'Auf diesem Gerät ist keine biometrische Anmeldung verfügbar.';
+      notifyListeners();
+      return false;
+    }
+
+    final token = await _secureStorage.read(key: 'flapamamaku_token');
+    if (token == null || token.isEmpty) {
+      authError =
+          'Bitte zuerst einmal mit Benutzername und Passwort anmelden.';
+      notifyListeners();
+      return false;
+    }
+
+    biometricUnlockPending = true;
+    notifyListeners();
+    return unlockWithBiometrics();
+  }
+
   Future<void> usePasswordInstead() async {
     api.setToken(null);
     currentUser = null;
@@ -220,6 +564,39 @@ class AppStore extends ChangeNotifier {
     authError = null;
     authReady = true;
     notifyListeners();
+  }
+
+  Future<bool> setPushEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!enabled) {
+      await pushService.disable();
+      pushEnabled = false;
+      await prefs.setBool('flapamamaku_push_enabled', false);
+      notifyListeners();
+      return true;
+    }
+
+    pushAvailable = pushService.isConfigured;
+    if (!pushAvailable) {
+      authError = 'Push-Dienst ist noch nicht vollständig eingerichtet.';
+      notifyListeners();
+      return false;
+    }
+
+    final ok = await pushService.enable();
+    if (!ok) {
+      authError =
+          'Push-Benachrichtigungen konnten nicht aktiviert werden. Bitte Berechtigung prüfen.';
+      notifyListeners();
+      return false;
+    }
+
+    pushEnabled = true;
+    authError = null;
+    await prefs.setBool('flapamamaku_push_enabled', true);
+    notifyListeners();
+    return true;
   }
 
   Future<bool> setBiometricEnabled(bool enabled) async {
@@ -287,9 +664,17 @@ class AppStore extends ChangeNotifier {
       );
       isAuthenticated = true;
       await refreshFromServer();
+      if (pushEnabled) {
+        await pushService.enable();
+      }
       return true;
     } catch (error) {
-      authError = 'Benutzername oder Passwort falsch.';
+      authError = error is ApiException && error.statusCode == 401
+          ? 'Benutzername oder Passwort falsch.'
+          : friendlyErrorMessage(
+              error,
+              fallback: 'Anmeldung momentan nicht möglich. Bitte nochmals versuchen.',
+            );
       isAuthenticated = false;
       currentUser = null;
       return false;
@@ -301,6 +686,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await pushService.disable();
     try {
       await api.logout();
     } catch (_) {
@@ -320,6 +706,7 @@ class AppStore extends ChangeNotifier {
     members
       ..clear()
       ..addAll(initialMembers);
+    memberFilters.clear();
     content.clear();
     _sortNews();
     _sortEvents();
@@ -331,7 +718,17 @@ class AppStore extends ChangeNotifier {
   }
 
   void _sortNews() {
-    news.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    news.sort((a, b) {
+      final aOrder = a.sortOrder;
+      final bOrder = b.sortOrder;
+      if (aOrder > 0 || bOrder > 0) {
+        final normalizedA = aOrder > 0 ? aOrder : 1 << 30;
+        final normalizedB = bOrder > 0 ? bOrder : 1 << 30;
+        final byOrder = normalizedA.compareTo(normalizedB);
+        if (byOrder != 0) return byOrder;
+      }
+      return b.createdAt.compareTo(a.createdAt);
+    });
   }
 
   void _sortEvents() {
@@ -357,7 +754,9 @@ class AppStore extends ChangeNotifier {
       final remoteNews = await api.fetchNews();
       final remoteEvents = await api.fetchEvents();
       final remoteMembers = await api.fetchMembers();
+      final remoteMemberFilters = await api.fetchMemberFilters();
       final remoteContent = await api.fetchContent();
+      final remotePolls = await api.fetchPolls();
 
       news
         ..clear()
@@ -368,17 +767,26 @@ class AppStore extends ChangeNotifier {
       members
         ..clear()
         ..addAll(remoteMembers);
+      memberFilters
+        ..clear()
+        ..addAll(remoteMemberFilters);
       content
         ..clear()
-        ..addAll(remoteContent);
+        ..addAll(remoteContent)
+        ..addAll(remotePolls);
 
       _sortNews();
       _sortEvents();
       isUsingServer = true;
       syncError = null;
       lastSuccessfulSync = DateTime.now();
+      await _saveOfflineCache();
     } catch (error) {
-      syncError = error.toString();
+      isUsingServer = false;
+      syncError = friendlyErrorMessage(error);
+      if (news.isEmpty && events.isEmpty && members.isEmpty && content.isEmpty) {
+        await _loadOfflineCache();
+      }
     } finally {
       isSyncing = false;
       notifyListeners();
@@ -392,12 +800,46 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> deleteContentItem(ContentItem item) async {
+    if (item.isSnapshot && item.snapshotId != null) {
+      try {
+        await api.deleteGallerySnapshot(item.snapshotId!);
+        await refreshFromServer();
+      } catch (error) {
+        syncError = friendlyErrorMessage(error);
+        notifyListeners();
+        rethrow;
+      }
+      return;
+    }
     if (item.id == null) return;
     try {
-      await api.deleteContent(item.id!);
+      if (item.section == 'polls') {
+        await api.deletePoll(item.id!);
+      } else {
+        await api.deleteContent(item.id!);
+      }
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> uploadGallerySnapshot({
+    required Uint8List bytes,
+    required String filename,
+    required int expiresDays,
+  }) async {
+    try {
+      await api.uploadGallerySnapshot(
+        bytes: bytes,
+        filename: filename,
+        expiresDays: expiresDays,
+      );
+      await refreshFromServer();
+    } catch (error) {
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -414,7 +856,7 @@ class AppStore extends ChangeNotifier {
       await api.saveNews(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -431,7 +873,7 @@ class AppStore extends ChangeNotifier {
       await api.saveNews(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -448,7 +890,7 @@ class AppStore extends ChangeNotifier {
       await api.deleteNews(item.id!);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -463,7 +905,7 @@ class AppStore extends ChangeNotifier {
       await api.setEventRegistration(event.id!, registered);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -480,7 +922,7 @@ class AppStore extends ChangeNotifier {
       await api.saveEvent(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -497,7 +939,7 @@ class AppStore extends ChangeNotifier {
       await api.saveEvent(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -514,7 +956,7 @@ class AppStore extends ChangeNotifier {
       await api.deleteEvent(item.id!);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -530,7 +972,7 @@ class AppStore extends ChangeNotifier {
       await api.saveMember(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -546,7 +988,7 @@ class AppStore extends ChangeNotifier {
       await api.saveMember(item);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }
@@ -563,7 +1005,7 @@ class AppStore extends ChangeNotifier {
       await api.deleteMember(item.id!);
       await refreshFromServer();
     } catch (error) {
-      syncError = error.toString();
+      syncError = friendlyErrorMessage(error);
       notifyListeners();
       rethrow;
     }

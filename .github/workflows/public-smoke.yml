@@ -1,0 +1,155 @@
+name: Public HTTPS Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "White-label profile to test"
+        required: false
+        default: "flapamamaku"
+  push:
+    branches: [ feature/public-smoke-v1, feature/public-instance-guard-v1, feature/profile-public-smoke-v1 ]
+    paths:
+      - ".github/workflows/public-smoke.yml"
+      - "backend/PUBLIC_DEPLOYMENT.md"
+      - "config/white-label/**"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load club profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          profile = os.environ["BUILD_PROFILE"].strip()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile):
+              raise SystemExit("Invalid white-label profile name")
+
+          path = Path("config/white-label") / f"{profile}.json"
+          if not path.exists():
+              raise SystemExit(f"White-label profile not found: {path}")
+
+          data = json.loads(path.read_text())
+          required = ["id", "instance_id", "api_base_url"]
+          missing = [key for key in required if key not in data]
+          if missing:
+              raise SystemExit("Missing profile fields: " + ", ".join(missing))
+          if data["id"] != profile:
+              raise SystemExit("Profile id does not match file name")
+
+          instance_id = str(data["instance_id"]).strip().lower()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", instance_id):
+              raise SystemExit("Profile instance_id is invalid")
+
+          api_url = str(data["api_base_url"]).strip().rstrip("/")
+          if not api_url.startswith("https://"):
+              raise SystemExit("Profile api_base_url must use HTTPS")
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a") as handle:
+              handle.write(f"PUBLIC_API_BASE_URL={api_url}\n")
+              handle.write(f"EXPECTED_INSTANCE_ID={instance_id}\n")
+
+          print(f"Loaded profile: {profile}")
+          print(f"Public API: {api_url}")
+          print(f"Expected instance: {instance_id}")
+          PY
+
+      - name: Validate configured public URL
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          url = os.environ["PUBLIC_API_BASE_URL"].rstrip("/")
+          parsed = urlparse(url)
+          assert parsed.scheme == "https", "Public API URL must use HTTPS"
+          assert parsed.netloc, "Public API URL must contain a hostname"
+          assert not parsed.path or parsed.path == "/", "Public API URL must not contain an API path"
+          print(f"Testing public API: {url}")
+          PY
+
+      - name: Test HTTPS health endpoint
+        shell: bash
+        run: |
+          BASE="${PUBLIC_API_BASE_URL%/}"
+          curl --fail --silent --show-error             --connect-timeout 15             --max-time 30             -D /tmp/headers.txt             -o /tmp/health.json             "$BASE/api/health"
+
+          cat /tmp/health.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          import os
+
+          payload = json.loads(Path("/tmp/health.json").read_text())
+          expected_instance = os.environ["EXPECTED_INSTANCE_ID"].strip().lower()
+          assert payload.get("status") == "ok", payload
+          assert payload.get("version"), payload
+          assert payload.get("build_sha"), payload
+          assert isinstance(payload.get("schema_version"), int), payload
+          actual_instance = str(payload.get("instance_id") or "").strip().lower()
+          assert actual_instance, "health endpoint has no instance_id"
+          assert actual_instance == expected_instance, (
+              f"Wrong club instance at public URL: expected {expected_instance}, "
+              f"got {actual_instance}"
+          )
+          print(f"health endpoint ok; instance_id={actual_instance}")
+          PY
+
+      - name: Verify public security headers
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          raw = Path("/tmp/headers.txt").read_text().lower()
+          required = {
+              "strict-transport-security:": "HSTS",
+              "x-content-type-options: nosniff": "nosniff",
+              "x-frame-options: deny": "frame protection",
+              "referrer-policy: no-referrer": "referrer policy",
+          }
+          missing = [label for header, label in required.items() if header not in raw]
+          if missing:
+              raise SystemExit("Missing security headers: " + ", ".join(missing))
+          print("security headers ok")
+          PY
+
+      - name: Verify production API docs are disabled
+        shell: bash
+        run: |
+          BASE="${PUBLIC_API_BASE_URL%/}"
+          CODE=$(curl --silent --show-error --output /dev/null --write-out "%{http_code}"             --connect-timeout 15 --max-time 30 "$BASE/api/docs")
+          if [ "$CODE" != "404" ]; then
+            echo "::error::Expected /api/docs to return 404 in production, got $CODE"
+            exit 1
+          fi
+          echo "production docs disabled"
+
+      - name: Verify authentication endpoint is reachable
+        shell: bash
+        run: |
+          BASE="${PUBLIC_API_BASE_URL%/}"
+          curl --fail --silent --show-error             --connect-timeout 15             --max-time 30             "$BASE/api/auth/status" > /tmp/auth-status.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("/tmp/auth-status.json").read_text())
+          assert isinstance(payload.get("bootstrap_required"), bool), payload
+          print("authentication endpoint ok")
+          PY

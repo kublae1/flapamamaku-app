@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
+import '../theme/flap_brand.dart';
 import 'content_detail_screens.dart';
 
 class NewsScreen extends StatelessWidget {
@@ -11,7 +13,7 @@ class NewsScreen extends StatelessWidget {
     if (item.imageUrl.isNotEmpty) {
       return AspectRatio(
         aspectRatio: 16 / 9,
-        child: Image.network(
+        child: OfflineNetworkImage(
           item.imageUrl,
           headers: headers,
           width: double.infinity,
@@ -41,6 +43,7 @@ class NewsScreen extends StatelessWidget {
     final items = store.news;
 
     return Scaffold(
+      backgroundColor: FlapBrand.charcoal,
       appBar: AppBar(title: const Text('News')),
       body: RefreshIndicator(
         onRefresh: store.refreshFromServer,
@@ -55,7 +58,7 @@ class NewsScreen extends StatelessWidget {
               )
             : ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 itemCount: items.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 14),
                 itemBuilder: (_, i) {
@@ -63,6 +66,7 @@ class NewsScreen extends StatelessWidget {
                   final image = _newsImage(item, store.api.authHeaders);
 
                   return Card(
+                    color: const Color(0xFF191B1E),
                     clipBehavior: Clip.antiAlias,
                     margin: EdgeInsets.zero,
                     child: InkWell(
@@ -83,8 +87,7 @@ class NewsScreen extends StatelessWidget {
                                 Text(
                                   item.date,
                                   style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
+                                    color: FlapBrand.gold,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
@@ -94,20 +97,19 @@ class NewsScreen extends StatelessWidget {
                                   style: Theme.of(context)
                                       .textTheme
                                       .titleLarge
-                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                      ?.copyWith(fontWeight: FontWeight.w900, color: Colors.white),
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
                                   item.text,
                                   maxLines: 4,
                                   overflow: TextOverflow.ellipsis,
-                                  style:
-                                      Theme.of(context).textTheme.bodyLarge,
+                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.white70),
                                 ),
                                 const SizedBox(height: 8),
                                 const Align(
                                   alignment: Alignment.centerRight,
-                                  child: Icon(Icons.chevron_right),
+                                  child: Icon(Icons.chevron_right, color: Colors.white70),
                                 ),
                               ],
                             ),

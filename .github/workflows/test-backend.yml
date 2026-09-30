@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -31,7 +31,501 @@ jobs:
       - name: Initialize database
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-backups
         run: python -c "from app.main import init_db; init_db(); print('database ok')"
+
+      - name: Test backup and restore
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-backups
+        run: |
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          from app.main import (
+              DB_PATH,
+              _create_database_backup,
+              _restore_database_backup,
+              init_db,
+          )
+
+          init_db()
+          with sqlite3.connect(DB_PATH) as db:
+              db.execute(
+                  "INSERT INTO members (name, role, since, created_at) VALUES (?, ?, ?, ?)",
+                  ("Restore Test", "Mitglied", "2026", "2026-09-28T00:00:00+00:00"),
+              )
+              db.commit()
+
+          backup = _create_database_backup("workflow-test")
+
+          with sqlite3.connect(DB_PATH) as db:
+              db.execute("DELETE FROM members WHERE name = ?", ("Restore Test",))
+              db.commit()
+
+          result = _restore_database_backup(backup)
+          assert result["restored"] is True
+          assert result["sessions_cleared"] is True
+          assert result["safety_backup"]["name"].endswith(".db")
+
+          with sqlite3.connect(DB_PATH) as db:
+              count = db.execute(
+                  "SELECT COUNT(*) FROM members WHERE name = ?",
+                  ("Restore Test",),
+              ).fetchone()[0]
+              sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+
+          assert count == 1, "restored member is missing"
+          assert sessions == 0, "sessions were not cleared"
+          assert Path(result["safety_backup"]["name"]).suffix == ".db"
+          print("backup restore ok")
+          PY
+
+      - name: Test login rate limit and session expiry
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-security-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-security-backups
+          FLAPAMAMAKU_LOGIN_RATE_MAX_ATTEMPTS: "3"
+          FLAPAMAMAKU_LOGIN_RATE_WINDOW_SECONDS: "600"
+          FLAPAMAMAKU_LOGIN_LOCKOUT_SECONDS: "60"
+          FLAPAMAMAKU_SESSION_LIFETIME_DAYS: "30"
+        run: |
+          rm -f /tmp/flapamamaku-security-test.db
+          python - <<'PY'
+          import sqlite3
+          from datetime import datetime, timezone
+          from fastapi import HTTPException
+          from starlette.requests import Request
+          from app.main import (
+              DB_PATH,
+              LoginPayload,
+              _check_login_rate_limit,
+              _hash_password,
+              _login_rate_key,
+              _record_login_failure,
+              _token_hash,
+              current_user,
+              init_db,
+              login,
+          )
+
+          init_db()
+          password_hash, salt = _hash_password("Geheim123!")
+          with sqlite3.connect(DB_PATH) as db:
+              cursor = db.execute(
+                  """
+                  INSERT INTO users (
+                      username, password_hash, password_salt, active,
+                      role_key, permission_overrides, created_at
+                  ) VALUES (?, ?, ?, 1, 'member', '{}', ?)
+                  """,
+                  (
+                      "security-test",
+                      password_hash,
+                      salt,
+                      datetime.now(timezone.utc).isoformat(),
+                  ),
+              )
+              user_id = cursor.lastrowid
+              db.commit()
+
+          scope = {
+              "type": "http",
+              "method": "POST",
+              "path": "/api/auth/login",
+              "headers": [],
+              "client": ("127.0.0.1", 12345),
+              "server": ("testserver", 80),
+              "scheme": "http",
+              "query_string": b"",
+          }
+          request = Request(scope)
+          key = _login_rate_key(request, "security-test")
+
+          for _ in range(3):
+              _record_login_failure(key)
+
+          try:
+              _check_login_rate_limit(key)
+              raise AssertionError("rate limit was not enforced")
+          except HTTPException as exc:
+              assert exc.status_code == 429
+              assert "Retry-After" in (exc.headers or {})
+
+          from app import main as main_module
+          main_module._clear_login_failures(key)
+          result = login(
+              request,
+              LoginPayload(username="security-test", password="Geheim123!"),
+          )
+          assert result["token"]
+          expires = datetime.fromisoformat(result["expires_at"])
+          remaining_days = (expires - datetime.now(timezone.utc)).total_seconds() / 86400
+          assert 29 <= remaining_days <= 30.1
+
+          with sqlite3.connect(DB_PATH) as db:
+              db.execute(
+                  "UPDATE sessions SET expires_at = ? WHERE token_hash = ?",
+                  (
+                      "2000-01-01T00:00:00+00:00",
+                      _token_hash(result["token"]),
+                  ),
+              )
+              db.commit()
+
+          try:
+              current_user(f"Bearer {result['token']}")
+              raise AssertionError("expired session was accepted")
+          except HTTPException as exc:
+              assert exc.status_code == 401
+
+          print("security hardening ok")
+          PY
+
+      - name: Test club instance identity
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-instance-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-instance-backups
+          FLAPAMAMAKU_INSTANCE_ID: test-verein
+        run: |
+          rm -f /tmp/flapamamaku-instance-test.db
+          python - <<'PY'
+          from app.main import INSTANCE_ID, get_app_config, health, init_db
+
+          init_db()
+          assert INSTANCE_ID == "test-verein"
+          config = get_app_config()
+          assert config["instance_id"] == "test-verein", config
+          status = health()
+          assert status["instance_id"] == "test-verein", status
+          print("club instance identity ok")
+          PY
+
+      - name: Test club setup status
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-setup-status.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-setup-status-backups
+          FLAPAMAMAKU_INSTANCE_ID: test-verein
+        run: |
+          rm -f /tmp/flapamamaku-setup-status.db
+          rm -rf /tmp/flapamamaku-setup-status-backups
+          python - <<'PY'
+          from app.main import _club_setup_status, connect, init_db
+
+          init_db()
+          initial = _club_setup_status()
+          assert initial["required_complete"] is False
+          assert initial["required"]["administrator"]["ok"] is False
+          assert initial["required"]["identity"]["ok"] is False
+          assert initial["required"]["contact"]["ok"] is False
+          assert initial["required"]["modules"]["ok"] is True
+
+          with connect() as db:
+              db.execute(
+                  """
+                  UPDATE app_config
+                  SET app_name = ?, contact_email = ?, club_description = ?
+                  WHERE id = 1
+                  """,
+                  ("Test Verein", "admin@test.invalid", "Testbeschreibung"),
+              )
+              db.commit()
+
+          updated = _club_setup_status()
+          assert updated["required"]["identity"]["ok"] is True
+          assert updated["required"]["contact"]["ok"] is True
+          assert updated["recommended"]["description"]["ok"] is True
+          assert updated["required_complete"] is False
+          print("club setup status ok")
+          PY
+
+      - name: Test backup club instance protection
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-instance-backup.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-instance-backups
+          FLAPAMAMAKU_INSTANCE_ID: test-verein
+        run: |
+          rm -f /tmp/flapamamaku-instance-backup.db
+          rm -rf /tmp/flapamamaku-instance-backups
+          python - <<'PY'
+          import shutil
+          import sqlite3
+          from app.main import (
+              INSTANCE_ID,
+              _create_database_backup,
+              _validate_restore_database,
+              connect,
+              init_db,
+          )
+
+          init_db()
+          assert INSTANCE_ID == "test-verein"
+          with connect() as db:
+              stored = db.execute(
+                  "SELECT instance_id FROM app_config WHERE id = 1"
+              ).fetchone()[0]
+              assert stored == "test-verein"
+
+          backup = _create_database_backup("instance-test")
+          assert backup.name.startswith("test-verein-")
+          assert _validate_restore_database(backup) >= 7
+
+          foreign = backup.with_name("renamed-foreign.db")
+          shutil.copy2(backup, foreign)
+          with sqlite3.connect(foreign) as db:
+              db.execute(
+                  "UPDATE app_config SET instance_id = ? WHERE id = 1",
+                  ("anderer-verein",),
+              )
+              db.commit()
+
+          try:
+              _validate_restore_database(foreign)
+              raise AssertionError("foreign club backup was accepted")
+          except RuntimeError as exc:
+              assert "another club instance" in str(exc)
+
+          print("backup club instance protection ok")
+          PY
+
+      - name: Test two club database isolation
+        run: |
+          rm -f /tmp/club-a.db
+          rm -rf /tmp/club-a-backups
+          FLAPAMAMAKU_DB=/tmp/club-a.db \
+          FLAPAMAMAKU_BACKUP_DIR=/tmp/club-a-backups \
+          FLAPAMAMAKU_INSTANCE_ID=club-a \
+          python - <<'PY'
+          from app.main import connect, init_db
+
+          init_db()
+          with connect() as db:
+              db.execute(
+                  "INSERT INTO members (name, role, since, created_at) VALUES (?, ?, ?, ?)",
+                  ("Club A Member", "Mitglied", "2026", "2026-09-30T00:00:00+00:00"),
+              )
+              db.commit()
+              stored = db.execute(
+                  "SELECT instance_id FROM app_config WHERE id = 1"
+              ).fetchone()[0]
+              assert stored == "club-a"
+          print("club-a initialized")
+          PY
+
+          set +e
+          OUTPUT=$(
+            FLAPAMAMAKU_DB=/tmp/club-a.db \
+            FLAPAMAMAKU_BACKUP_DIR=/tmp/club-a-backups \
+            FLAPAMAMAKU_INSTANCE_ID=club-b \
+            python - <<'PY' 2>&1
+          from app.main import init_db
+
+          init_db()
+          PY
+          )
+          CODE=$?
+          set -e
+
+          if [ "$CODE" -eq 0 ]; then
+            echo "::error::Club B incorrectly accepted Club A database"
+            exit 1
+          fi
+
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "Database belongs to another club instance"
+          echo "two club database isolation ok"
+
+      - name: Test separate club settings permission
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-settings-permission.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-settings-permission-backups
+        run: |
+          rm -f /tmp/flapamamaku-settings-permission.db
+          rm -rf /tmp/flapamamaku-settings-permission-backups
+          python - <<'PY'
+          from app.main import (
+              CURRENT_SCHEMA_VERSION,
+              ROLE_DEFINITIONS,
+              connect,
+              init_db,
+          )
+
+          init_db()
+          assert CURRENT_SCHEMA_VERSION == 8
+          assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
+          assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
+          assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
+          assert ROLE_DEFINITIONS["member"]["permissions"]["can_manage_settings"] is False
+
+          with connect() as db:
+              columns = {
+                  row["name"]
+                  for row in db.execute("PRAGMA table_info(users)").fetchall()
+              }
+              assert "can_manage_settings" in columns
+
+          print("separate club settings permission ok")
+          PY
+
+      - name: Test settings permission integration
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-settings-integration.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-settings-integration-backups
+        run: |
+          rm -f /tmp/flapamamaku-settings-integration.db
+          rm -rf /tmp/flapamamaku-settings-integration-backups
+          python - <<'PY'
+          from fastapi import HTTPException
+          from app.main import (
+              ROLE_DEFINITIONS,
+              _serialize_user,
+              init_db,
+              require,
+          )
+
+          init_db()
+
+          board = _serialize_user({
+              "id": 1,
+              "username": "board-user",
+              "active": 1,
+              "role_key": "board",
+              "permission_overrides": "{}",
+          })
+          assert board["can_manage_settings"] is True
+          assert board["can_manage_users"] is False
+
+          settings_guard = require("can_manage_settings")
+          users_guard = require("can_manage_users")
+
+          assert settings_guard(board)["id"] == 1
+
+          try:
+              users_guard(board)
+              raise AssertionError("board role incorrectly received user-management access")
+          except HTTPException as exc:
+              assert exc.status_code == 403
+
+          overridden = _serialize_user({
+              "id": 2,
+              "username": "limited-board",
+              "active": 1,
+              "role_key": "board",
+              "permission_overrides": '{"can_manage_settings": false}',
+          })
+          assert overridden["can_manage_settings"] is False
+
+          try:
+              settings_guard(overridden)
+              raise AssertionError("settings override deny was ignored")
+          except HTTPException as exc:
+              assert exc.status_code == 403
+
+          print("settings permission integration ok")
+          PY
+
+      - name: Test settings permission fields in admin UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          html = Path("static/admin.html").read_text()
+
+          required = [
+              'name="can_manage_settings"',
+              'name="account_can_manage_settings"',
+              "Vereinseinstellungen verwalten",
+          ]
+          missing = [item for item in required if item not in html]
+          if missing:
+              raise SystemExit("Missing admin permission UI: " + ", ".join(missing))
+
+          print("settings permission admin UI ok")
+          PY
+
+      - name: Test settings permission summary label
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          html = Path("static/admin.html").read_text()
+          required = [
+              'can_manage_settings:"Vereinseinstellungen"',
+              'name="can_manage_settings"',
+              'name="account_can_manage_settings"',
+          ]
+          missing = [item for item in required if item not in html]
+          if missing:
+              raise SystemExit("Missing settings permission UI summary: " + ", ".join(missing))
+
+          print("settings permission summary ok")
+          PY
+
+      - name: Test dedicated club manager role
+        run: |
+          python - <<'PY'
+          from app.main import ROLE_DEFINITIONS
+
+          role = ROLE_DEFINITIONS["club_manager"]
+          permissions = role["permissions"]
+
+          assert role["label"] == "Vereinsverwaltung"
+          assert permissions["can_admin_page"] is True
+          assert permissions["can_manage_settings"] is True
+          assert permissions["can_manage_users"] is False
+
+          blocked = [
+              "can_news",
+              "can_events",
+              "can_members",
+              "can_documents",
+              "can_photos",
+              "can_gallery_upload",
+              "can_polls",
+              "can_links",
+              "can_contact",
+              "can_about",
+          ]
+          assert all(permissions[key] is False for key in blocked), permissions
+
+          print("club manager role ok")
+          PY
+
+      - name: Test production readiness
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-readiness-test.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-readiness-backups
+          FLAPAMAMAKU_ENV: production
+          FLAPAMAMAKU_ALLOWED_ORIGINS: https://app.example.test
+          FLAPAMAMAKU_BUILD_SHA: readiness-test-build
+          FLAPAMAMAKU_SESSION_LIFETIME_DAYS: "30"
+        run: |
+          rm -f /tmp/flapamamaku-readiness-test.db
+          rm -rf /tmp/flapamamaku-readiness-backups
+          python - <<'PY'
+          from app.main import (
+              _create_database_backup,
+              _production_readiness,
+              app,
+              init_db,
+          )
+
+          init_db()
+          _create_database_backup("readiness-test")
+          result = _production_readiness()
+
+          assert app.docs_url is None
+          assert app.openapi_url is None
+          assert result["ready"] is True, result
+          assert result["checks"]["production_mode"] is True
+          assert result["checks"]["cors_not_wildcard"] is True
+          assert result["checks"]["cors_https_only"] is True
+          assert result["checks"]["database_integrity"] is True
+          assert result["checks"]["recent_backup"] is True
+          assert result["checks"]["build_identified"] is True
+          assert result["checks"]["session_lifetime_bounded"] is True
+          print("production readiness ok")
+          PY
 
       - name: Build Docker image
         run: docker build -t flapamamaku-backend:test .

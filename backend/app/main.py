@@ -1,36 +1,174 @@
+import asyncio
+import base64
 import hashlib
 import hmac
+import io
+import json
+import logging
 import os
 import secrets
 import sqlite3
+import threading
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import service_account
 from pydantic import BaseModel, Field
+from PIL import Image, ImageOps, ImageSequence
 
 
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
+BACKUP_DIR = Path(os.getenv("FLAPAMAMAKU_BACKUP_DIR", "/data/backups"))
+BACKUP_RETENTION = max(3, int(os.getenv("FLAPAMAMAKU_BACKUP_RETENTION", "14")))
+BACKUP_INTERVAL_SECONDS = max(
+    3600,
+    int(os.getenv("FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS", "86400")),
+)
+MAX_BACKUP_UPLOAD_BYTES = max(
+    10 * 1024 * 1024,
+    int(os.getenv("FLAPAMAMAKU_MAX_BACKUP_UPLOAD_BYTES", str(256 * 1024 * 1024))),
+)
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-SESSION_DAYS = 30
+SESSION_LIFETIME_DAYS = max(
+    1,
+    int(os.getenv("FLAPAMAMAKU_SESSION_LIFETIME_DAYS", "90")),
+)
+LOGIN_RATE_WINDOW_SECONDS = max(
+    60,
+    int(os.getenv("FLAPAMAMAKU_LOGIN_RATE_WINDOW_SECONDS", "600")),
+)
+LOGIN_RATE_MAX_ATTEMPTS = max(
+    3,
+    int(os.getenv("FLAPAMAMAKU_LOGIN_RATE_MAX_ATTEMPTS", "5")),
+)
+LOGIN_LOCKOUT_SECONDS = max(
+    60,
+    int(os.getenv("FLAPAMAMAKU_LOGIN_LOCKOUT_SECONDS", "900")),
+)
+_LOGIN_RATE_LOCK = threading.Lock()
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_LOGIN_LOCKED_UNTIL: dict[str, float] = {}
+
+API_VERSION = "0.8.56"
+# Stable identifier for one autonomous club instance. It is public metadata and
+# lets a white-label app reject an accidentally configured server of another club.
+INSTANCE_ID = (
+    os.getenv("FLAPAMAMAKU_INSTANCE_ID", "flapamamaku").strip().lower()
+    or "flapamamaku"
+)
+if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
+    raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
+# Exposed via /api/health to verify which backend image is actually deployed.
+BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
+CURRENT_SCHEMA_VERSION = 8
+APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
+logger = logging.getLogger("flapamamaku.push")
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv(
+    "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_JSON",
+    "",
+).strip()
+PUSH_ICON_URL = os.getenv(
+    "FLAPAMAMAKU_PUSH_ICON_URL",
+    "https://flapamamaku.kublaecloud.synology.me/flapamamaku-icon.png",
+).strip()
+if not FIREBASE_SERVICE_ACCOUNT_JSON:
+    firebase_b64 = os.getenv(
+        "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_B64",
+        "",
+    ).strip()
+    if firebase_b64:
+        try:
+            FIREBASE_SERVICE_ACCOUNT_JSON = base64.b64decode(
+                firebase_b64
+            ).decode("utf-8")
+        except Exception:
+            FIREBASE_SERVICE_ACCOUNT_JSON = ""
 
 app = FastAPI(
     title="FLAPAMAMAKU API",
-    version="0.8.9",
-    docs_url="/api/docs",
+    version=API_VERSION,
+    docs_url=None if IS_PRODUCTION else "/api/docs",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
     redoc_url=None,
 )
 
+ALLOWED_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("FLAPAMAMAKU_ALLOWED_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+
+
+def _production_readiness() -> dict[str, Any]:
+    checks: dict[str, bool] = {
+        "production_mode": IS_PRODUCTION,
+        "cors_not_wildcard": bool(ALLOWED_ORIGINS) and "*" not in ALLOWED_ORIGINS,
+        "cors_https_only": bool(ALLOWED_ORIGINS) and all(
+            origin.startswith("https://") for origin in ALLOWED_ORIGINS
+        ),
+        "api_docs_disabled": app.docs_url is None and app.openapi_url is None,
+        "database_exists": DB_PATH.exists(),
+        "schema_current": _schema_version() == CURRENT_SCHEMA_VERSION,
+        "build_identified": BUILD_SHA != "development",
+        "session_lifetime_bounded": 1 <= SESSION_LIFETIME_DAYS <= 90,
+    }
+
+    database_integrity = "missing"
+    if DB_PATH.exists():
+        try:
+            with connect() as db:
+                row = db.execute("PRAGMA integrity_check").fetchone()
+                database_integrity = str(row[0]).lower() if row else "unknown"
+        except sqlite3.Error:
+            database_integrity = "error"
+    checks["database_integrity"] = database_integrity == "ok"
+
+    backups = _backup_files()
+    if backups:
+        age = datetime.now(timezone.utc).timestamp() - backups[0].stat().st_mtime
+        checks["recent_backup"] = age <= max(BACKUP_INTERVAL_SECONDS * 2, 172800)
+    else:
+        checks["recent_backup"] = False
+
+    return {
+        "ready": all(checks.values()),
+        "checks": checks,
+        "allowed_origins": ALLOWED_ORIGINS,
+        "database_integrity": database_integrity,
+    }
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    if request.url.path.startswith("/api/auth/") or request.url.path.startswith("/admin"):
+        response.headers["Cache-Control"] = "no-store"
+    if IS_PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 
 PERMISSION_FIELDS = (
@@ -39,13 +177,78 @@ PERMISSION_FIELDS = (
     "can_members",
     "can_documents",
     "can_photos",
+    "can_gallery_upload",
     "can_polls",
     "can_links",
     "can_contact",
     "can_about",
     "can_admin_page",
+    "can_manage_settings",
     "can_manage_users",
 )
+
+
+ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "member": {
+        "label": "Mitglied",
+        "permissions": {key: False for key in PERMISSION_FIELDS},
+    },
+    "editor": {
+        "label": "Redaktion",
+        "permissions": {
+            key: key in {
+                "can_news", "can_events", "can_documents", "can_photos",
+                "can_gallery_upload", "can_polls", "can_links", "can_contact",
+                "can_about", "can_admin_page",
+            }
+            for key in PERMISSION_FIELDS
+        },
+    },
+    "board": {
+        "label": "Vorstand",
+        "permissions": {
+            key: key != "can_manage_users"
+            for key in PERMISSION_FIELDS
+        },
+    },
+    "club_manager": {
+        "label": "Vereinsverwaltung",
+        "permissions": {
+            key: key in {"can_admin_page", "can_manage_settings"}
+            for key in PERMISSION_FIELDS
+        },
+    },
+    "admin": {
+        "label": "Administrator",
+        "permissions": {key: True for key in PERMISSION_FIELDS},
+    },
+}
+
+
+def _normalize_role_key(value: str) -> str:
+    role_key = str(value or "member").strip().lower()
+    if role_key not in ROLE_DEFINITIONS:
+        raise HTTPException(status_code=422, detail="Unbekannte Benutzerrolle")
+    return role_key
+
+
+def _normalize_permission_overrides(values: dict[str, bool] | None) -> dict[str, bool]:
+    result: dict[str, bool] = {}
+    for key, value in (values or {}).items():
+        if key not in PERMISSION_FIELDS:
+            raise HTTPException(status_code=422, detail=f"Unbekannte Berechtigung: {key}")
+        result[key] = bool(value)
+    return result
+
+
+def _effective_permissions(
+    role_key: str,
+    overrides: dict[str, bool] | None = None,
+) -> dict[str, bool]:
+    normalized_role = role_key if role_key in ROLE_DEFINITIONS else "member"
+    permissions = dict(ROLE_DEFINITIONS[normalized_role]["permissions"])
+    permissions.update(_normalize_permission_overrides(overrides))
+    return permissions
 
 
 class NewsPayload(BaseModel):
@@ -68,6 +271,11 @@ class MemberPayload(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     role: str = "Präsident"
     since: str = ""
+    birth_date: str = ""
+    status: str = "Aktiv"
+    member_group: str = ""
+    engagement: str = ""
+    filter_ids: list[int] = []
     partner_name: str = ""
     phone_mobile: str = ""
     phone_private: str = ""
@@ -79,11 +287,77 @@ class MemberPayload(BaseModel):
     employer_url: str = ""
 
 
+class MemberSelfUpdatePayload(BaseModel):
+    partner_name: str = ""
+    phone_mobile: str = ""
+    phone_private: str = ""
+    phone_work: str = ""
+    email: str = ""
+    address: str = ""
+    occupation: str = ""
+    employer: str = ""
+    employer_url: str = ""
+    engagement: str = ""
+
+
+class MemberFilterPayload(BaseModel):
+    label: str = Field(min_length=1, max_length=80)
+    active: bool = True
+
+
 class ContentPayload(BaseModel):
     section: str = Field(min_length=1, max_length=40)
     title: str = Field(min_length=1, max_length=200)
     text: str = ""
     link_url: str = ""
+    poll_options: list[str] = []
+    poll_allow_suggestions: bool = False
+
+
+class PollPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    text: str = ""
+    options: list[str]
+    allow_suggestions: bool = False
+
+
+class AppConfigPayload(BaseModel):
+    app_name: str = Field(default="FLAPAMAMAKU", min_length=1, max_length=80)
+    app_subtitle: str = Field(default="Fasnachtsgruppe Luzern", max_length=120)
+    primary_color: str = Field(default="#8A101B", pattern=r"^#[0-9A-Fa-f]{6}$")
+    club_description: str = Field(default="", max_length=4000)
+    website_url: str = Field(default="", max_length=500)
+    contact_email: str = Field(default="", max_length=320)
+    contact_phone: str = Field(default="", max_length=80)
+    club_address: str = Field(default="", max_length=500)
+    show_sujet: bool = True
+    label_sujet: str = Field(default="Sujet nächstes Jahr", min_length=1, max_length=80)
+    show_archive: bool = True
+    label_archive: str = Field(default="Vergangene Sujet", min_length=1, max_length=80)
+    show_photos: bool = True
+    label_photos: str = Field(default="Fotoalben", min_length=1, max_length=80)
+    show_documents: bool = True
+    label_documents: str = Field(default="Dokumente", min_length=1, max_length=80)
+    show_polls: bool = True
+    label_polls: str = Field(default="Umfragen", min_length=1, max_length=80)
+    show_links: bool = True
+    label_links: str = Field(default="Links", min_length=1, max_length=80)
+
+
+class PollVotePayload(BaseModel):
+    option_index: int = Field(ge=0, le=20)
+
+
+class PollSuggestionPayload(BaseModel):
+    text: str = Field(min_length=1, max_length=120)
+
+
+class ContentImageOrderPayload(BaseModel):
+    image_ids: list[int]
+
+
+class ContentOrderPayload(BaseModel):
+    item_ids: list[int]
 
 
 class LoginPayload(BaseModel):
@@ -105,12 +379,31 @@ class UserPayload(BaseModel):
     can_members: bool = False
     can_documents: bool = False
     can_photos: bool = False
+    can_gallery_upload: bool = False
     can_polls: bool = False
     can_links: bool = False
     can_contact: bool = False
     can_about: bool = False
     can_admin_page: bool = False
+    can_manage_settings: bool = False
     can_manage_users: bool = False
+    role_key: str = Field(default="member", max_length=40)
+    permission_overrides: dict[str, bool] = Field(default_factory=dict)
+
+
+class PushTokenPayload(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+    platform: str = Field(default="android", max_length=20)
+
+
+class PushTokenDeletePayload(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+
+
+class ManualPushPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(default="", max_length=500)
+    route: str = Field(default="", max_length=80)
 
 
 TABLES: dict[str, tuple[str, type[BaseModel]]] = {
@@ -124,6 +417,7 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             image_url TEXT NOT NULL DEFAULT '',
             image_data BLOB,
             image_mime TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         )
         """,
@@ -151,6 +445,10 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             name TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'Präsident',
             since TEXT NOT NULL DEFAULT '',
+            birth_date TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'Aktiv',
+            member_group TEXT NOT NULL DEFAULT '',
+            engagement TEXT NOT NULL DEFAULT '',
             partner_name TEXT NOT NULL DEFAULT '',
             phone_mobile TEXT NOT NULL DEFAULT '',
             phone_private TEXT NOT NULL DEFAULT '',
@@ -160,6 +458,7 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             occupation TEXT NOT NULL DEFAULT '',
             employer TEXT NOT NULL DEFAULT '',
             employer_url TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
             photo_data BLOB,
             photo_mime TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
@@ -177,6 +476,82 @@ def connect() -> sqlite3.Connection:
     return connection
 
 
+MAX_UPLOAD_IMAGE_BYTES = 30 * 1024 * 1024
+MAX_STORED_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_IMAGE_DIMENSION = 1600
+
+
+def _optimize_image(data: bytes, mime: str) -> tuple[bytes, str]:
+    """Resize/compress uploads without cropping; preserve aspect ratio."""
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > MAX_UPLOAD_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    normalized_mime = (mime or "").lower().strip()
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            if normalized_mime == "image/gif" or (source.format or "").upper() == "GIF":
+                frames: list[Image.Image] = []
+                durations: list[int] = []
+                loop = int(source.info.get("loop", 0) or 0)
+                for frame in ImageSequence.Iterator(source):
+                    resized = frame.convert("RGBA")
+                    resized.thumbnail(
+                        (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
+                        Image.Resampling.LANCZOS,
+                    )
+                    frames.append(
+                        resized.convert("P", palette=Image.Palette.ADAPTIVE)
+                    )
+                    durations.append(int(frame.info.get("duration", source.info.get("duration", 100)) or 100))
+
+                if not frames:
+                    raise HTTPException(status_code=400, detail="Invalid image")
+
+                output = io.BytesIO()
+                frames[0].save(
+                    output,
+                    format="GIF",
+                    save_all=True,
+                    append_images=frames[1:],
+                    optimize=True,
+                    loop=loop,
+                    duration=durations,
+                )
+                optimized = output.getvalue()
+                optimized_mime = "image/gif"
+            else:
+                image = ImageOps.exif_transpose(source)
+                image.thumbnail(
+                    (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
+                    Image.Resampling.LANCZOS,
+                )
+                if image.mode not in {"RGB", "RGBA"}:
+                    image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+
+                output = io.BytesIO()
+                image.save(
+                    output,
+                    format="WEBP",
+                    quality=82,
+                    method=6,
+                    lossless=False,
+                )
+                optimized = output.getvalue()
+                optimized_mime = "image/webp"
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=415, detail="Invalid or unsupported image") from exc
+
+    if not optimized:
+        raise HTTPException(status_code=400, detail="Image optimization failed")
+    if len(optimized) > MAX_STORED_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Optimized image is still too large")
+    return optimized, optimized_mime
+
+
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
 
@@ -191,10 +566,320 @@ def _ensure_column(
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _apply_schema_migrations(db: sqlite3.Connection) -> None:
+    """Record ordered schema migrations after the legacy bootstrap is reconciled."""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    migrations: list[tuple[int, str]] = [
+        (1, "baseline-v0.8.33"),
+        (2, "app-config-foundation"),
+        (3, "app-config-logo"),
+        (4, "app-config-club-details"),
+        (5, "app-config-modules"),
+        (6, "user-roles-and-permission-overrides"),
+        (7, "club-instance-binding"),
+        (8, "club-settings-permission"),
+    ]
+    applied = {
+        int(row["version"])
+        for row in db.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    for version, name in migrations:
+        if version in applied:
+            continue
+        db.execute(
+            """
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (?, ?, ?)
+            """,
+            (version, name, now),
+        )
+
+
+def _schema_version() -> int:
+    if not DB_PATH.exists():
+        return 0
+    try:
+        with connect() as db:
+            row = db.execute(
+                "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+            ).fetchone()
+            return int(row["version"] if row is not None else 0)
+    except sqlite3.Error:
+        return 0
+
+
+def _backup_files() -> list[Path]:
+    if not BACKUP_DIR.exists():
+        return []
+    patterns = [f"{INSTANCE_ID}-*.db"]
+    # Keep existing FLAPAMAMAKU backups visible after upgrading from schema <= 6.
+    if INSTANCE_ID == "flapamamaku":
+        patterns.append("flapamamaku-*.db")
+    files: dict[Path, None] = {}
+    for pattern in patterns:
+        for path in BACKUP_DIR.glob(pattern):
+            if path.is_file():
+                files[path] = None
+    return sorted(
+        files,
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _backup_info(path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    return {
+        "name": path.name,
+        "instance_id": INSTANCE_ID,
+        "size_bytes": stat.st_size,
+        "created_at": datetime.fromtimestamp(
+            stat.st_mtime,
+            tz=timezone.utc,
+        ).isoformat(),
+    }
+
+
+def _prune_backups() -> None:
+    for path in _backup_files()[BACKUP_RETENTION:]:
+        try:
+            path.unlink()
+        except OSError:
+            logger.exception("Could not remove old backup %s", path)
+
+
+def _create_database_backup(reason: str = "automatic") -> Path:
+    if not DB_PATH.exists():
+        raise RuntimeError("Database does not exist")
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    safe_reason = "".join(
+        char for char in reason.lower().strip()
+        if char.isalnum() or char in {"-", "_"}
+    ) or "backup"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = BACKUP_DIR / f"{INSTANCE_ID}-{timestamp}-{safe_reason}.db"
+
+    with sqlite3.connect(DB_PATH) as source, sqlite3.connect(target) as destination:
+        source.backup(destination)
+
+    with sqlite3.connect(target) as check:
+        result = check.execute("PRAGMA integrity_check").fetchone()
+        if result is None or str(result[0]).lower() != "ok":
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            raise RuntimeError("Backup integrity check failed")
+
+    _prune_backups()
+    logger.info("Database backup created: %s", target)
+    return target
+
+
+def _ensure_automatic_backup() -> None:
+    files = _backup_files()
+    if files:
+        age = datetime.now(timezone.utc).timestamp() - files[0].stat().st_mtime
+        if age < BACKUP_INTERVAL_SECONDS:
+            return
+    _create_database_backup("automatic")
+
+
+def _validate_restore_database(path: Path) -> int:
+    try:
+        with sqlite3.connect(path) as db:
+            integrity = db.execute("PRAGMA integrity_check").fetchone()
+            if integrity is None or str(integrity[0]).lower() != "ok":
+                raise RuntimeError("Backup integrity check failed")
+
+            tables = {
+                str(row[0])
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            required = {
+                "users",
+                "members",
+                "sessions",
+                "schema_migrations",
+                "app_config",
+            }
+            if not required.issubset(tables):
+                raise RuntimeError("Backup does not contain a valid club database")
+
+            row = db.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+            ).fetchone()
+            schema_version = int(row[0] if row is not None else 0)
+            if schema_version > CURRENT_SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Backup schema {schema_version} is newer than supported schema "
+                    f"{CURRENT_SCHEMA_VERSION}"
+                )
+
+            app_columns = {
+                str(row[1])
+                for row in db.execute("PRAGMA table_info(app_config)").fetchall()
+            }
+            if "instance_id" in app_columns:
+                instance_row = db.execute(
+                    "SELECT instance_id FROM app_config WHERE id = 1"
+                ).fetchone()
+                source_instance = (
+                    str(instance_row[0]).strip().lower()
+                    if instance_row is not None and instance_row[0]
+                    else ""
+                )
+                if not source_instance:
+                    raise RuntimeError("Backup has no club instance identity")
+                if source_instance != INSTANCE_ID:
+                    raise RuntimeError(
+                        "Backup belongs to another club instance "
+                        f"({source_instance}); expected {INSTANCE_ID}"
+                    )
+            elif INSTANCE_ID != "flapamamaku":
+                raise RuntimeError(
+                    "Legacy backup has no club instance identity and cannot be "
+                    "restored into this club"
+                )
+            return schema_version
+    except sqlite3.Error as exc:
+        raise RuntimeError("Backup is not a readable SQLite database") from exc
+
+
+def _restore_database_backup(source: Path) -> dict[str, Any]:
+    schema_version = _validate_restore_database(source)
+    safety_backup = _create_database_backup("before-restore")
+
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    replacement = DB_PATH.with_name(f".{DB_PATH.name}.restore-{secrets.token_hex(6)}")
+    try:
+        with sqlite3.connect(source) as src, sqlite3.connect(replacement) as dst:
+            src.backup(dst)
+        _validate_restore_database(replacement)
+        os.replace(replacement, DB_PATH)
+        init_db()
+        with connect() as db:
+            db.execute("DELETE FROM sessions")
+            db.commit()
+    except Exception:
+        try:
+            replacement.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    logger.warning(
+        "Database restored from %s; safety backup: %s",
+        source.name,
+        safety_backup.name,
+    )
+    return {
+        "restored": True,
+        "source_name": source.name,
+        "source_schema_version": schema_version,
+        "current_schema_version": _schema_version(),
+        "safety_backup": _backup_info(safety_backup),
+        "sessions_cleared": True,
+    }
+
+
 def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                app_name TEXT NOT NULL DEFAULT 'FLAPAMAMAKU',
+                app_subtitle TEXT NOT NULL DEFAULT 'Fasnachtsgruppe Luzern',
+                primary_color TEXT NOT NULL DEFAULT '#8A101B',
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            INSERT OR IGNORE INTO app_config (
+                id, app_name, app_subtitle, primary_color, updated_at
+            ) VALUES (1, 'FLAPAMAMAKU', 'Fasnachtsgruppe Luzern', '#8A101B', ?)
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        _ensure_column(db, "app_config", "instance_id", "TEXT NOT NULL DEFAULT ''")
+        instance_row = db.execute(
+            "SELECT instance_id FROM app_config WHERE id = 1"
+        ).fetchone()
+        stored_instance = (
+            str(instance_row["instance_id"]).strip().lower()
+            if instance_row is not None and instance_row["instance_id"]
+            else ""
+        )
+        if stored_instance and stored_instance != INSTANCE_ID:
+            raise RuntimeError(
+                "Database belongs to another club instance "
+                f"({stored_instance}); configured instance is {INSTANCE_ID}"
+            )
+        if not stored_instance:
+            db.execute(
+                "UPDATE app_config SET instance_id = ? WHERE id = 1",
+                (INSTANCE_ID,),
+            )
+
+        _ensure_column(db, "app_config", "logo_data", "BLOB")
+        _ensure_column(db, "app_config", "logo_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "club_description", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "website_url", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "contact_email", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "contact_phone", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "club_address", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "app_config", "show_sujet", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_sujet", "TEXT NOT NULL DEFAULT 'Sujet nächstes Jahr'")
+        _ensure_column(db, "app_config", "show_archive", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_archive", "TEXT NOT NULL DEFAULT 'Vergangene Sujet'")
+        _ensure_column(db, "app_config", "show_photos", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_photos", "TEXT NOT NULL DEFAULT 'Fotoalben'")
+        _ensure_column(db, "app_config", "show_documents", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_documents", "TEXT NOT NULL DEFAULT 'Dokumente'")
+        _ensure_column(db, "app_config", "show_polls", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_polls", "TEXT NOT NULL DEFAULT 'Umfragen'")
+        _ensure_column(db, "app_config", "show_links", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "app_config", "label_links", "TEXT NOT NULL DEFAULT 'Links'")
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS member_filters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS member_filter_links (
+                member_id INTEGER NOT NULL,
+                filter_id INTEGER NOT NULL,
+                PRIMARY KEY(member_id, filter_id),
+                FOREIGN KEY(member_id) REFERENCES members(id),
+                FOREIGN KEY(filter_id) REFERENCES member_filters(id)
+            )
+            """
+        )
 
         db.execute(
             """
@@ -206,7 +891,49 @@ def init_db() -> None:
                 link_url TEXT NOT NULL DEFAULT '',
                 image_data BLOB,
                 image_mime TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        _ensure_column(db, "content_items", "document_data", "BLOB")
+        _ensure_column(db, "content_items", "document_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "content_items", "document_name", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "content_items", "poll_options", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(
+            db,
+            "content_items",
+            "poll_allow_suggestions",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS poll_votes (
+                poll_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                option_index INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(poll_id, user_id),
+                FOREIGN KEY(poll_id) REFERENCES content_items(id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS poll_suggestions (
+                poll_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                option_index INTEGER NOT NULL,
+                suggestion_text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(poll_id, user_id),
+                FOREIGN KEY(poll_id) REFERENCES content_items(id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
         )
@@ -218,8 +945,66 @@ def init_db() -> None:
                 content_id INTEGER NOT NULL,
                 image_data BLOB NOT NULL,
                 image_mime TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(content_id) REFERENCES content_items(id)
+            )
+            """
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gallery_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                image_data BLOB NOT NULL,
+                image_mime TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                platform TEXT NOT NULL DEFAULT 'android',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                route TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                last_error TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_deliveries (
+                notification_id INTEGER NOT NULL,
+                token_id INTEGER NOT NULL,
+                sent_at TEXT,
+                last_error TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(notification_id, token_id),
+                FOREIGN KEY(notification_id) REFERENCES push_notifications(id),
+                FOREIGN KEY(token_id) REFERENCES push_tokens(id)
             )
             """
         )
@@ -275,6 +1060,16 @@ def init_db() -> None:
 
         _ensure_column(db, "news", "image_data", "BLOB")
         _ensure_column(db, "news", "image_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "news", "sort_order", "INTEGER NOT NULL DEFAULT 0")
+        news_order_rows = db.execute(
+            "SELECT id, sort_order FROM news ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+        if news_order_rows and all(int(row["sort_order"] or 0) == 0 for row in news_order_rows):
+            for position, row in enumerate(news_order_rows, start=1):
+                db.execute(
+                    "UPDATE news SET sort_order = ? WHERE id = ?",
+                    (position, row["id"]),
+                )
         _ensure_column(db, "events", "event_date", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_mobile", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_private", "TEXT NOT NULL DEFAULT ''")
@@ -282,8 +1077,164 @@ def init_db() -> None:
         _ensure_column(db, "members", "occupation", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "employer_url", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "birth_date", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "status", "TEXT NOT NULL DEFAULT 'Aktiv'")
+        _ensure_column(db, "members", "member_group", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "engagement", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "users", "can_manage_settings", "INTEGER NOT NULL DEFAULT 0")
+        db.execute(
+            """
+            UPDATE users
+            SET can_manage_settings = 1
+            WHERE can_manage_users = 1 AND can_manage_settings = 0
+            """
+        )
+
+        _ensure_column(db, "members", "sort_order", "INTEGER NOT NULL DEFAULT 0")
+        db.execute(
+            """
+            UPDATE members
+            SET sort_order = id
+            WHERE sort_order = 0
+            """
+        )
         _ensure_column(db, "members", "photo_data", "BLOB")
         _ensure_column(db, "members", "photo_mime", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "members", "sort_order", "INTEGER NOT NULL DEFAULT 0")
+
+        member_order_rows = db.execute(
+            "SELECT id, sort_order FROM members ORDER BY name COLLATE NOCASE ASC, id ASC"
+        ).fetchall()
+        if member_order_rows and all(int(row["sort_order"] or 0) == 0 for row in member_order_rows):
+            for position, row in enumerate(member_order_rows, start=1):
+                db.execute(
+                    "UPDATE members SET sort_order = ? WHERE id = ?",
+                    (position, row["id"]),
+                )
+        _ensure_column(
+            db,
+            "users",
+            "can_gallery_upload",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+
+        _ensure_column(
+            db,
+            "users",
+            "role_key",
+            "TEXT NOT NULL DEFAULT 'member'",
+        )
+        _ensure_column(
+            db,
+            "users",
+            "permission_overrides",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+
+        legacy_role_rows = db.execute(
+            "SELECT * FROM users WHERE permission_overrides = ''"
+        ).fetchall()
+        for legacy_user in legacy_role_rows:
+            legacy_permissions = {
+                key: bool(legacy_user[key])
+                for key in PERMISSION_FIELDS
+            }
+            if all(legacy_permissions.values()):
+                role_key = "admin"
+                overrides: dict[str, bool] = {}
+            else:
+                role_key = "member"
+                overrides = legacy_permissions
+            db.execute(
+                """
+                UPDATE users
+                SET role_key = ?, permission_overrides = ?
+                WHERE id = ?
+                """,
+                (
+                    role_key,
+                    json.dumps(overrides, ensure_ascii=False, sort_keys=True),
+                    legacy_user["id"],
+                ),
+            )
+
+        _ensure_column(
+            db,
+            "content_items",
+            "sort_order",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execute(
+            """
+            UPDATE content_items
+            SET sort_order = id
+            WHERE sort_order = 0
+            """
+        )
+
+        _ensure_column(
+            db,
+            "content_images",
+            "sort_order",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execute(
+            """
+            UPDATE content_images
+            SET sort_order = id
+            WHERE sort_order = 0
+            """
+        )
+
+        legacy_rows = db.execute(
+            """
+            SELECT id, image_data, image_mime, created_at
+            FROM content_items
+            WHERE image_data IS NOT NULL
+            """
+        ).fetchall()
+        for legacy in legacy_rows:
+            max_order = db.execute(
+                """
+                SELECT COALESCE(MAX(sort_order), 0)
+                FROM content_images
+                WHERE content_id = ?
+                """,
+                (legacy["id"],),
+            ).fetchone()[0]
+            db.execute(
+                """
+                INSERT INTO content_images (
+                    content_id, image_data, image_mime, sort_order, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    legacy["id"],
+                    legacy["image_data"],
+                    legacy["image_mime"],
+                    max_order + 1,
+                    legacy["created_at"],
+                ),
+            )
+            db.execute(
+                """
+                UPDATE content_items
+                SET image_data = NULL, image_mime = ''
+                WHERE id = ?
+                """,
+                (legacy["id"],),
+            )
+
+        if db.execute("SELECT COUNT(*) FROM member_filters").fetchone()[0] == 0:
+            now = datetime.now(timezone.utc).isoformat()
+            for position, label in enumerate(["Aktiv", "Ehrenmitglied", "Vorstand", "Wagenbau", "Verstorben"], start=1):
+                db.execute(
+                    """
+                    INSERT INTO member_filters (label, active, sort_order, created_at)
+                    VALUES (?, 1, ?, ?)
+                    """,
+                    (label, position, now),
+                )
 
         member_columns = _columns(db, "members")
         if "phone" in member_columns:
@@ -294,12 +1245,289 @@ def init_db() -> None:
                 WHERE phone_mobile = '' AND phone <> ''
                 """
             )
+
+        _apply_schema_migrations(db)
         db.commit()
 
 
+async def _snapshot_cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        with connect() as db:
+            db.execute(
+                "DELETE FROM gallery_snapshots WHERE expires_at <= ?",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            db.commit()
+
+
+async def _backup_loop() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await asyncio.to_thread(_ensure_automatic_backup)
+        except Exception:
+            logger.exception("Automatic database backup failed")
+
+
+def _firebase_access() -> tuple[str, str] | None:
+    if not FIREBASE_SERVICE_ACCOUNT_JSON:
+        return None
+    try:
+        info = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
+        credentials = service_account.Credentials.from_service_account_info(
+            info,
+            scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+        )
+        credentials.refresh(GoogleAuthRequest())
+        project_id = str(info.get("project_id") or "").strip()
+        if not credentials.token or not project_id:
+            logger.error("Firebase credentials incomplete: token/project_id missing")
+            return None
+        return credentials.token, project_id
+    except Exception as exc:
+        logger.error("Firebase authentication failed: %s", exc)
+        return None
+
+
+def _firebase_diagnostic() -> dict[str, Any]:
+    configured = bool(FIREBASE_SERVICE_ACCOUNT_JSON)
+    if not configured:
+        return {
+            "delivery_configured": False,
+            "firebase_auth_ready": False,
+            "firebase_project_id": "",
+            "firebase_error": "Firebase service account is not configured",
+        }
+    try:
+        info = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
+        project_id = str(info.get("project_id") or "").strip()
+        client_email = str(info.get("client_email") or "").strip()
+        credentials = service_account.Credentials.from_service_account_info(
+            info,
+            scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+        )
+        credentials.refresh(GoogleAuthRequest())
+        return {
+            "delivery_configured": True,
+            "firebase_auth_ready": bool(credentials.token and project_id),
+            "firebase_project_id": project_id,
+            "firebase_client_email": client_email,
+            "firebase_error": "",
+        }
+    except Exception as exc:
+        return {
+            "delivery_configured": True,
+            "firebase_auth_ready": False,
+            "firebase_project_id": "",
+            "firebase_client_email": "",
+            "firebase_error": str(exc)[:500],
+        }
+
+
+def _send_fcm_message(
+    *,
+    access_token: str,
+    project_id: str,
+    device_token: str,
+    title: str,
+    body: str,
+    kind: str,
+    route: str,
+) -> tuple[bool, bool, str]:
+    payload = {
+        "message": {
+            "token": device_token,
+            "notification": {
+                "title": title,
+                "body": body,
+                **({"image": PUSH_ICON_URL} if PUSH_ICON_URL else {}),
+            },
+            "data": {
+                "kind": kind,
+                "route": route,
+            },
+            "android": {
+                "priority": "high",
+                "notification": {
+                    "icon": "ic_stat_flapamamaku",
+                    **({"image": PUSH_ICON_URL} if PUSH_ICON_URL else {}),
+                },
+            },
+            "apns": {
+                "headers": {
+                    "apns-priority": "10",
+                },
+            },
+        },
+    }
+    request = urllib.request.Request(
+        f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response.read()
+        return True, False, ""
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        invalid = exc.code in {400, 404} and (
+            "UNREGISTERED" in detail
+            or "registration-token-not-registered" in detail
+        )
+        return False, invalid, f"HTTP {exc.code}: {detail}"
+    except Exception as exc:
+        return False, False, str(exc)[:1000]
+
+
+def _deliver_pending_push() -> None:
+    firebase = _firebase_access()
+    if firebase is None:
+        return
+    access_token, project_id = firebase
+    now = datetime.now(timezone.utc).isoformat()
+
+    with connect() as db:
+        notifications = db.execute(
+            """
+            SELECT *
+            FROM push_notifications
+            WHERE sent_at IS NULL
+            ORDER BY id ASC
+            LIMIT 10
+            """
+        ).fetchall()
+
+        for notification in notifications:
+            tokens = db.execute(
+                """
+                SELECT *
+                FROM push_tokens
+                WHERE enabled = 1
+                ORDER BY id ASC
+                """
+            ).fetchall()
+            if not tokens:
+                continue
+
+            had_transient_error = False
+            for token in tokens:
+                delivered = db.execute(
+                    """
+                    SELECT sent_at
+                    FROM push_deliveries
+                    WHERE notification_id = ? AND token_id = ?
+                    """,
+                    (notification["id"], token["id"]),
+                ).fetchone()
+                if delivered is not None and delivered["sent_at"]:
+                    continue
+
+                ok, invalid, error = _send_fcm_message(
+                    access_token=access_token,
+                    project_id=project_id,
+                    device_token=token["token"],
+                    title=notification["title"],
+                    body=notification["body"],
+                    kind=notification["kind"],
+                    route=notification["route"],
+                )
+
+                if invalid:
+                    db.execute("DELETE FROM push_tokens WHERE id = ?", (token["id"],))
+                    db.execute(
+                        """
+                        DELETE FROM push_deliveries
+                        WHERE notification_id = ? AND token_id = ?
+                        """,
+                        (notification["id"], token["id"]),
+                    )
+                    continue
+
+                db.execute(
+                    """
+                    INSERT INTO push_deliveries (
+                        notification_id, token_id, sent_at, last_error
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(notification_id, token_id) DO UPDATE SET
+                        sent_at = excluded.sent_at,
+                        last_error = excluded.last_error
+                    """,
+                    (
+                        notification["id"],
+                        token["id"],
+                        now if ok else None,
+                        error,
+                    ),
+                )
+                if not ok:
+                    had_transient_error = True
+                    logger.error(
+                        "FCM delivery failed for notification %s token %s: %s",
+                        notification["id"],
+                        token["id"],
+                        error,
+                    )
+
+            remaining = db.execute(
+                """
+                SELECT COUNT(*)
+                FROM push_tokens pt
+                WHERE pt.enabled = 1
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM push_deliveries pd
+                      WHERE pd.notification_id = ?
+                        AND pd.token_id = pt.id
+                        AND pd.sent_at IS NOT NULL
+                  )
+                """,
+                (notification["id"],),
+            ).fetchone()[0]
+
+            if remaining == 0 and not had_transient_error:
+                db.execute(
+                    """
+                    UPDATE push_notifications
+                    SET sent_at = ?, last_error = ''
+                    WHERE id = ?
+                    """,
+                    (now, notification["id"]),
+                )
+            elif had_transient_error:
+                db.execute(
+                    """
+                    UPDATE push_notifications
+                    SET last_error = 'Mindestens eine Zustellung wird erneut versucht'
+                    WHERE id = ?
+                    """,
+                    (notification["id"],),
+                )
+        db.commit()
+
+
+async def _push_delivery_loop() -> None:
+    while True:
+        await asyncio.sleep(15)
+        if FIREBASE_SERVICE_ACCOUNT_JSON:
+            await asyncio.to_thread(_deliver_pending_push)
+
+
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     init_db()
+    try:
+        await asyncio.to_thread(_ensure_automatic_backup)
+    except Exception:
+        logger.exception("Initial automatic database backup failed")
+    asyncio.create_task(_snapshot_cleanup_loop())
+    asyncio.create_task(_backup_loop())
+    asyncio.create_task(_push_delivery_loop())
 
 
 def _hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
@@ -317,12 +1545,79 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def _login_rate_key(request: Request, username: str) -> str:
+    host = request.client.host if request.client else "unknown"
+    normalized = username.strip().lower()
+    return hashlib.sha256(f"{host}|{normalized}".encode()).hexdigest()
+
+
+def _check_login_rate_limit(key: str) -> None:
+    now = time.monotonic()
+    with _LOGIN_RATE_LOCK:
+        locked_until = _LOGIN_LOCKED_UNTIL.get(key, 0.0)
+        if locked_until > now:
+            retry_after = max(1, int(locked_until - now) + 1)
+            raise HTTPException(
+                status_code=429,
+                detail="Zu viele fehlgeschlagene Anmeldeversuche. Bitte später nochmals versuchen.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        if locked_until:
+            _LOGIN_LOCKED_UNTIL.pop(key, None)
+
+        attempts = [
+            stamp
+            for stamp in _LOGIN_ATTEMPTS.get(key, [])
+            if now - stamp <= LOGIN_RATE_WINDOW_SECONDS
+        ]
+        if attempts:
+            _LOGIN_ATTEMPTS[key] = attempts
+        else:
+            _LOGIN_ATTEMPTS.pop(key, None)
+
+
+def _record_login_failure(key: str) -> None:
+    now = time.monotonic()
+    with _LOGIN_RATE_LOCK:
+        attempts = [
+            stamp
+            for stamp in _LOGIN_ATTEMPTS.get(key, [])
+            if now - stamp <= LOGIN_RATE_WINDOW_SECONDS
+        ]
+        attempts.append(now)
+        if len(attempts) >= LOGIN_RATE_MAX_ATTEMPTS:
+            _LOGIN_ATTEMPTS.pop(key, None)
+            _LOGIN_LOCKED_UNTIL[key] = now + LOGIN_LOCKOUT_SECONDS
+        else:
+            _LOGIN_ATTEMPTS[key] = attempts
+
+
+def _clear_login_failures(key: str) -> None:
+    with _LOGIN_RATE_LOCK:
+        _LOGIN_ATTEMPTS.pop(key, None)
+        _LOGIN_LOCKED_UNTIL.pop(key, None)
+
+
 def _serialize_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
     item.pop("password_hash", None)
     item.pop("password_salt", None)
+    role_key = str(item.get("role_key") or "member")
+    if role_key not in ROLE_DEFINITIONS:
+        role_key = "member"
+    try:
+        overrides = json.loads(str(item.get("permission_overrides") or "{}"))
+        if not isinstance(overrides, dict):
+            overrides = {}
+    except Exception:
+        overrides = {}
+    overrides = _normalize_permission_overrides(overrides)
+    effective = _effective_permissions(role_key, overrides)
     for key in PERMISSION_FIELDS:
-        item[key] = bool(item.get(key, 0))
+        item[key] = effective[key]
+    item["role_key"] = role_key
+    item["role_label"] = ROLE_DEFINITIONS[role_key]["label"]
+    item["permission_overrides"] = overrides
     item["active"] = bool(item.get("active", 0))
     return item
 
@@ -358,7 +1653,6 @@ def current_user(
     token = _extract_token(authorization)
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
-        db.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         row = db.execute(
             """
             SELECT u.*
@@ -368,7 +1662,6 @@ def current_user(
             """,
             (_token_hash(token), now),
         ).fetchone()
-        db.commit()
     if row is None:
         raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
     return _serialize_user(row)
@@ -405,18 +1698,67 @@ def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
     item["photo_url"] = (
         f"/api/members/{item['id']}/photo" if has_photo else ""
     )
+    with connect() as db:
+        item["filter_ids"] = [
+            int(link["filter_id"])
+            for link in db.execute(
+                """
+                SELECT filter_id
+                FROM member_filter_links
+                WHERE member_id = ?
+                ORDER BY filter_id ASC
+                """,
+                (item["id"],),
+            ).fetchall()
+        ]
     return item
+
+
+CONTENT_PUSH_RULES = {
+    "documents": ("document", "Neues Dokument", "/more"),
+    "polls": ("poll", "Neue Umfrage", "/more"),
+    "photos": ("photo_album", "Neues Fotoalbum", "/more"),
+    "gallery": ("gallery", "Neuer Galerie-Inhalt", "/gallery"),
+    "sujet": ("sujet", "Neues Sujet", "/more"),
+    "archive": ("archive", "Neuer Archiv-Inhalt", "/more"),
+}
+
+
+def _queue_push_notification(
+    db: sqlite3.Connection,
+    *,
+    kind: str,
+    title: str,
+    body: str = "",
+    route: str = "",
+) -> None:
+    db.execute(
+        """
+        INSERT INTO push_notifications (
+            kind, title, body, route, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            kind,
+            title[:200],
+            body[:500],
+            route,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
 
 
 def list_rows(resource: str) -> list[dict[str, Any]]:
     table_or_404(resource)
     if resource == "news":
-        order = "created_at DESC, id DESC"
+        order = "sort_order ASC, created_at DESC, id DESC"
     elif resource == "events":
         order = (
             "CASE WHEN event_date = '' THEN '9999-12-31' ELSE event_date END ASC, "
             "time ASC, id ASC"
         )
+    elif resource == "members":
+        order = "sort_order ASC, name COLLATE NOCASE ASC, id ASC"
     else:
         order = "name COLLATE NOCASE ASC, id ASC"
 
@@ -435,7 +1777,13 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
 def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     table_or_404(resource)
     data = payload.model_dump()
+    member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     data["created_at"] = datetime.now(timezone.utc).isoformat()
+    if resource in {"members", "news"}:
+        with connect() as db:
+            data["sort_order"] = db.execute(
+                f"SELECT COALESCE(MAX(sort_order), 0) + 1 FROM {resource}"
+            ).fetchone()[0]
     columns = list(data.keys())
     placeholders = ", ".join("?" for _ in columns)
     sql = (
@@ -444,6 +1792,12 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     )
     with connect() as db:
         cursor = db.execute(sql, [data[column] for column in columns])
+        if resource == "members":
+            for filter_id in sorted(set(member_filter_ids)):
+                db.execute(
+                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
+                    (cursor.lastrowid, filter_id),
+                )
         db.commit()
         row = db.execute(
             f"SELECT * FROM {resource} WHERE id = ?",
@@ -459,6 +1813,7 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
 def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]:
     table_or_404(resource)
     data = payload.model_dump()
+    member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     assignments = ", ".join(f"{column} = ?" for column in data)
     with connect() as db:
         cursor = db.execute(
@@ -467,6 +1822,13 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
+        if resource == "members":
+            db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+            for filter_id in sorted(set(member_filter_ids)):
+                db.execute(
+                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
+                    (row_id, filter_id),
+                )
         db.commit()
         row = db.execute(
             f"SELECT * FROM {resource} WHERE id = ?",
@@ -492,36 +1854,209 @@ def delete_row(resource: str, row_id: int) -> None:
 
 
 CONTENT_PERMISSIONS = {
+    "hero": "can_photos",
     "sujet": "can_photos",
     "archive": "can_photos",
+    "gallery": "can_photos",
     "documents": "can_documents",
     "photos": "can_photos",
     "polls": "can_polls",
     "links": "can_links",
+    "whatsapp": "can_links",
     "contact": "can_contact",
     "about": "can_about",
 }
 
 
-def _serialize_content(row: sqlite3.Row) -> dict[str, Any]:
+def _serialize_content(
+    row: sqlite3.Row,
+    user_id: int | None = None,
+) -> dict[str, Any]:
     item = dict(row)
-    has_legacy_image = bool(item.pop("image_data", None))
+    item.pop("image_data", None)
     item.pop("image_mime", None)
-    image_urls: list[str] = []
-    if has_legacy_image:
-        image_urls.append(f"/api/content/{item['id']}/image")
+    has_document = bool(item.pop("document_data", None))
+    document_mime = str(item.pop("document_mime", "") or "")
+    document_name = str(item.get("document_name", "") or "")
     with connect() as db:
         image_rows = db.execute(
-            "SELECT id FROM content_images WHERE content_id = ? ORDER BY id ASC",
+            """
+            SELECT id, sort_order, created_at
+            FROM content_images
+            WHERE content_id = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
             (item["id"],),
         ).fetchall()
-    image_urls.extend(
-        f"/api/content/{item['id']}/images/{image_row['id']}"
+        if item.get("section") == "polls":
+            try:
+                options = json.loads(item.get("poll_options") or "[]")
+            except Exception:
+                options = []
+            if not isinstance(options, list):
+                options = []
+            options = [str(value).strip() for value in options if str(value).strip()]
+            counts = [0 for _ in options]
+            for vote in db.execute(
+                """
+                SELECT option_index, COUNT(*) AS count
+                FROM poll_votes
+                WHERE poll_id = ?
+                GROUP BY option_index
+                """,
+                (item["id"],),
+            ).fetchall():
+                index = int(vote["option_index"])
+                if 0 <= index < len(counts):
+                    counts[index] = int(vote["count"])
+            my_vote = None
+            if user_id is not None:
+                vote = db.execute(
+                    "SELECT option_index FROM poll_votes WHERE poll_id = ? AND user_id = ?",
+                    (item["id"], user_id),
+                ).fetchone()
+                if vote is not None:
+                    my_vote = int(vote["option_index"])
+            voter_rows = db.execute(
+                """
+                SELECT
+                    pv.option_index,
+                    COALESCE(NULLIF(TRIM(m.name), ''), u.username) AS voter_name
+                FROM poll_votes pv
+                JOIN users u ON u.id = pv.user_id
+                LEFT JOIN members m ON m.id = u.member_id
+                WHERE pv.poll_id = ?
+                ORDER BY voter_name COLLATE NOCASE ASC, u.id ASC
+                """,
+                (item["id"],),
+            ).fetchall()
+            suggestion_rows = db.execute(
+                """
+                SELECT
+                    ps.option_index,
+                    ps.suggestion_text,
+                    COALESCE(NULLIF(TRIM(m.name), ''), u.username) AS member_name
+                FROM poll_suggestions ps
+                JOIN users u ON u.id = ps.user_id
+                LEFT JOIN members m ON m.id = u.member_id
+                WHERE ps.poll_id = ?
+                ORDER BY ps.created_at ASC, ps.user_id ASC
+                """,
+                (item["id"],),
+            ).fetchall()
+
+            my_suggestion_index = None
+            my_suggestion_text = ""
+            if user_id is not None:
+                suggestion = db.execute(
+                    """
+                    SELECT option_index, suggestion_text
+                    FROM poll_suggestions
+                    WHERE poll_id = ? AND user_id = ?
+                    """,
+                    (item["id"], user_id),
+                ).fetchone()
+                if suggestion is not None:
+                    index = int(suggestion["option_index"])
+                    if 0 <= index < len(options):
+                        my_suggestion_index = index
+                        my_suggestion_text = str(options[index] or "").strip()
+
+            item["poll_options"] = options
+            item["poll_allow_suggestions"] = bool(
+                item.get("poll_allow_suggestions", 0)
+            )
+            item["poll_counts"] = counts
+            item["poll_total_votes"] = sum(counts)
+            item["poll_my_vote"] = my_vote
+            item["poll_my_suggestion_index"] = my_suggestion_index
+            item["poll_my_suggestion_text"] = my_suggestion_text
+            item["poll_voters"] = [
+                {
+                    "name": str(voter["voter_name"] or "").strip(),
+                    "option_index": int(voter["option_index"]),
+                }
+                for voter in voter_rows
+                if str(voter["voter_name"] or "").strip()
+            ]
+            item["poll_suggestions"] = [
+                {
+                    "member_name": str(suggestion["member_name"] or "").strip(),
+                    "text": (
+                        str(options[int(suggestion["option_index"])]).strip()
+                        if 0 <= int(suggestion["option_index"]) < len(options)
+                        else str(suggestion["suggestion_text"] or "").strip()
+                    ),
+                    "option_index": int(suggestion["option_index"]),
+                    "vote_count": (
+                        counts[int(suggestion["option_index"])]
+                        if 0 <= int(suggestion["option_index"]) < len(counts)
+                        else 0
+                    ),
+                }
+                for suggestion in suggestion_rows
+                if str(suggestion["suggestion_text"] or "").strip()
+            ]
+        else:
+            item["poll_options"] = []
+            item["poll_allow_suggestions"] = False
+            item["poll_counts"] = []
+            item["poll_total_votes"] = 0
+            item["poll_my_vote"] = None
+            item["poll_my_suggestion_index"] = None
+            item["poll_my_suggestion_text"] = ""
+            item["poll_voters"] = []
+            item["poll_suggestions"] = []
+    images = [
+        {
+            "id": image_row["id"],
+            "url": f"/api/content/{item['id']}/images/{image_row['id']}",
+            "legacy": False,
+            "sort_order": image_row["sort_order"],
+            "created_at": image_row["created_at"],
+        }
         for image_row in image_rows
-    )
+    ]
+    image_urls = [image["url"] for image in images]
+    item["images"] = images
     item["image_urls"] = image_urls
     item["image_url"] = image_urls[0] if image_urls else ""
+    item["document_url"] = (
+        f"/api/content/{item['id']}/document" if has_document else ""
+    )
+    item["document_name"] = document_name
+    item["document_mime"] = document_mime if has_document else ""
     return item
+
+def _cleanup_expired_snapshots(db: sqlite3.Connection) -> None:
+    db.execute(
+        "DELETE FROM gallery_snapshots WHERE expires_at <= ?",
+        (datetime.now(timezone.utc).isoformat(),),
+    )
+
+
+def _serialize_snapshot(
+    row: sqlite3.Row,
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    owner_name = row["member_name"] or row["username"]
+    can_delete = row["user_id"] == user["id"] or bool(user.get("can_photos", False))
+    return {
+        "id": None,
+        "snapshot_id": row["id"],
+        "section": "gallery",
+        "title": f"Snapshot von {owner_name}",
+        "text": "",
+        "link_url": "",
+        "sort_order": -1,
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+        "is_snapshot": True,
+        "can_delete": can_delete,
+        "image_url": f"/api/gallery/snapshots/{row['id']}/image",
+        "image_urls": [f"/api/gallery/snapshots/{row['id']}/image"],
+        "images": [],
+    }
 
 
 def _content_permission(section: str) -> str:
@@ -540,6 +2075,178 @@ def _require_content_permission(
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
 
 
+def _app_config() -> dict[str, Any]:
+    with connect() as db:
+        row = db.execute(
+            """
+            SELECT
+                app_name,
+                app_subtitle,
+                primary_color,
+                logo_data,
+                club_description,
+                website_url,
+                contact_email,
+                contact_phone,
+                club_address,
+                show_sujet,
+                label_sujet,
+                show_archive,
+                label_archive,
+                show_photos,
+                label_photos,
+                show_documents,
+                label_documents,
+                show_polls,
+                label_polls,
+                show_links,
+                label_links
+            FROM app_config
+            WHERE id = 1
+            """
+        ).fetchone()
+    if row is None:
+        return {
+            "instance_id": INSTANCE_ID,
+            "app_name": "FLAPAMAMAKU",
+            "app_subtitle": "Fasnachtsgruppe Luzern",
+            "primary_color": "#8A101B",
+            "logo_url": "",
+            "club_description": "",
+            "website_url": "",
+            "contact_email": "",
+            "contact_phone": "",
+            "club_address": "",
+            "show_sujet": True,
+            "label_sujet": "Sujet nächstes Jahr",
+            "show_archive": True,
+            "label_archive": "Vergangene Sujet",
+            "show_photos": True,
+            "label_photos": "Fotoalben",
+            "show_documents": True,
+            "label_documents": "Dokumente",
+            "show_polls": True,
+            "label_polls": "Umfragen",
+            "show_links": True,
+            "label_links": "Links",
+        }
+    return {
+        "instance_id": INSTANCE_ID,
+        "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
+        "app_subtitle": str(row["app_subtitle"] or ""),
+        "primary_color": str(row["primary_color"] or "#8A101B"),
+        "logo_url": "/api/app-config/logo" if row["logo_data"] else "",
+        "club_description": str(row["club_description"] or ""),
+        "website_url": str(row["website_url"] or ""),
+        "contact_email": str(row["contact_email"] or ""),
+        "contact_phone": str(row["contact_phone"] or ""),
+        "club_address": str(row["club_address"] or ""),
+        "show_sujet": bool(row["show_sujet"]),
+        "label_sujet": str(row["label_sujet"] or "Sujet nächstes Jahr"),
+        "show_archive": bool(row["show_archive"]),
+        "label_archive": str(row["label_archive"] or "Vergangene Sujet"),
+        "show_photos": bool(row["show_photos"]),
+        "label_photos": str(row["label_photos"] or "Fotoalben"),
+        "show_documents": bool(row["show_documents"]),
+        "label_documents": str(row["label_documents"] or "Dokumente"),
+        "show_polls": bool(row["show_polls"]),
+        "label_polls": str(row["label_polls"] or "Umfragen"),
+        "show_links": bool(row["show_links"]),
+        "label_links": str(row["label_links"] or "Links"),
+    }
+
+
+def _club_setup_status() -> dict[str, Any]:
+    config = _app_config()
+    with connect() as db:
+        administrator_ready = bool(
+            db.execute(
+                """
+                SELECT 1
+                FROM users
+                WHERE active = 1 AND can_manage_users = 1
+                LIMIT 1
+                """
+            ).fetchone()
+        )
+
+    app_name = str(config.get("app_name") or "").strip()
+    identity_ready = bool(app_name)
+    if INSTANCE_ID != "flapamamaku" and app_name.upper() == "FLAPAMAMAKU":
+        identity_ready = False
+
+    contact_ready = any(
+        str(config.get(key) or "").strip()
+        for key in ("contact_email", "contact_phone", "website_url")
+    )
+    modules_ready = any(
+        bool(config.get(key))
+        for key in (
+            "show_sujet",
+            "show_archive",
+            "show_photos",
+            "show_documents",
+            "show_polls",
+            "show_links",
+        )
+    )
+
+    required = {
+        "administrator": {
+            "ok": administrator_ready,
+            "label": "Hauptadministrator vorhanden",
+        },
+        "identity": {
+            "ok": identity_ready,
+            "label": "Vereinsname eingerichtet",
+        },
+        "contact": {
+            "ok": contact_ready,
+            "label": "Mindestens eine Kontaktmöglichkeit erfasst",
+        },
+        "modules": {
+            "ok": modules_ready,
+            "label": "Mindestens ein Inhaltsmodul aktiviert",
+        },
+    }
+
+    recommended = {
+        "logo": {
+            "ok": bool(str(config.get("logo_url") or "").strip()),
+            "label": "Vereinslogo hinterlegt",
+        },
+        "description": {
+            "ok": bool(str(config.get("club_description") or "").strip()),
+            "label": "Vereinsbeschreibung erfasst",
+        },
+        "backup": {
+            "ok": bool(_backup_files()),
+            "label": "Mindestens ein Backup vorhanden",
+        },
+        "push": {
+            "ok": bool(FIREBASE_SERVICE_ACCOUNT_JSON),
+            "label": "Push-Zustellung konfiguriert",
+        },
+        "production": {
+            "ok": bool(_production_readiness()["ready"]),
+            "label": "Öffentlicher Produktionsbetrieb bereit",
+        },
+    }
+
+    required_done = sum(1 for item in required.values() if item["ok"])
+    recommended_done = sum(1 for item in recommended.values() if item["ok"])
+    return {
+        "instance_id": INSTANCE_ID,
+        "required_complete": required_done == len(required),
+        "required_done": required_done,
+        "required_total": len(required),
+        "recommended_done": recommended_done,
+        "recommended_total": len(recommended),
+        "required": required,
+        "recommended": recommended,
+    }
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {
@@ -550,13 +2257,395 @@ def root() -> dict[str, str]:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.8.9"}
+def health() -> dict[str, Any]:
+    readiness = _production_readiness()
+    return {
+        "status": "ok",
+        "instance_id": INSTANCE_ID,
+        "version": API_VERSION,
+        "build_sha": BUILD_SHA,
+        "schema_version": _schema_version(),
+        "production_ready": readiness["ready"],
+    }
+
+
+@app.get("/api/app-config")
+def get_app_config() -> dict[str, Any]:
+    return _app_config()
+
+
+@app.put("/api/app-config")
+def put_app_config(
+    payload: AppConfigPayload,
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, Any]:
+    values = payload.model_dump()
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        db.execute(
+            """
+            INSERT INTO app_config (
+                id,
+                app_name,
+                app_subtitle,
+                primary_color,
+                club_description,
+                website_url,
+                contact_email,
+                contact_phone,
+                club_address,
+                show_sujet,
+                label_sujet,
+                show_archive,
+                label_archive,
+                show_photos,
+                label_photos,
+                show_documents,
+                label_documents,
+                show_polls,
+                label_polls,
+                show_links,
+                label_links,
+                updated_at
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                app_name = excluded.app_name,
+                app_subtitle = excluded.app_subtitle,
+                primary_color = excluded.primary_color,
+                club_description = excluded.club_description,
+                website_url = excluded.website_url,
+                contact_email = excluded.contact_email,
+                contact_phone = excluded.contact_phone,
+                club_address = excluded.club_address,
+                show_sujet = excluded.show_sujet,
+                label_sujet = excluded.label_sujet,
+                show_archive = excluded.show_archive,
+                label_archive = excluded.label_archive,
+                show_photos = excluded.show_photos,
+                label_photos = excluded.label_photos,
+                show_documents = excluded.show_documents,
+                label_documents = excluded.label_documents,
+                show_polls = excluded.show_polls,
+                label_polls = excluded.label_polls,
+                show_links = excluded.show_links,
+                label_links = excluded.label_links,
+                updated_at = excluded.updated_at
+            """,
+            (
+                values["app_name"].strip(),
+                values["app_subtitle"].strip(),
+                values["primary_color"].upper(),
+                values["club_description"].strip(),
+                values["website_url"].strip(),
+                values["contact_email"].strip(),
+                values["contact_phone"].strip(),
+                values["club_address"].strip(),
+                int(values["show_sujet"]),
+                values["label_sujet"].strip(),
+                int(values["show_archive"]),
+                values["label_archive"].strip(),
+                int(values["show_photos"]),
+                values["label_photos"].strip(),
+                int(values["show_documents"]),
+                values["label_documents"].strip(),
+                int(values["show_polls"]),
+                values["label_polls"].strip(),
+                int(values["show_links"]),
+                values["label_links"].strip(),
+                now,
+            ),
+        )
+        db.commit()
+    return _app_config()
+
+
+@app.get("/api/app-config/logo")
+def get_app_logo() -> Response:
+    with connect() as db:
+        row = db.execute(
+            "SELECT logo_data, logo_mime FROM app_config WHERE id = 1"
+        ).fetchone()
+    if row is None or not row["logo_data"]:
+        raise HTTPException(status_code=404, detail="Logo nicht vorhanden")
+    return Response(
+        content=row["logo_data"],
+        media_type=row["logo_mime"] or "image/webp",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.post("/api/app-config/logo")
+async def upload_app_logo(
+    logo: UploadFile = File(...),
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, Any]:
+    raw = await logo.read()
+    optimized, mime = _optimize_image(raw, logo.content_type or "")
+    with connect() as db:
+        db.execute(
+            """
+            UPDATE app_config
+            SET logo_data = ?, logo_mime = ?, updated_at = ?
+            WHERE id = 1
+            """,
+            (
+                optimized,
+                mime,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        db.commit()
+    return _app_config()
+
+
+@app.delete("/api/app-config/logo", status_code=204)
+def delete_app_logo(
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> None:
+    with connect() as db:
+        db.execute(
+            """
+            UPDATE app_config
+            SET logo_data = NULL, logo_mime = '', updated_at = ?
+            WHERE id = 1
+            """,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        db.commit()
 
 
 @app.get("/admin")
 def admin() -> FileResponse:
-    return FileResponse(STATIC_DIR / "admin.html")
+    return FileResponse(
+        STATIC_DIR / "admin.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "flapamamaku-icon.png",
+        media_type="image/png",
+    )
+
+
+@app.get("/flapamamaku-icon.png", include_in_schema=False)
+def flapamamaku_icon() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "flapamamaku-icon.png",
+        media_type="image/png",
+    )
+
+
+@app.get("/api/system/status")
+def system_status(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    backups = _backup_files()
+    latest_backup = _backup_info(backups[0]) if backups else None
+    latest_backup_age_seconds: int | None = None
+    if backups:
+        latest_backup_age_seconds = max(
+            0,
+            int(datetime.now(timezone.utc).timestamp() - backups[0].stat().st_mtime),
+        )
+
+    database_integrity = "unbekannt"
+    active_users = 0
+    active_sessions = 0
+    members = 0
+    registered_devices = 0
+    queued_push = 0
+    try:
+        with connect() as db:
+            integrity = db.execute("PRAGMA quick_check").fetchone()
+            database_integrity = (
+                str(integrity[0]).lower() if integrity is not None else "unbekannt"
+            )
+            active_users = int(
+                db.execute("SELECT COUNT(*) FROM users WHERE active = 1").fetchone()[0]
+            )
+            active_sessions = int(
+                db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            )
+            members = int(db.execute("SELECT COUNT(*) FROM members").fetchone()[0])
+            registered_devices = int(
+                db.execute(
+                    "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+                ).fetchone()[0]
+            )
+            queued_push = int(
+                db.execute(
+                    "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+                ).fetchone()[0]
+            )
+    except sqlite3.Error:
+        database_integrity = "fehler"
+
+    storage_total = 0
+    storage_free = 0
+    try:
+        stat = os.statvfs(DB_PATH.parent)
+        storage_total = int(stat.f_blocks * stat.f_frsize)
+        storage_free = int(stat.f_bavail * stat.f_frsize)
+    except OSError:
+        pass
+
+    backup_ok = (
+        latest_backup_age_seconds is not None
+        and latest_backup_age_seconds <= max(BACKUP_INTERVAL_SECONDS * 2, 172800)
+    )
+    schema_ok = _schema_version() == CURRENT_SCHEMA_VERSION
+    database_ok = database_integrity == "ok"
+    overall_status = "ok" if database_ok and schema_ok and backup_ok else "warning"
+
+    return {
+        "overall_status": overall_status,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "api_version": API_VERSION,
+        "instance_id": INSTANCE_ID,
+        "build_sha": BUILD_SHA,
+        "schema_version": _schema_version(),
+        "expected_schema_version": CURRENT_SCHEMA_VERSION,
+        "schema_ok": schema_ok,
+        "database_integrity": database_integrity,
+        "database_ok": database_ok,
+        "database_path": str(DB_PATH),
+        "database_size_bytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
+        "storage_total_bytes": storage_total,
+        "storage_free_bytes": storage_free,
+        "backup_directory": str(BACKUP_DIR),
+        "backup_retention": BACKUP_RETENTION,
+        "backup_count": len(backups),
+        "latest_backup": latest_backup,
+        "latest_backup_age_seconds": latest_backup_age_seconds,
+        "backup_ok": backup_ok,
+        "active_users": active_users,
+        "active_sessions": active_sessions,
+        "members": members,
+        "registered_devices": registered_devices,
+        "queued_push": queued_push,
+    }
+
+
+@app.get("/api/system/readiness")
+def system_readiness(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    readiness = _production_readiness()
+    return {
+        **readiness,
+        "environment": APP_ENV,
+        "instance_id": INSTANCE_ID,
+        "api_version": API_VERSION,
+        "build_sha": BUILD_SHA,
+        "session_lifetime_days": SESSION_LIFETIME_DAYS,
+        "expected_schema_version": CURRENT_SCHEMA_VERSION,
+    }
+
+
+@app.get("/api/system/setup-status")
+def system_setup_status(
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, Any]:
+    return _club_setup_status()
+
+
+@app.get("/api/system/backups")
+def list_backups(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> list[dict[str, Any]]:
+    return [_backup_info(path) for path in _backup_files()]
+
+
+@app.post("/api/system/backups")
+def create_backup(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    try:
+        path = _create_database_backup("manual")
+    except Exception as exc:
+        logger.exception("Manual database backup failed")
+        raise HTTPException(status_code=500, detail="Backup konnte nicht erstellt werden") from exc
+    return _backup_info(path)
+
+
+@app.get("/api/system/backups/{filename}")
+def download_backup(
+    filename: str,
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> FileResponse:
+    candidate = BACKUP_DIR / Path(filename).name
+    valid_prefix = candidate.name.startswith(f"{INSTANCE_ID}-")
+    if INSTANCE_ID == "flapamamaku":
+        valid_prefix = valid_prefix or candidate.name.startswith("flapamamaku-")
+    if (
+        candidate.parent != BACKUP_DIR
+        or not valid_prefix
+        or candidate.suffix != ".db"
+        or not candidate.is_file()
+    ):
+        raise HTTPException(status_code=404, detail="Backup nicht gefunden")
+    return FileResponse(
+        candidate,
+        media_type="application/octet-stream",
+        filename=candidate.name,
+    )
+
+
+@app.post("/api/system/restore")
+async def restore_backup(
+    backup_file: UploadFile = File(...),
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    filename = Path(backup_file.filename or "").name
+    if not filename.lower().endswith(".db"):
+        raise HTTPException(status_code=400, detail="Bitte eine .db-Backupdatei auswählen")
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = BACKUP_DIR / f".restore-upload-{secrets.token_hex(8)}.db"
+    total = 0
+    try:
+        with temporary.open("wb") as handle:
+            while True:
+                chunk = await backup_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_BACKUP_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Backupdatei ist zu gross",
+                    )
+                handle.write(chunk)
+
+        if total == 0:
+            raise HTTPException(status_code=400, detail="Backupdatei ist leer")
+
+        try:
+            result = await asyncio.to_thread(_restore_database_backup, temporary)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Database restore failed")
+            raise HTTPException(
+                status_code=500,
+                detail="Datenbank konnte nicht wiederhergestellt werden",
+            ) from exc
+
+        result["uploaded_name"] = filename
+        return result
+    finally:
+        await backup_file.close()
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not remove temporary restore upload %s", temporary)
 
 
 @app.get("/api/auth/status")
@@ -592,8 +2681,8 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
             f"""
             INSERT INTO users (
                 member_id, username, password_hash, password_salt, active,
-                {", ".join(PERMISSION_FIELDS)}, created_at
-            ) VALUES (?, ?, ?, ?, 1, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?)
+                {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides, created_at
+            ) VALUES (?, ?, ?, ?, 1, {", ".join("?" for _ in PERMISSION_FIELDS)}, 'admin', '{{}}', ?)
             """,
             [
                 payload.member_id,
@@ -610,7 +2699,10 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginPayload) -> dict[str, Any]:
+def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
+    rate_key = _login_rate_key(request, payload.username)
+    _check_login_rate_limit(rate_key)
+
     with connect() as db:
         row = db.execute(
             "SELECT * FROM users WHERE username = ? COLLATE NOCASE AND active = 1",
@@ -621,11 +2713,20 @@ def login(payload: LoginPayload) -> dict[str, Any]:
             row["password_hash"],
             row["password_salt"],
         ):
+            _record_login_failure(rate_key)
             raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
 
+        _clear_login_failures(rate_key)
         token = secrets.token_urlsafe(48)
         now_dt = datetime.now(timezone.utc)
-        expires = now_dt + timedelta(days=SESSION_DAYS)
+        expires = (now_dt + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
+        db.execute(
+            """
+            DELETE FROM sessions
+            WHERE expires_at <= ?
+            """,
+            (now_dt.isoformat(),),
+        )
         db.execute(
             """
             INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
@@ -634,7 +2735,7 @@ def login(payload: LoginPayload) -> dict[str, Any]:
             (
                 _token_hash(token),
                 row["id"],
-                expires.isoformat(),
+                expires,
                 now_dt.isoformat(),
             ),
         )
@@ -642,10 +2743,9 @@ def login(payload: LoginPayload) -> dict[str, Any]:
 
     return {
         "token": token,
-        "expires_at": expires.isoformat(),
+        "expires_at": expires,
         "user": _user_profile(row["id"]),
     }
-
 
 @app.post("/api/auth/logout", status_code=204)
 def logout(
@@ -660,6 +2760,20 @@ def logout(
 @app.get("/api/auth/me")
 def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     return _user_profile(user["id"])
+
+
+@app.get("/api/roles")
+def get_roles(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "key": key,
+            "label": definition["label"],
+            "permissions": definition["permissions"],
+        }
+        for key, definition in ROLE_DEFINITIONS.items()
+    ]
 
 
 @app.get("/api/users")
@@ -686,7 +2800,16 @@ def post_user(
     if len(payload.password) < 6:
         raise HTTPException(status_code=422, detail="Passwort muss mindestens 6 Zeichen haben")
     password_hash, salt = _hash_password(payload.password)
-    data = payload.model_dump(exclude={"password"})
+    role_key = _normalize_role_key(payload.role_key)
+    overrides = _normalize_permission_overrides(payload.permission_overrides)
+    if not overrides and role_key == "member":
+        legacy_permissions = {
+            key: bool(getattr(payload, key))
+            for key in PERMISSION_FIELDS
+        }
+        if any(legacy_permissions.values()):
+            overrides = legacy_permissions
+    effective = _effective_permissions(role_key, overrides)
     now = datetime.now(timezone.utc).isoformat()
 
     with connect() as db:
@@ -695,16 +2818,18 @@ def post_user(
                 f"""
                 INSERT INTO users (
                     member_id, username, password_hash, password_salt, active,
-                    {", ".join(PERMISSION_FIELDS)}, created_at
-                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?)
+                    {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides, created_at
+                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?, ?, ?)
                 """,
                 [
-                    data["member_id"],
-                    data["username"].strip(),
+                    payload.member_id,
+                    payload.username.strip(),
                     password_hash,
                     salt,
-                    int(data["active"]),
-                    *[int(data[key]) for key in PERMISSION_FIELDS],
+                    int(payload.active),
+                    *[int(effective[key]) for key in PERMISSION_FIELDS],
+                    role_key,
+                    json.dumps(overrides, ensure_ascii=False, sort_keys=True),
                     now,
                 ],
             )
@@ -720,29 +2845,48 @@ def put_user(
     payload: UserPayload,
     actor: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> dict[str, Any]:
-    data = payload.model_dump(exclude={"password"})
-    assignments = ["member_id = ?", "username = ?", "active = ?"]
+    role_key = _normalize_role_key(payload.role_key)
+    overrides = _normalize_permission_overrides(payload.permission_overrides)
+    if not overrides and role_key == "member":
+        legacy_permissions = {
+            key: bool(getattr(payload, key))
+            for key in PERMISSION_FIELDS
+        }
+        if any(legacy_permissions.values()):
+            overrides = legacy_permissions
+    effective = _effective_permissions(role_key, overrides)
+
+    if user_id == actor["id"] and not effective["can_manage_users"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Eigenes Recht zur Benutzerverwaltung kann nicht entfernt werden",
+        )
+
+    assignments = [
+        "member_id = ?",
+        "username = ?",
+        "active = ?",
+        "role_key = ?",
+        "permission_overrides = ?",
+    ]
     values: list[Any] = [
-        data["member_id"],
-        data["username"].strip(),
-        int(data["active"]),
+        payload.member_id,
+        payload.username.strip(),
+        int(payload.active),
+        role_key,
+        json.dumps(overrides, ensure_ascii=False, sort_keys=True),
     ]
     for key in PERMISSION_FIELDS:
         assignments.append(f"{key} = ?")
-        values.append(int(data[key]))
+        values.append(int(effective[key]))
 
+    password_changed = bool(payload.password)
     if payload.password:
         if len(payload.password) < 6:
             raise HTTPException(status_code=422, detail="Passwort muss mindestens 6 Zeichen haben")
         password_hash, salt = _hash_password(payload.password)
         assignments.extend(["password_hash = ?", "password_salt = ?"])
         values.extend([password_hash, salt])
-
-    if user_id == actor["id"] and not data["can_manage_users"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Eigenes Recht zur Benutzerverwaltung kann nicht entfernt werden",
-        )
 
     values.append(user_id)
     with connect() as db:
@@ -753,10 +2897,25 @@ def put_user(
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+            if password_changed:
+                db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
             db.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Benutzername bereits vorhanden")
     return _user_profile(user_id)
+
+
+@app.delete("/api/users/{user_id}/sessions", status_code=204)
+def revoke_user_sessions(
+    user_id: int,
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> None:
+    with connect() as db:
+        user = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user is None:
+            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        db.commit()
 
 
 @app.delete("/api/users/{user_id}", status_code=204)
@@ -774,10 +2933,476 @@ def delete_user(
         db.commit()
 
 
+@app.post("/api/gallery/snapshots")
+async def post_gallery_snapshot(
+    image: UploadFile = File(...),
+    expires_days: int = 14,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not (user.get("can_gallery_upload", False) or user.get("can_photos", False)):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung für Galerie-Snapshots")
+    if expires_days not in {7, 14, 30}:
+        raise HTTPException(status_code=422, detail="Ablaufzeit muss 7, 14 oder 30 Tage sein")
+    raw_data = await image.read()
+    mime = image.content_type or ""
+    if mime not in {"image/jpeg", "image/png", "image/webp"}:
+        if raw_data.startswith(b"\xff\xd8\xff"):
+            mime = "image/jpeg"
+        elif raw_data.startswith(b"\x89PNG\r\n\x1a\n"):
+            mime = "image/png"
+        elif len(raw_data) >= 12 and raw_data[:4] == b"RIFF" and raw_data[8:12] == b"WEBP":
+            mime = "image/webp"
+        else:
+            raise HTTPException(status_code=415, detail="Unsupported image type")
+    data, mime = _optimize_image(raw_data, mime)
+
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=expires_days)
+    with connect() as db:
+        _cleanup_expired_snapshots(db)
+        cursor = db.execute(
+            """
+            INSERT INTO gallery_snapshots (
+                user_id, image_data, image_mime, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                user["id"],
+                data,
+                mime,
+                now.isoformat(),
+                expires.isoformat(),
+            ),
+        )
+        db.commit()
+        row = db.execute(
+            """
+            SELECT gs.*, u.username, m.name AS member_name
+            FROM gallery_snapshots gs
+            JOIN users u ON u.id = gs.user_id
+            LEFT JOIN members m ON m.id = u.member_id
+            WHERE gs.id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+    return _serialize_snapshot(row, user)
+
+
+@app.get("/api/gallery/snapshots/{snapshot_id}/image")
+def get_gallery_snapshot_image(
+    snapshot_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        _cleanup_expired_snapshots(db)
+        row = db.execute(
+            """
+            SELECT image_data, image_mime
+            FROM gallery_snapshots
+            WHERE id = ? AND expires_at > ?
+            """,
+            (snapshot_id, datetime.now(timezone.utc).isoformat()),
+        ).fetchone()
+        db.commit()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Snapshot nicht gefunden oder abgelaufen")
+    return Response(
+        content=row["image_data"],
+        media_type=row["image_mime"] or "image/jpeg",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+@app.delete("/api/gallery/snapshots/{snapshot_id}", status_code=204)
+def delete_gallery_snapshot(
+    snapshot_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        row = db.execute(
+            "SELECT user_id FROM gallery_snapshots WHERE id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Snapshot nicht gefunden")
+        if row["user_id"] != user["id"] and not user.get("can_photos", False):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung")
+        db.execute("DELETE FROM gallery_snapshots WHERE id = ?", (snapshot_id,))
+        db.commit()
+
+
+def _serialize_push_notification(
+    row: sqlite3.Row | dict[str, Any],
+) -> dict[str, Any]:
+    item = dict(row)
+    item["delivered_count"] = int(item.get("delivered_count", 0) or 0)
+    item["failed_count"] = int(item.get("failed_count", 0) or 0)
+    item["status"] = (
+        "sent"
+        if item.get("sent_at")
+        else ("error" if item.get("last_error") else "queued")
+    )
+    return item
+
+
+@app.get("/api/push/admin")
+def get_push_admin(
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    with connect() as db:
+        registered_devices_total = int(
+            db.execute(
+                "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+            ).fetchone()[0]
+        )
+        queued_notifications = int(
+            db.execute(
+                "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+            ).fetchone()[0]
+        )
+        rows = db.execute(
+            """
+            SELECT
+                pn.*,
+                (
+                    SELECT COUNT(*)
+                    FROM push_deliveries pd
+                    WHERE pd.notification_id = pn.id
+                      AND pd.sent_at IS NOT NULL
+                ) AS delivered_count,
+                (
+                    SELECT COUNT(*)
+                    FROM push_deliveries pd
+                    WHERE pd.notification_id = pn.id
+                      AND pd.sent_at IS NULL
+                      AND pd.last_error <> ''
+                ) AS failed_count
+            FROM push_notifications pn
+            ORDER BY pn.id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        last_delivery_error = db.execute(
+            """
+            SELECT last_error
+            FROM push_deliveries
+            WHERE last_error IS NOT NULL AND last_error <> ''
+            ORDER BY rowid DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    return {
+        "registered_devices_total": registered_devices_total,
+        "queued_notifications": queued_notifications,
+        "last_delivery_error": (
+            str(last_delivery_error["last_error"])[:500]
+            if last_delivery_error is not None
+            else ""
+        ),
+        "notifications": [_serialize_push_notification(row) for row in rows],
+        **_firebase_diagnostic(),
+    }
+
+
+@app.post("/api/push/admin/send")
+def send_manual_push(
+    payload: ManualPushPayload,
+    _: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    route = payload.route.strip()
+    allowed_routes = {"", "/news", "/events", "/gallery", "/more"}
+    if route not in allowed_routes:
+        raise HTTPException(status_code=422, detail="Unbekanntes Push-Ziel")
+
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="manual",
+            title=payload.title.strip(),
+            body=payload.body.strip(),
+            route=route,
+        )
+        notification_id = int(db.execute("SELECT last_insert_rowid()").fetchone()[0])
+        db.commit()
+        row = db.execute(
+            """
+            SELECT
+                pn.*,
+                0 AS delivered_count,
+                0 AS failed_count
+            FROM push_notifications pn
+            WHERE pn.id = ?
+            """,
+            (notification_id,),
+        ).fetchone()
+    return _serialize_push_notification(row)
+
+
+@app.post("/api/push/register")
+def register_push_token(
+    payload: PushTokenPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    platform = payload.platform.lower().strip()
+    if platform not in {"android", "ios"}:
+        raise HTTPException(status_code=422, detail="Unbekannte Plattform")
+    with connect() as db:
+        db.execute(
+            """
+            INSERT INTO push_tokens (
+                user_id, token, platform, enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, 1, ?, ?)
+            ON CONFLICT(token) DO UPDATE SET
+                user_id = excluded.user_id,
+                platform = excluded.platform,
+                enabled = 1,
+                updated_at = excluded.updated_at
+            """,
+            (user["id"], payload.token, platform, now, now),
+        )
+        db.commit()
+    return {"registered": True}
+
+
+@app.delete("/api/push/register", status_code=204)
+def unregister_push_token(
+    payload: PushTokenDeletePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        db.execute(
+            "DELETE FROM push_tokens WHERE token = ? AND user_id = ?",
+            (payload.token, user["id"]),
+        )
+        db.commit()
+
+
+@app.get("/api/push/status")
+def push_status(
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        count = db.execute(
+            "SELECT COUNT(*) FROM push_tokens WHERE user_id = ? AND enabled = 1",
+            (user["id"],),
+        ).fetchone()[0]
+        total_devices = db.execute(
+            "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1",
+        ).fetchone()[0]
+        queued = db.execute(
+            "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL",
+        ).fetchone()[0]
+        last_delivery_error = db.execute(
+            """
+            SELECT last_error
+            FROM push_deliveries
+            WHERE last_error IS NOT NULL AND last_error <> ''
+            ORDER BY rowid DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    diagnostic = _firebase_diagnostic()
+    return {
+        "registered_devices": count,
+        "registered_devices_total": total_devices,
+        "queued_notifications": queued,
+        "last_delivery_error": (
+            last_delivery_error["last_error"][:500]
+            if last_delivery_error is not None
+            else ""
+        ),
+        **diagnostic,
+    }
+
+
+def _normalize_poll_options(
+    values: list[str],
+    allow_suggestions: bool = False,
+) -> list[str]:
+    options = [str(value).strip() for value in values if str(value).strip()]
+    if len(options) < 2 and not allow_suggestions:
+        raise HTTPException(
+            status_code=422,
+            detail="Eine Umfrage benötigt mindestens zwei Antwortmöglichkeiten",
+        )
+    if len(options) > 21:
+        raise HTTPException(
+            status_code=422,
+            detail="Maximal 21 Antwortoptionen möglich",
+        )
+    normalized = [value.casefold() for value in options]
+    if len(set(normalized)) != len(normalized):
+        raise HTTPException(
+            status_code=422,
+            detail="Antwortmöglichkeiten dürfen nicht doppelt vorkommen",
+        )
+    return options
+
+
+def _create_poll(
+    payload: PollPayload,
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    if not user.get("can_polls", False):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    options = _normalize_poll_options(
+        payload.options,
+        allow_suggestions=payload.allow_suggestions,
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        max_order = db.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM content_items
+            WHERE section = 'polls'
+            """
+        ).fetchone()[0]
+        cursor = db.execute(
+            """
+            INSERT INTO content_items (
+                section, title, text, link_url, poll_options,
+                poll_allow_suggestions, sort_order, created_at
+            ) VALUES ('polls', ?, ?, '', ?, ?, ?, ?)
+            """,
+            (
+                payload.title,
+                payload.text,
+                json.dumps(options, ensure_ascii=False),
+                int(payload.allow_suggestions),
+                max_order + 1,
+                now,
+            ),
+        )
+        rule = CONTENT_PUSH_RULES.get("polls")
+        if rule is not None:
+            kind, prefix, route = rule
+            _queue_push_notification(
+                db,
+                kind=kind,
+                title=f"{prefix}: {payload.title}",
+                body=payload.text,
+                route=route,
+            )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+def _update_poll(
+    poll_id: int,
+    payload: PollPayload,
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    if not user.get("can_polls", False):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    options = _normalize_poll_options(
+        payload.options,
+        allow_suggestions=payload.allow_suggestions,
+    )
+    with connect() as db:
+        existing = db.execute(
+            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        db.execute(
+            """
+            UPDATE content_items
+            SET title = ?, text = ?, link_url = '',
+                poll_options = ?, poll_allow_suggestions = ?
+            WHERE id = ? AND section = 'polls'
+            """,
+            (
+                payload.title,
+                payload.text,
+                json.dumps(options, ensure_ascii=False),
+                int(payload.allow_suggestions),
+                poll_id,
+            ),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (poll_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+def _delete_poll(
+    poll_id: int,
+    user: dict[str, Any],
+) -> None:
+    if not user.get("can_polls", False):
+        raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    with connect() as db:
+        existing = db.execute(
+            "SELECT id FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (poll_id,))
+        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (poll_id,))
+        db.execute("DELETE FROM content_images WHERE content_id = ?", (poll_id,))
+        db.execute(
+            "DELETE FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        )
+        db.commit()
+
+
+@app.get("/api/polls")
+def get_polls(
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute(
+            """
+            SELECT *
+            FROM content_items
+            WHERE section = 'polls'
+            ORDER BY sort_order ASC, id ASC
+            """
+        ).fetchall()
+    return [_serialize_content(row, user["id"]) for row in rows]
+
+
+@app.post("/api/polls")
+def post_poll(
+    payload: PollPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    return _create_poll(payload, user)
+
+
+@app.put("/api/polls/{poll_id}")
+def put_poll(
+    poll_id: int,
+    payload: PollPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    return _update_poll(poll_id, payload, user)
+
+
+@app.delete("/api/polls/{poll_id}", status_code=204)
+def delete_poll(
+    poll_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    _delete_poll(poll_id, user)
+
+
 @app.get("/api/content")
 def get_content(
     section: str | None = None,
-    _: dict[str, Any] = Depends(current_user),
+    user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     sql = "SELECT * FROM content_items"
     values: list[Any] = []
@@ -785,11 +3410,99 @@ def get_content(
         _content_permission(section)
         sql += " WHERE section = ?"
         values.append(section)
-    sql += " ORDER BY created_at DESC, id DESC"
+    sql += " ORDER BY sort_order ASC, id ASC"
 
     with connect() as db:
+        _cleanup_expired_snapshots(db)
         rows = db.execute(sql, values).fetchall()
-    return [_serialize_content(row) for row in rows]
+        snapshots: list[sqlite3.Row] = []
+        if section is None or section == "gallery":
+            snapshots = db.execute(
+                """
+                SELECT gs.*, u.username, m.name AS member_name
+                FROM gallery_snapshots gs
+                JOIN users u ON u.id = gs.user_id
+                LEFT JOIN members m ON m.id = u.member_id
+                WHERE gs.expires_at > ?
+                ORDER BY gs.created_at DESC, gs.id DESC
+                """,
+                (datetime.now(timezone.utc).isoformat(),),
+            ).fetchall()
+        db.commit()
+
+    items = [_serialize_content(row, user["id"]) for row in rows]
+    items.extend(_serialize_snapshot(row, user) for row in snapshots)
+    return items
+
+
+@app.put("/api/content/order")
+def reorder_content_items(
+    payload: ContentOrderPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        rows = db.execute(
+            f"""
+            SELECT id, section
+            FROM content_items
+            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
+            """,
+            payload.item_ids,
+        ).fetchall()
+
+        if len(rows) != len(set(payload.item_ids)):
+            raise HTTPException(status_code=422, detail="Eintragsreihenfolge ist ungültig")
+
+        sections = {row["section"] for row in rows}
+        if len(sections) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="Reihenfolge kann nur innerhalb eines Bereichs geändert werden",
+            )
+
+        section = next(iter(sections))
+        _require_content_permission(section, user)
+
+        current_rows = db.execute(
+            """
+            SELECT id
+            FROM content_items
+            WHERE section = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (section,),
+        ).fetchall()
+        current_ids = [row["id"] for row in current_rows]
+        if set(current_ids) != set(payload.item_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="Eintragsreihenfolge ist unvollständig",
+            )
+
+        for position, item_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                """
+                UPDATE content_items
+                SET sort_order = ?
+                WHERE id = ? AND section = ?
+                """,
+                (position, item_id, section),
+            )
+        db.commit()
+
+        ordered = db.execute(
+            """
+            SELECT *
+            FROM content_items
+            WHERE section = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (section,),
+        ).fetchall()
+    return [_serialize_content(row) for row in ordered]
 
 
 @app.post("/api/content")
@@ -800,20 +3513,52 @@ def post_content(
     _require_content_permission(payload.section, user)
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        max_order = db.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM content_items
+            WHERE section = ?
+            """,
+            (payload.section,),
+        ).fetchone()[0]
         cursor = db.execute(
             """
             INSERT INTO content_items (
-                section, title, text, link_url, created_at
-            ) VALUES (?, ?, ?, ?, ?)
+                section, title, text, link_url, poll_options,
+                poll_allow_suggestions, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (payload.section, payload.title, payload.text, payload.link_url, now),
+            (
+                payload.section,
+                payload.title,
+                payload.text,
+                payload.link_url,
+                json.dumps(
+                    [value.strip() for value in payload.poll_options if value.strip()],
+                    ensure_ascii=False,
+                ) if payload.section == "polls" else "[]",
+                int(payload.poll_allow_suggestions)
+                if payload.section == "polls" else 0,
+                max_order + 1,
+                now,
+            ),
         )
+        rule = CONTENT_PUSH_RULES.get(payload.section)
+        if rule is not None:
+            kind, prefix, route = rule
+            _queue_push_notification(
+                db,
+                kind=kind,
+                title=f"{prefix}: {payload.title}",
+                body=payload.text,
+                route=route,
+            )
         db.commit()
         row = db.execute(
             "SELECT * FROM content_items WHERE id = ?",
             (cursor.lastrowid,),
         ).fetchone()
-    return _serialize_content(row)
+    return _serialize_content(row, user["id"])
 
 
 @app.put("/api/content/{row_id}")
@@ -834,7 +3579,8 @@ def put_content(
         db.execute(
             """
             UPDATE content_items
-            SET section = ?, title = ?, text = ?, link_url = ?
+            SET section = ?, title = ?, text = ?, link_url = ?,
+                poll_options = ?, poll_allow_suggestions = ?
             WHERE id = ?
             """,
             (
@@ -842,6 +3588,12 @@ def put_content(
                 payload.title,
                 payload.text,
                 payload.link_url,
+                json.dumps(
+                    [value.strip() for value in payload.poll_options if value.strip()],
+                    ensure_ascii=False,
+                ) if payload.section == "polls" else "[]",
+                int(payload.poll_allow_suggestions)
+                if payload.section == "polls" else 0,
                 row_id,
             ),
         )
@@ -867,8 +3619,281 @@ def delete_content(
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(row["section"], user)
         db.execute("DELETE FROM content_images WHERE content_id = ?", (row_id,))
+        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (row_id,))
+        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (row_id,))
         db.execute("DELETE FROM content_items WHERE id = ?", (row_id,))
         db.commit()
+
+
+@app.post("/api/content/{row_id}/document")
+async def upload_content_document(
+    row_id: int,
+    document: UploadFile = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        if existing["section"] != "documents":
+            raise HTTPException(status_code=422, detail="PDF nur bei Dokumenten erlaubt")
+
+        data = await document.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="Leere PDF-Datei")
+        if len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="PDF ist grösser als 20 MB")
+        mime = (document.content_type or "").lower()
+        filename = (document.filename or "dokument.pdf").strip()
+        is_pdf = mime == "application/pdf" or filename.lower().endswith(".pdf")
+        if not is_pdf or not data.startswith(b"%PDF"):
+            raise HTTPException(status_code=415, detail="Nur PDF-Dateien sind erlaubt")
+
+        db.execute(
+            """
+            UPDATE content_items
+            SET document_data = ?, document_mime = 'application/pdf', document_name = ?
+            WHERE id = ?
+            """,
+            (data, filename, row_id),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+@app.get("/api/content/{row_id}/document")
+def get_content_document(
+    row_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        row = db.execute(
+            """
+            SELECT document_data, document_mime, document_name
+            FROM content_items
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+    if row is None or row["document_data"] is None:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    filename = str(row["document_name"] or "dokument.pdf").replace('"', "")
+    return Response(
+        content=row["document_data"],
+        media_type=row["document_mime"] or "application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
+@app.delete("/api/content/{row_id}/document", status_code=204)
+def delete_content_document(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        db.execute(
+            """
+            UPDATE content_items
+            SET document_data = NULL, document_mime = '', document_name = ''
+            WHERE id = ?
+            """,
+            (row_id,),
+        )
+        db.commit()
+
+
+@app.post("/api/polls/{poll_id}/vote")
+def vote_poll(
+    poll_id: int,
+    payload: PollVotePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        poll = db.execute(
+            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if poll is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        try:
+            options = json.loads(poll["poll_options"] or "[]")
+        except Exception:
+            options = []
+        if payload.option_index >= len(options):
+            raise HTTPException(status_code=422, detail="Antwortoption ungültig")
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(poll_id, user_id) DO UPDATE SET
+                option_index = excluded.option_index,
+                created_at = excluded.created_at
+            """,
+            (poll_id, user["id"], payload.option_index, now),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (poll_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
+
+
+@app.post("/api/polls/{poll_id}/suggest-and-vote")
+def suggest_and_vote_poll(
+    poll_id: int,
+    payload: PollSuggestionPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    suggestion = payload.text.strip()
+    if not suggestion:
+        raise HTTPException(status_code=422, detail="Vorschlag darf nicht leer sein")
+
+    with connect() as db:
+        poll = db.execute(
+            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
+            (poll_id,),
+        ).fetchone()
+        if poll is None:
+            raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
+        if not bool(poll["poll_allow_suggestions"]):
+            raise HTTPException(
+                status_code=403,
+                detail="Eigene Vorschläge sind bei dieser Umfrage deaktiviert",
+            )
+
+        try:
+            options = json.loads(poll["poll_options"] or "[]")
+        except Exception:
+            options = []
+        if not isinstance(options, list):
+            options = []
+        options = [str(value).strip() for value in options if str(value).strip()]
+
+        owned = db.execute(
+            """
+            SELECT option_index
+            FROM poll_suggestions
+            WHERE poll_id = ? AND user_id = ?
+            """,
+            (poll_id, user["id"]),
+        ).fetchone()
+
+        if owned is not None:
+            option_index = int(owned["option_index"])
+            if not (0 <= option_index < len(options)):
+                db.execute(
+                    "DELETE FROM poll_suggestions WHERE poll_id = ? AND user_id = ?",
+                    (poll_id, user["id"]),
+                )
+                owned = None
+            else:
+                duplicate_index = next(
+                    (
+                        index
+                        for index, value in enumerate(options)
+                        if index != option_index
+                        and value.casefold() == suggestion.casefold()
+                    ),
+                    None,
+                )
+                if duplicate_index is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Dieser Vorschlag ist bereits vorhanden",
+                    )
+                options[option_index] = suggestion
+                db.execute(
+                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
+                    (json.dumps(options, ensure_ascii=False), poll_id),
+                )
+                now = datetime.now(timezone.utc).isoformat()
+                db.execute(
+                    """
+                    UPDATE poll_suggestions
+                    SET suggestion_text = ?, updated_at = ?
+                    WHERE poll_id = ? AND user_id = ?
+                    """,
+                    (suggestion, now, poll_id, user["id"]),
+                )
+
+        if owned is None:
+            existing_index = next(
+                (
+                    index
+                    for index, value in enumerate(options)
+                    if value.casefold() == suggestion.casefold()
+                ),
+                None,
+            )
+            if existing_index is not None:
+                option_index = existing_index
+            else:
+                if len(options) >= 21:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Maximal 21 Antwortoptionen möglich",
+                    )
+                options.append(suggestion)
+                option_index = len(options) - 1
+                now = datetime.now(timezone.utc).isoformat()
+                db.execute(
+                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
+                    (json.dumps(options, ensure_ascii=False), poll_id),
+                )
+                db.execute(
+                    """
+                    INSERT INTO poll_suggestions (
+                        poll_id, user_id, option_index, suggestion_text,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        poll_id,
+                        user["id"],
+                        option_index,
+                        suggestion,
+                        now,
+                        now,
+                    ),
+                )
+
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(poll_id, user_id) DO UPDATE SET
+                option_index = excluded.option_index,
+                created_at = excluded.created_at
+            """,
+            (poll_id, user["id"], option_index, now),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (poll_id,),
+        ).fetchone()
+    return _serialize_content(row, user["id"])
 
 
 @app.post("/api/content/{row_id}/images")
@@ -887,12 +3912,11 @@ async def upload_content_images(
     for image in images:
         if image.content_type not in allowed_types:
             raise HTTPException(status_code=415, detail="Unsupported image type")
-        data = await image.read()
-        if not data:
-            raise HTTPException(status_code=400, detail="Empty image")
-        if len(data) > 12 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Image too large")
-        prepared.append((data, image.content_type or "application/octet-stream"))
+        data, optimized_mime = _optimize_image(
+            await image.read(),
+            image.content_type or "",
+        )
+        prepared.append((data, optimized_mime))
 
     with connect() as db:
         existing = db.execute(
@@ -903,14 +3927,71 @@ async def upload_content_images(
             raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         _require_content_permission(existing["section"], user)
         now = datetime.now(timezone.utc).isoformat()
+        max_order = db.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM content_images
+            WHERE content_id = ?
+            """,
+            (row_id,),
+        ).fetchone()[0]
         db.executemany(
             """
             INSERT INTO content_images (
-                content_id, image_data, image_mime, created_at
-            ) VALUES (?, ?, ?, ?)
+                content_id, image_data, image_mime, sort_order, created_at
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            [(row_id, data, mime, now) for data, mime in prepared],
+            [
+                (row_id, data, mime, max_order + index + 1, now)
+                for index, (data, mime) in enumerate(prepared)
+            ],
         )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    return _serialize_content(row)
+
+
+@app.put("/api/content/{row_id}/images/order")
+def reorder_content_images(
+    row_id: int,
+    payload: ContentImageOrderPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT * FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+
+        rows = db.execute(
+            "SELECT id FROM content_images WHERE content_id = ?",
+            (row_id,),
+        ).fetchall()
+        current_ids = {row["id"] for row in rows}
+        requested_ids = payload.image_ids
+        if len(requested_ids) != len(set(requested_ids)):
+            raise HTTPException(status_code=422, detail="Doppelte Bild-ID")
+        if set(requested_ids) != current_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Bildreihenfolge ist unvollständig oder ungültig",
+            )
+
+        for position, image_id in enumerate(requested_ids, start=1):
+            db.execute(
+                """
+                UPDATE content_images
+                SET sort_order = ?
+                WHERE id = ? AND content_id = ?
+                """,
+                (position, image_id, row_id),
+            )
         db.commit()
         row = db.execute(
             "SELECT * FROM content_items WHERE id = ?",
@@ -943,6 +4024,57 @@ def get_content_gallery_image(
     )
 
 
+@app.delete("/api/content/{row_id}/images/{image_id}", status_code=204)
+def delete_content_gallery_image(
+    row_id: int,
+    image_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        cursor = db.execute(
+            "DELETE FROM content_images WHERE id = ? AND content_id = ?",
+            (image_id, row_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Bild nicht gefunden")
+        db.commit()
+
+
+@app.delete("/api/content/{row_id}/images", status_code=204)
+def delete_all_content_images(
+    row_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    with connect() as db:
+        existing = db.execute(
+            "SELECT section FROM content_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        _require_content_permission(existing["section"], user)
+        db.execute(
+            "DELETE FROM content_images WHERE content_id = ?",
+            (row_id,),
+        )
+        db.execute(
+            """
+            UPDATE content_items
+            SET image_data = NULL, image_mime = ''
+            WHERE id = ?
+            """,
+            (row_id,),
+        )
+        db.commit()
+
+
 @app.post("/api/content/{row_id}/image")
 async def upload_content_image(
     row_id: int,
@@ -953,11 +4085,10 @@ async def upload_content_image(
     if image.content_type not in allowed_types:
         raise HTTPException(status_code=415, detail="Unsupported image type")
 
-    data = await image.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
+    data, optimized_mime = _optimize_image(
+        await image.read(),
+        image.content_type or "",
+    )
 
     with connect() as db:
         existing = db.execute(
@@ -973,7 +4104,7 @@ async def upload_content_image(
             SET image_data = ?, image_mime = ?
             WHERE id = ?
             """,
-            (data, image.content_type, row_id),
+            (data, optimized_mime, row_id),
         )
         db.commit()
         row = db.execute(
@@ -1026,6 +4157,33 @@ def delete_content_image(
         db.commit()
 
 
+@app.put("/api/news/order")
+def reorder_news(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_news")),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        current_ids = {
+            int(row["id"]) for row in db.execute("SELECT id FROM news").fetchall()
+        }
+        if set(payload.item_ids) != current_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="News-Reihenfolge ist unvollständig",
+            )
+        for position, news_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE news SET sort_order = ? WHERE id = ?",
+                (position, news_id),
+            )
+        db.commit()
+
+    return list_rows("news")
+
+
 @app.get("/api/news")
 def get_news(
     _: dict[str, Any] = Depends(current_user),
@@ -1038,7 +4196,17 @@ def post_news(
     payload: NewsPayload,
     _: dict[str, Any] = Depends(require("can_news")),
 ) -> dict[str, Any]:
-    return create_row("news", payload)
+    item = create_row("news", payload)
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="news",
+            title=payload.title,
+            body=payload.text,
+            route="/news",
+        )
+        db.commit()
+    return item
 
 
 @app.put("/api/news/{row_id}")
@@ -1068,11 +4236,10 @@ async def upload_news_image(
     if image.content_type not in allowed_types:
         raise HTTPException(status_code=415, detail="Unsupported image type")
 
-    data = await image.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
+    data, optimized_mime = _optimize_image(
+        await image.read(),
+        image.content_type or "",
+    )
 
     with connect() as db:
         cursor = db.execute(
@@ -1081,7 +4248,7 @@ async def upload_news_image(
             SET image_data = ?, image_mime = ?, image_url = ''
             WHERE id = ?
             """,
-            (data, image.content_type, row_id),
+            (data, optimized_mime, row_id),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
@@ -1164,7 +4331,17 @@ def post_events(
     payload: EventPayload,
     _: dict[str, Any] = Depends(require("can_events")),
 ) -> dict[str, Any]:
-    return create_row("events", payload)
+    item = create_row("events", payload)
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="event",
+            title=f"Neuer Termin: {payload.title}",
+            body=" ".join(part for part in [payload.event_date, payload.time, payload.location] if part),
+            route="/events",
+        )
+        db.commit()
+    return item
 
 
 @app.put("/api/events/{row_id}")
@@ -1173,7 +4350,17 @@ def put_events(
     payload: EventPayload,
     _: dict[str, Any] = Depends(require("can_events")),
 ) -> dict[str, Any]:
-    return update_row("events", row_id, payload)
+    item = update_row("events", row_id, payload)
+    with connect() as db:
+        _queue_push_notification(
+            db,
+            kind="event_update",
+            title=f"Termin geändert: {payload.title}",
+            body=" ".join(part for part in [payload.event_date, payload.time, payload.location] if part),
+            route="/events",
+        )
+        db.commit()
+    return item
 
 
 @app.get("/api/events/{row_id}/registrations")
@@ -1242,10 +4429,254 @@ def delete_events(
     delete_row("events", row_id)
 
 
+@app.get("/api/member-filters")
+def get_member_filters(
+    _: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute(
+            """
+            SELECT id, label, active, sort_order
+            FROM member_filters
+            ORDER BY sort_order ASC, label COLLATE NOCASE ASC, id ASC
+            """
+        ).fetchall()
+    return [
+        {
+            "id": int(row["id"]),
+            "label": row["label"],
+            "active": bool(row["active"]),
+            "sort_order": int(row["sort_order"]),
+        }
+        for row in rows
+    ]
+
+
+@app.post("/api/member-filters")
+def post_member_filter(
+    payload: MemberFilterPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> dict[str, Any]:
+    with connect() as db:
+        sort_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM member_filters"
+        ).fetchone()[0]
+        try:
+            cursor = db.execute(
+                """
+                INSERT INTO member_filters (label, active, sort_order, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    payload.label.strip(),
+                    1 if payload.active else 0,
+                    sort_order,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            db.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="Filter existiert bereits")
+        row = db.execute(
+            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+    return {
+        "id": int(row["id"]),
+        "label": row["label"],
+        "active": bool(row["active"]),
+        "sort_order": int(row["sort_order"]),
+    }
+
+
+@app.put("/api/member-filters/order")
+def reorder_member_filters(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        ids = {int(row["id"]) for row in db.execute("SELECT id FROM member_filters")}
+        if set(payload.item_ids) != ids:
+            raise HTTPException(status_code=422, detail="Filterreihenfolge ist unvollständig")
+        for position, filter_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE member_filters SET sort_order = ? WHERE id = ?",
+                (position, filter_id),
+            )
+        db.commit()
+    return get_member_filters(_)
+
+
+@app.put("/api/member-filters/{filter_id}")
+def put_member_filter(
+    filter_id: int,
+    payload: MemberFilterPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> dict[str, Any]:
+    with connect() as db:
+        try:
+            cursor = db.execute(
+                "UPDATE member_filters SET label = ?, active = ? WHERE id = ?",
+                (payload.label.strip(), 1 if payload.active else 0, filter_id),
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Filter nicht gefunden")
+            db.commit()
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="Filter existiert bereits")
+        row = db.execute(
+            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
+            (filter_id,),
+        ).fetchone()
+    return {
+        "id": int(row["id"]),
+        "label": row["label"],
+        "active": bool(row["active"]),
+        "sort_order": int(row["sort_order"]),
+    }
+
+
+@app.delete("/api/member-filters/{filter_id}", status_code=204)
+def delete_member_filter(
+    filter_id: int,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> None:
+    with connect() as db:
+        db.execute("DELETE FROM member_filter_links WHERE filter_id = ?", (filter_id,))
+        cursor = db.execute("DELETE FROM member_filters WHERE id = ?", (filter_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Filter nicht gefunden")
+        db.commit()
+
+
+@app.put("/api/members/me")
+def put_my_member(
+    payload: MemberSelfUpdatePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    member_id = user.get("member_id")
+    if member_id is None:
+        raise HTTPException(status_code=400, detail="Benutzer ist keinem Mitglied zugeordnet")
+
+    data = payload.model_dump()
+    assignments = ", ".join(f"{column} = ?" for column in data)
+    with connect() as db:
+        cursor = db.execute(
+            f"UPDATE members SET {assignments} WHERE id = ?",
+            [*data.values(), member_id],
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ?",
+            (member_id,),
+        ).fetchone()
+    return _serialize_member(row)
+
+
+@app.post("/api/members/me/photo")
+async def upload_my_member_photo(
+    photo: UploadFile = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    member_id = user.get("member_id")
+    if member_id is None:
+        raise HTTPException(status_code=400, detail="Benutzer ist keinem Mitglied zugeordnet")
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp"}
+    if photo.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+
+    data, optimized_mime = _optimize_image(
+        await photo.read(),
+        photo.content_type or "",
+    )
+
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE members
+            SET photo_data = ?, photo_mime = ?
+            WHERE id = ?
+            """,
+            (data, optimized_mime, member_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ?",
+            (member_id,),
+        ).fetchone()
+    return _serialize_member(row)
+
+
+@app.delete("/api/members/me/photo", status_code=204)
+def delete_my_member_photo(
+    user: dict[str, Any] = Depends(current_user),
+) -> None:
+    member_id = user.get("member_id")
+    if member_id is None:
+        raise HTTPException(status_code=400, detail="Benutzer ist keinem Mitglied zugeordnet")
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE members
+            SET photo_data = NULL, photo_mime = ''
+            WHERE id = ?
+            """,
+            (member_id,),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
+        db.commit()
+
+
 @app.get("/api/members")
 def get_members(
     _: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
+    return list_rows("members")
+
+
+@app.put("/api/members/order")
+def reorder_members(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        rows = db.execute(
+            f"""
+            SELECT id
+            FROM members
+            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
+            """,
+            payload.item_ids,
+        ).fetchall()
+
+        if len(rows) != len(set(payload.item_ids)):
+            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
+
+        current_ids = {
+            row["id"] for row in db.execute("SELECT id FROM members").fetchall()
+        }
+        if set(payload.item_ids) != current_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Mitgliederreihenfolge ist unvollständig",
+            )
+
+        for position, member_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE members SET sort_order = ? WHERE id = ?",
+                (position, member_id),
+            )
+        db.commit()
+
     return list_rows("members")
 
 
@@ -1254,7 +4685,57 @@ def post_members(
     payload: MemberPayload,
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> dict[str, Any]:
-    return create_row("members", payload)
+    item = create_row("members", payload)
+    with connect() as db:
+        max_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM members WHERE id != ?",
+            (item["id"],),
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE members SET sort_order = ? WHERE id = ?",
+            (int(max_order or 0) + 1, item["id"]),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ?",
+            (item["id"],),
+        ).fetchone()
+    return _serialize_member(row)
+
+
+@app.put("/api/members/order")
+def reorder_members(
+    payload: ContentOrderPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> list[dict[str, Any]]:
+    if not payload.item_ids:
+        return []
+
+    with connect() as db:
+        rows = db.execute(
+            f"SELECT id FROM members WHERE id IN ({','.join('?' for _ in payload.item_ids)})",
+            payload.item_ids,
+        ).fetchall()
+        if len(rows) != len(set(payload.item_ids)):
+            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
+
+        all_ids = [row["id"] for row in db.execute(
+            "SELECT id FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
+        ).fetchall()]
+        if set(all_ids) != set(payload.item_ids):
+            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist unvollständig")
+
+        for position, member_id in enumerate(payload.item_ids, start=1):
+            db.execute(
+                "UPDATE members SET sort_order = ? WHERE id = ?",
+                (position, member_id),
+            )
+        db.commit()
+        ordered = db.execute(
+            "SELECT * FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
+        ).fetchall()
+
+    return [_serialize_member(row) for row in ordered]
 
 
 @app.put("/api/members/{row_id}")
@@ -1276,11 +4757,10 @@ async def upload_member_photo(
     if photo.content_type not in allowed_types:
         raise HTTPException(status_code=415, detail="Unsupported image type")
 
-    data = await photo.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    if len(data) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large")
+    data, optimized_mime = _optimize_image(
+        await photo.read(),
+        photo.content_type or "",
+    )
 
     with connect() as db:
         cursor = db.execute(
@@ -1289,7 +4769,7 @@ async def upload_member_photo(
             SET photo_data = ?, photo_mime = ?
             WHERE id = ?
             """,
-            (data, photo.content_type, row_id),
+            (data, optimized_mime, row_id),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
@@ -1345,4 +4825,7 @@ def delete_members(
     row_id: int,
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> None:
+    with connect() as db:
+        db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+        db.commit()
     delete_row("members", row_id)

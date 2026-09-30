@@ -1,3 +1,79 @@
+class ContentImage {
+  final int? id;
+  final String url;
+  final int sortOrder;
+  final String createdAt;
+  final bool legacy;
+
+  const ContentImage({
+    this.id,
+    required this.url,
+    this.sortOrder = 0,
+    this.createdAt = '',
+    this.legacy = false,
+  });
+
+  factory ContentImage.fromJson(Map<String, dynamic> json) {
+    return ContentImage(
+      id: json['id'] is int
+          ? json['id'] as int
+          : int.tryParse(json['id']?.toString() ?? ''),
+      url: json['url']?.toString() ?? '',
+      sortOrder: json['sort_order'] is int
+          ? json['sort_order'] as int
+          : int.tryParse(json['sort_order']?.toString() ?? '') ?? 0,
+      createdAt: json['created_at']?.toString() ?? '',
+      legacy: json['legacy'] == true,
+    );
+  }
+}
+
+class PollVoter {
+  final String name;
+  final int optionIndex;
+
+  const PollVoter({
+    required this.name,
+    required this.optionIndex,
+  });
+
+  factory PollVoter.fromJson(Map<String, dynamic> json) {
+    return PollVoter(
+      name: json['name']?.toString() ?? '',
+      optionIndex: json['option_index'] is int
+          ? json['option_index'] as int
+          : int.tryParse(json['option_index']?.toString() ?? '') ?? -1,
+    );
+  }
+}
+
+class PollSuggestion {
+  final String memberName;
+  final String text;
+  final int optionIndex;
+  final int voteCount;
+
+  const PollSuggestion({
+    required this.memberName,
+    required this.text,
+    required this.optionIndex,
+    required this.voteCount,
+  });
+
+  factory PollSuggestion.fromJson(Map<String, dynamic> json) {
+    return PollSuggestion(
+      memberName: json['member_name']?.toString() ?? '',
+      text: json['text']?.toString() ?? '',
+      optionIndex: json['option_index'] is int
+          ? json['option_index'] as int
+          : int.tryParse(json['option_index']?.toString() ?? '') ?? -1,
+      voteCount: json['vote_count'] is int
+          ? json['vote_count'] as int
+          : int.tryParse(json['vote_count']?.toString() ?? '') ?? 0,
+    );
+  }
+}
+
 class ContentItem {
   final int? id;
   final String section;
@@ -6,7 +82,28 @@ class ContentItem {
   final String linkUrl;
   final String imageUrl;
   final List<String> imageUrls;
+  final List<int> imageIds;
+  final List<int> imageSortOrders;
+  final List<String> imageCreatedAts;
+  final List<ContentImage> mediaImages;
   final String createdAt;
+  final int sortOrder;
+  final int? snapshotId;
+  final bool isSnapshot;
+  final bool canDelete;
+  final String expiresAt;
+  final String documentUrl;
+  final String documentName;
+  final String documentMime;
+  final List<String> pollOptions;
+  final bool pollAllowSuggestions;
+  final List<int> pollCounts;
+  final int pollTotalVotes;
+  final int? pollMyVote;
+  final int? pollMySuggestionIndex;
+  final String pollMySuggestionText;
+  final List<PollVoter> pollVoters;
+  final List<PollSuggestion> pollSuggestions;
 
   const ContentItem({
     this.id,
@@ -16,10 +113,55 @@ class ContentItem {
     this.linkUrl = '',
     this.imageUrl = '',
     this.imageUrls = const [],
+    this.imageIds = const [],
+    this.imageSortOrders = const [],
+    this.imageCreatedAts = const [],
+    this.mediaImages = const [],
     this.createdAt = '',
+    this.sortOrder = 0,
+    this.snapshotId,
+    this.isSnapshot = false,
+    this.canDelete = false,
+    this.expiresAt = '',
+    this.documentUrl = '',
+    this.documentName = '',
+    this.documentMime = '',
+    this.pollOptions = const [],
+    this.pollAllowSuggestions = false,
+    this.pollCounts = const [],
+    this.pollTotalVotes = 0,
+    this.pollMyVote,
+    this.pollMySuggestionIndex,
+    this.pollMySuggestionText = '',
+    this.pollVoters = const [],
+    this.pollSuggestions = const [],
   });
 
   factory ContentItem.fromJson(Map<String, dynamic> json) {
+    final structuredImages = (json['images'] as List<dynamic>? ?? const [])
+        .map((value) => ContentImage.fromJson(
+              Map<String, dynamic>.from(value as Map),
+            ))
+        .where((image) => image.url.trim().isNotEmpty)
+        .toList();
+
+    final legacyUrls = (json['image_urls'] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .where((value) => value.trim().isNotEmpty)
+        .toList();
+
+    final mediaImages = structuredImages.isNotEmpty
+        ? structuredImages
+        : List<ContentImage>.generate(
+            legacyUrls.length,
+            (index) => ContentImage(
+              url: legacyUrls[index],
+              sortOrder: index + 1,
+              createdAt: json['created_at']?.toString() ?? '',
+              legacy: true,
+            ),
+          );
+
     return ContentItem(
       id: json['id'] as int?,
       section: json['section']?.toString() ?? '',
@@ -27,10 +169,50 @@ class ContentItem {
       text: json['text']?.toString() ?? '',
       linkUrl: json['link_url']?.toString() ?? '',
       imageUrl: json['image_url']?.toString() ?? '',
-      imageUrls: (json['image_urls'] as List<dynamic>? ?? const [])
+      imageUrls: mediaImages.map((image) => image.url).toList(),
+      imageIds: mediaImages
+          .map((image) => image.id)
+          .whereType<int>()
+          .toList(),
+      imageSortOrders:
+          mediaImages.map((image) => image.sortOrder).toList(),
+      imageCreatedAts:
+          mediaImages.map((image) => image.createdAt).toList(),
+      mediaImages: mediaImages,
+      createdAt: json['created_at']?.toString() ?? '',
+      sortOrder: json['sort_order'] as int? ?? 0,
+      snapshotId: json['snapshot_id'] as int?,
+      isSnapshot: json['is_snapshot'] == true,
+      canDelete: json['can_delete'] == true,
+      expiresAt: json['expires_at']?.toString() ?? '',
+      documentUrl: json['document_url']?.toString() ?? '',
+      documentName: json['document_name']?.toString() ?? '',
+      documentMime: json['document_mime']?.toString() ?? '',
+      pollOptions: (json['poll_options'] as List<dynamic>? ?? const [])
           .map((value) => value.toString())
           .toList(),
-      createdAt: json['created_at']?.toString() ?? '',
+      pollAllowSuggestions: json['poll_allow_suggestions'] == true,
+      pollCounts: (json['poll_counts'] as List<dynamic>? ?? const [])
+          .map((value) => value is int ? value : int.tryParse(value.toString()) ?? 0)
+          .toList(),
+      pollTotalVotes: json['poll_total_votes'] as int? ?? 0,
+      pollMyVote: json['poll_my_vote'] as int?,
+      pollMySuggestionIndex: json['poll_my_suggestion_index'] as int?,
+      pollMySuggestionText: json['poll_my_suggestion_text']?.toString() ?? '',
+      pollVoters: (json['poll_voters'] as List<dynamic>? ?? const [])
+          .map((value) => PollVoter.fromJson(
+                Map<String, dynamic>.from(value as Map),
+              ))
+          .where((voter) => voter.name.isNotEmpty && voter.optionIndex >= 0)
+          .toList(),
+      pollSuggestions:
+          (json['poll_suggestions'] as List<dynamic>? ?? const [])
+              .map((value) => PollSuggestion.fromJson(
+                    Map<String, dynamic>.from(value as Map),
+                  ))
+              .where((suggestion) =>
+                  suggestion.text.isNotEmpty && suggestion.optionIndex >= 0)
+              .toList(),
     );
   }
 }
@@ -41,6 +223,7 @@ class NewsItem {
   final String title;
   final String text;
   final String createdAt;
+  final int sortOrder;
   final String imageAsset;
   final String imageUrl;
 
@@ -50,6 +233,7 @@ class NewsItem {
     this.text, {
     this.id,
     required this.createdAt,
+    this.sortOrder = 0,
     this.imageAsset = '',
     this.imageUrl = '',
   });
@@ -61,6 +245,7 @@ class NewsItem {
       json['text']?.toString() ?? '',
       id: json['id'] as int?,
       createdAt: json['created_at']?.toString() ?? '',
+      sortOrder: json['sort_order'] as int? ?? 0,
       imageUrl: json['image_url']?.toString() ?? '',
     );
   }
@@ -112,11 +297,40 @@ class EventItem {
   }
 }
 
+class MemberFilterItem {
+  final int id;
+  final String label;
+  final bool active;
+  final int sortOrder;
+
+  const MemberFilterItem({
+    required this.id,
+    required this.label,
+    required this.active,
+    required this.sortOrder,
+  });
+
+  factory MemberFilterItem.fromJson(Map<String, dynamic> json) {
+    return MemberFilterItem(
+      id: json['id'] as int? ?? 0,
+      label: json['label']?.toString() ?? '',
+      active: json['active'] == true,
+      sortOrder: json['sort_order'] as int? ?? 0,
+    );
+  }
+}
+
 class MemberItem {
   final int? id;
   final String name;
   final String role;
   final String since;
+  final String birthDate;
+  final String status;
+  final String memberGroup;
+  final String engagement;
+  final int sortOrder;
+  final List<int> filterIds;
   final String partnerName;
   final String phoneMobile;
   final String phonePrivate;
@@ -133,6 +347,12 @@ class MemberItem {
     this.role,
     this.since, {
     this.id,
+    this.birthDate = '',
+    this.status = 'Aktiv',
+    this.memberGroup = '',
+    this.engagement = '',
+    this.sortOrder = 0,
+    this.filterIds = const [],
     this.partnerName = '',
     this.phoneMobile = '',
     this.phonePrivate = '',
@@ -152,6 +372,15 @@ class MemberItem {
       json['role']?.toString() ?? 'Präsident',
       json['since']?.toString() ?? '',
       id: json['id'] as int?,
+      birthDate: json['birth_date']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'Aktiv',
+      memberGroup: json['member_group']?.toString() ?? '',
+      engagement: json['engagement']?.toString() ?? '',
+      sortOrder: json['sort_order'] as int? ?? 0,
+      filterIds: (json['filter_ids'] as List<dynamic>? ?? const [])
+          .map((value) => value is int ? value : int.tryParse(value.toString()) ?? 0)
+          .where((value) => value > 0)
+          .toList(),
       partnerName: json['partner_name']?.toString() ?? '',
       phoneMobile:
           json['phone_mobile']?.toString().isNotEmpty == true
@@ -235,3 +464,121 @@ const initialMembers = [
   MemberItem('Thomas Steiner', 'Präsident', 'seit 2019'),
   MemberItem('Patrick Felder', 'Präsident', 'seit 2020'),
 ];
+
+
+extension ContentImageOfflineCacheJson on ContentImage {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'url': url,
+        'sort_order': sortOrder,
+        'created_at': createdAt,
+        'legacy': legacy,
+      };
+}
+
+extension PollVoterOfflineCacheJson on PollVoter {
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'option_index': optionIndex,
+      };
+}
+
+extension PollSuggestionOfflineCacheJson on PollSuggestion {
+  Map<String, dynamic> toJson() => {
+        'member_name': memberName,
+        'text': text,
+        'option_index': optionIndex,
+        'vote_count': voteCount,
+      };
+}
+
+extension ContentItemOfflineCacheJson on ContentItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'section': section,
+        'title': title,
+        'text': text,
+        'link_url': linkUrl,
+        'image_url': imageUrl,
+        'images': mediaImages.map((image) => image.toJson()).toList(),
+        'created_at': createdAt,
+        'sort_order': sortOrder,
+        'snapshot_id': snapshotId,
+        'is_snapshot': isSnapshot,
+        'can_delete': canDelete,
+        'expires_at': expiresAt,
+        'document_url': documentUrl,
+        'document_name': documentName,
+        'document_mime': documentMime,
+        'poll_options': pollOptions,
+        'poll_allow_suggestions': pollAllowSuggestions,
+        'poll_counts': pollCounts,
+        'poll_total_votes': pollTotalVotes,
+        'poll_my_vote': pollMyVote,
+        'poll_my_suggestion_index': pollMySuggestionIndex,
+        'poll_my_suggestion_text': pollMySuggestionText,
+        'poll_voters': pollVoters.map((voter) => voter.toJson()).toList(),
+        'poll_suggestions':
+            pollSuggestions.map((suggestion) => suggestion.toJson()).toList(),
+      };
+}
+
+extension NewsItemOfflineCacheJson on NewsItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'date': date,
+        'title': title,
+        'text': text,
+        'created_at': createdAt,
+        'sort_order': sortOrder,
+        'image_url': imageUrl,
+      };
+}
+
+extension EventItemOfflineCacheJson on EventItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'event_date': eventDate,
+        'day': day,
+        'month': month,
+        'title': title,
+        'location': location,
+        'time': time,
+        'registration_count': registrationCount,
+        'registered_by_me': registeredByMe,
+      };
+}
+
+extension MemberFilterItemOfflineCacheJson on MemberFilterItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'label': label,
+        'active': active,
+        'sort_order': sortOrder,
+      };
+}
+
+extension MemberItemOfflineCacheJson on MemberItem {
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'role': role,
+        'since': since,
+        'birth_date': birthDate,
+        'status': status,
+        'member_group': memberGroup,
+        'engagement': engagement,
+        'sort_order': sortOrder,
+        'filter_ids': filterIds,
+        'partner_name': partnerName,
+        'phone_mobile': phoneMobile,
+        'phone_private': phonePrivate,
+        'phone_work': phoneWork,
+        'email': email,
+        'address': address,
+        'occupation': occupation,
+        'employer': employer,
+        'employer_url': employerUrl,
+        'photo_url': photoUrl,
+      };
+}

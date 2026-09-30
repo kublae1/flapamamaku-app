@@ -1,352 +1,272 @@
 import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
+import '../widgets/offline_network_image.dart';
 import '../models/app_data.dart';
-import '../widgets/section_title.dart';
-import 'year_motto_screen.dart';
-import 'remote_content_screen.dart';
+import '../theme/flap_brand.dart';
+import 'flap_image_viewer_screen.dart';
+import 'members_screen.dart';
+import 'more_screen.dart';
 import 'content_detail_screens.dart';
 
 class StartScreen extends StatelessWidget {
   const StartScreen({super.key});
 
-  Widget? _newsImage(NewsItem item, Map<String, String> headers) {
-    if (item.imageUrl.isNotEmpty) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Image.network(
-          item.imageUrl,
-          headers: headers,
-          width: double.infinity,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-        ),
-      );
-    }
-
-    if (item.imageAsset.isNotEmpty) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Image.asset(
-          item.imageAsset,
-          width: double.infinity,
-          fit: BoxFit.cover,
-        ),
-      );
-    }
-
-    return null;
+  ContentItem? _latestContent(AppStore store, String section) {
+    final items = List<ContentItem>.from(store.contentFor(section));
+    if (items.isEmpty) return null;
+    items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return items.first;
   }
 
-  List<String> _sujetImages(AppStore store) {
-    final images = <String>[];
-    for (final item in store.contentFor('sujet')) {
-      if (item.imageUrls.isNotEmpty) {
-        images.addAll(item.imageUrls.where((url) => url.trim().isNotEmpty));
-      } else if (item.imageUrl.trim().isNotEmpty) {
-        images.add(item.imageUrl);
+  String _contentImage(ContentItem? item) {
+    if (item == null) return '';
+    if (item.imageUrls.isNotEmpty) {
+      for (final url in item.imageUrls) {
+        if (url.trim().isNotEmpty) return url.trim();
       }
     }
-    return images;
+    return item.imageUrl.trim();
   }
 
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
-    final latestNewsImage = store.news.isEmpty
-        ? null
-        : _newsImage(store.news.first, store.api.authHeaders);
-    final sujetImages = _sujetImages(store);
+    final hero = _latestContent(store, 'hero');
+    final heroImage = _contentImage(hero);
+    final heroTitle = hero == null || hero.title.trim().isEmpty
+        ? store.appName
+        : hero.title.trim();
+    const fallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
+    final latestNews = store.news.take(3).toList();
 
-    return RefreshIndicator(
-      onRefresh: store.refreshFromServer,
-      child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 285,
-            pinned: true,
-            backgroundColor: const Color(0xFF8A101B),
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
+    return Scaffold(
+      backgroundColor: FlapBrand.charcoal,
+      body: RefreshIndicator(
+        onRefresh: store.refreshFromServer,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          children: [
+            Container(
+              color: const Color(0xFF061018),
+              padding: const EdgeInsets.fromLTRB(14, 46, 14, 12),
+              child: Row(
                 children: [
-                  Image.asset(
-                    'assets/images/hero_fireworks.jpg',
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.cover,
+                  IconButton(
+                    tooltip: 'Mehr',
+                    color: Colors.white,
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const MoreScreen()),
+                    ),
+                    icon: const Icon(Icons.menu_rounded, size: 28),
+                  ),
+                  Expanded(
+                    child: Text(
+                      store.appName,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: store.themeColor,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Mitglieder',
+                    color: Colors.white,
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const MembersScreen()),
+                    ),
+                    icon: const Icon(Icons.person_outline_rounded, size: 28),
                   ),
                 ],
               ),
             ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-            sliver: SliverList.list(
-              children: [
-                InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const YearMottoScreen()),
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => FlapImageViewerScreen(
+                    title: heroTitle,
+                    imageUrl: heroImage,
+                    imageAsset: fallbackHero,
                   ),
-                  child: sujetImages.isEmpty
-                      ? Card(
-                          margin: EdgeInsets.zero,
-                          child: Padding(
-                            padding: const EdgeInsets.all(18),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.auto_awesome_outlined,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Sujet nächstes Jahr',
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Noch keine Sujet-Bilder hinterlegt.',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Icon(Icons.chevron_right),
-                              ],
-                            ),
-                          ),
-                        )
-                      : SujetSlider(
-                          images: sujetImages,
-                          headers: store.api.authHeaders,
-                        ),
                 ),
-                const SizedBox(height: 22),
-                const SectionTitle('Aktuelle News', action: 'Alle'),
-                const SizedBox(height: 8),
-                if (store.news.isNotEmpty)
-                  Card(
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => NewsDetailScreen(
-                            item: store.news.first,
-                          ),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (latestNewsImage != null) latestNewsImage,
-                          Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  store.news.first.date,
-                                  style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  store.news.first.title,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  store.news.first.text,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
+              ),
+              child: Stack(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    height: 480,
+                    child: heroImage.isNotEmpty
+                        ? OfflineNetworkImage(
+                            heroImage,
+                            headers: store.api.authHeaders,
+                            fit: BoxFit.contain,
+                            alignment: Alignment.center,
+                            errorBuilder: (_, __, ___) => Image.asset(
+                              fallbackHero,
+                              fit: BoxFit.contain,
+                              alignment: Alignment.center,
                             ),
+                          )
+                        : Image.asset(
+                            fallbackHero,
+                            fit: BoxFit.contain,
+                            alignment: Alignment.center,
                           ),
-                        ],
+                  ),
+                  Positioned(
+                    right: 14,
+                    bottom: 14,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(
+                        color: Color(0xB8000000),
+                        shape: BoxShape.circle,
                       ),
-                    ),
-                  )
-                else
-                  const Card(
-                    child: ListTile(
-                      title: Text('Keine News vorhanden'),
+                      child: const Icon(
+                        Icons.zoom_in_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
                     ),
                   ),
-                const SizedBox(height: 20),
-                const SectionTitle('Nächste Termine', action: 'Alle'),
-                const SizedBox(height: 8),
-                ...store.events.take(2).map(
-                  (e) => Card(
-                    child: ListTile(
-                      leading: SizedBox(
-                        width: 48,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              e.day,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.article_rounded, color: FlapBrand.gold),
+                      SizedBox(width: 8),
+                      Text(
+                        'News',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (latestNews.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF191B1E),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0x18FFFFFF)),
+                      ),
+                      child: const Text(
+                        'Noch keine News vorhanden.',
+                        style: TextStyle(color: Colors.white60),
+                      ),
+                    )
+                  else
+                    ...latestNews.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Material(
+                          color: const Color(0xFF191B1E),
+                          borderRadius: BorderRadius.circular(16),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => NewsDetailScreen(item: item),
                               ),
                             ),
-                            Text(e.month),
-                          ],
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (item.imageUrl.isNotEmpty || item.imageAsset.isNotEmpty)
+                                  SizedBox(
+                                    width: 108,
+                                    height: 108,
+                                    child: item.imageUrl.isNotEmpty
+                                        ? OfflineNetworkImage(
+                                            item.imageUrl,
+                                            headers: store.api.authHeaders,
+                                            fit: BoxFit.contain,
+                                            errorBuilder: (_, __, ___) =>
+                                                const ColoredBox(
+                                              color: Color(0xFF24272B),
+                                            ),
+                                          )
+                                        : Image.asset(
+                                            item.imageAsset,
+                                            fit: BoxFit.contain,
+                                          ),
+                                  ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.date,
+                                          style: const TextStyle(
+                                            color: FlapBrand.gold,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          item.title,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                        if (item.text.trim().isNotEmpty) ...[
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            item.text,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white60,
+                                              height: 1.25,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 39, right: 8),
+                                  child: Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Colors.white38,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                      title: Text(e.title),
-                      subtitle: Text('${e.location} · ${e.time}'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => EventDetailScreen(event: e),
-                        ),
-                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Card(
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.photo_library_outlined),
-                    ),
-                    title: const Text(
-                      'Vergangene Sujet',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: const Text(
-                      'Frühere Sujets, Mottos und Erinnerungen',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const RemoteContentScreen(
-                          section: 'archive',
-                          title: 'Vergangene Sujet',
-                          emptyText:
-                              'Noch keine vergangenen Sujets hinterlegt.',
-                          icon: Icons.history,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class SujetSlider extends StatefulWidget {
-  final List<String> images;
-  final Map<String, String> headers;
-
-  const SujetSlider({
-    required this.images,
-    required this.headers,
-    super.key,
-  });
-
-  @override
-  State<SujetSlider> createState() => _SujetSliderState();
-}
-
-class _SujetSliderState extends State<SujetSlider> {
-  late final PageController _controller;
-  int _page = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = PageController();
-  }
-
-  @override
-  void didUpdateWidget(covariant SujetSlider oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (_page >= widget.images.length) {
-      _page = 0;
-      if (_controller.hasClients) {
-        _controller.jumpToPage(0);
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
-      child: Stack(
-        alignment: Alignment.bottomCenter,
-        children: [
-          AspectRatio(
-            aspectRatio: 16 / 10,
-            child: PageView.builder(
-              controller: _controller,
-              itemCount: widget.images.length,
-              onPageChanged: (value) => setState(() => _page = value),
-              itemBuilder: (_, index) => Image.network(
-                widget.images[index],
-                headers: widget.headers,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                errorBuilder: (_, __, ___) => Container(
-                  alignment: Alignment.center,
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: const Icon(Icons.broken_image_outlined, size: 48),
-                ),
+                ],
               ),
             ),
-          ),
-          if (widget.images.length > 1)
-            Positioned(
-              bottom: 10,
-              child: Row(
-                children: List.generate(
-                  widget.images.length,
-                  (index) => AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    width: index == _page ? 18 : 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      color:
-                          index == _page ? Colors.white : Colors.white60,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
