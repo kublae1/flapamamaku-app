@@ -93,6 +93,29 @@ class ApiService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  Future<List<Map<String, dynamic>>> fetchAccessibleClubs() async {
+    final response = await http
+        .get(_uri('/api/clubs/accessible'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final values = jsonDecode(response.body) as List<dynamic>;
+    return values
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> switchClub(int clubId) async {
+    final response = await http
+        .post(
+          _uri('/api/auth/club'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'club_id': clubId}),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   Future<void> logout() async {
     if (!hasToken) return;
     final response = await http
@@ -135,7 +158,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> fetchAppConfig() async {
     final response = await http
-        .get(_uri('/api/app-config'))
+        .get(_uri('/api/app-config'), headers: authHeaders)
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final json = jsonDecode(response.body) as Map<String, dynamic>;
