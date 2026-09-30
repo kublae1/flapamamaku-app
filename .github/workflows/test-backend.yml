@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7, feature/multi-tenant-package8, feature/multi-tenant-package9, feature/multi-tenant-package10 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7, feature/multi-tenant-package8, feature/multi-tenant-package9, feature/multi-tenant-package10, feature/white-label-onboarding-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -1103,6 +1103,37 @@ jobs:
           rm -f /tmp/flapamamaku-package10-app-behavior.db
           rm -rf /tmp/flapamamaku-package10-backups
           PYTHONPATH=. python tests/test_multiclub_app_behavior.py
+
+      - name: Test white-label club onboarding UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          admin_html = Path("static/admin.html").read_text(encoding="utf-8")
+          required = (
+              'id="club-create-open"',
+              'id="club-create-card"',
+              'id="club-create-form"',
+              'id="club-create-features"',
+              'name="admin_username"',
+              'name="admin_password"',
+              'api("/api/clubs"',
+              'api("/api/auth/club"',
+              'api("/api/app-config/features"',
+              'api("/api/app-config/logo"',
+              'api("/api/users"',
+              '"role_key": "admin"',
+              'Verein ist einsatzbereit.',
+          )
+          for marker in required:
+              assert marker in admin_html, marker
+
+          assert admin_html.index('api("/api/clubs"') < admin_html.index('api("/api/auth/club"')
+          assert admin_html.index('api("/api/auth/club"') < admin_html.index('api("/api/app-config/features"')
+          assert admin_html.index('api("/api/app-config/features"') < admin_html.index('api("/api/users"')
+
+          print("white-label club onboarding UI ok")
+          PY
 
       - name: Test backup and restore
         env:
