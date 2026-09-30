@@ -1109,28 +1109,6 @@ def init_db() -> None:
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_user_clubs_club_id ON user_clubs(club_id)"
         )
-        membership_now = datetime.now(timezone.utc).isoformat()
-        db.execute(
-            """
-            INSERT OR IGNORE INTO user_clubs (
-                user_id, club_id, role, active, created_at, updated_at
-            )
-            SELECT
-                u.id,
-                1,
-                CASE
-                    WHEN u.role_key = 'admin' OR u.can_manage_users = 1
-                    THEN 'club_admin'
-                    ELSE 'member'
-                END,
-                u.active,
-                ?,
-                ?
-            FROM users u
-            """,
-            (membership_now, membership_now),
-        )
-
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS event_registrations (
@@ -1254,6 +1232,28 @@ def init_db() -> None:
                     legacy_user["id"],
                 ),
             )
+
+        membership_now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT OR IGNORE INTO user_clubs (
+                user_id, club_id, role, active, created_at, updated_at
+            )
+            SELECT
+                u.id,
+                1,
+                CASE
+                    WHEN u.role_key = 'admin' OR u.can_manage_users = 1
+                    THEN 'club_admin'
+                    ELSE 'member'
+                END,
+                u.active,
+                ?,
+                ?
+            FROM users u
+            """,
+            (membership_now, membership_now),
+        )
 
         _ensure_column(
             db,
