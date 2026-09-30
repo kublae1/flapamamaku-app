@@ -5575,15 +5575,15 @@ def put_my_member(
     assignments = ", ".join(f"{column} = ?" for column in data)
     with connect() as db:
         cursor = db.execute(
-            f"UPDATE members SET {assignments} WHERE id = ?",
-            [*data.values(), member_id],
+            f"UPDATE members SET {assignments} WHERE id = ? AND club_id = ?",
+            [*data.values(), member_id, _active_club_id(db)],
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
         db.commit()
         row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (member_id,),
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (member_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_member(row)
 
@@ -5611,9 +5611,9 @@ async def upload_my_member_photo(
             """
             UPDATE members
             SET photo_data = ?, photo_mime = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, member_id),
+            (data, optimized_mime, member_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
@@ -5637,9 +5637,9 @@ def delete_my_member_photo(
             """
             UPDATE members
             SET photo_data = NULL, photo_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (member_id,),
+            (member_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
