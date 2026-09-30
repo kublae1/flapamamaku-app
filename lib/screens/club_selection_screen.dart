@@ -102,7 +102,7 @@ class _ClubCard extends StatelessWidget {
     final match = RegExp(r'^#([0-9A-Fa-f]{6})$').firstMatch(colorText);
     final color = match == null
         ? Theme.of(context).colorScheme.primary
-        : Color(int.parse('FF' + match.group(1)!, radix: 16));
+        : Color(int.parse('FF${match.group(1)!}', radix: 16));
 
     return Material(
       color: const Color(0xFF191B1E),
