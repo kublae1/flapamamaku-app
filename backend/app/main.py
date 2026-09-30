@@ -3409,15 +3409,16 @@ def _create_poll(
             """
             SELECT COALESCE(MAX(sort_order), 0)
             FROM content_items
-            WHERE section = 'polls'
-            """
+            WHERE section = 'polls' AND club_id = ?
+            """,
+            (_active_club_id(db),),
         ).fetchone()[0]
         cursor = db.execute(
             """
             INSERT INTO content_items (
                 section, title, text, link_url, poll_options,
-                poll_allow_suggestions, sort_order, created_at
-            ) VALUES ('polls', ?, ?, '', ?, ?, ?, ?)
+                poll_allow_suggestions, sort_order, created_at, club_id
+            ) VALUES ('polls', ?, ?, '', ?, ?, ?, ?, ?)
             """,
             (
                 payload.title,
@@ -3459,18 +3460,15 @@ def _update_poll(
         allow_suggestions=payload.allow_suggestions,
     )
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if existing is None:
+        existing = _require_active_club_row(db, "content_items", poll_id)
+        if existing["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
         db.execute(
             """
             UPDATE content_items
             SET title = ?, text = ?, link_url = '',
                 poll_options = ?, poll_allow_suggestions = ?
-            WHERE id = ? AND section = 'polls'
+            WHERE id = ? AND section = 'polls' AND club_id = ?
             """,
             (
                 payload.title,
@@ -3478,13 +3476,11 @@ def _update_poll(
                 json.dumps(options, ensure_ascii=False),
                 int(payload.allow_suggestions),
                 poll_id,
+                _active_club_id(db),
             ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (poll_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", poll_id)
     return _serialize_content(row, user["id"])
 
 
@@ -3520,9 +3516,10 @@ def get_polls(
             """
             SELECT *
             FROM content_items
-            WHERE section = 'polls'
+            WHERE section = 'polls' AND club_id = ?
             ORDER BY sort_order ASC, id ASC
-            """
+            """,
+            (_active_club_id(db),),
         ).fetchall()
     return [_serialize_content(row, user["id"]) for row in rows]
 
@@ -3695,6 +3692,7 @@ def post_content(
                 if payload.section == "polls" else 0,
                 max_order + 1,
                 now,
+                _active_club_id(db),
             ),
         )
         rule = CONTENT_PUSH_RULES.get(payload.section)
@@ -3723,19 +3721,14 @@ def put_content(
 ) -> dict[str, Any]:
     _require_content_permission(payload.section, user)
     with connect() as db:
-        current = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if current is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        current = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(current["section"], user)
         db.execute(
             """
             UPDATE content_items
             SET section = ?, title = ?, text = ?, link_url = ?,
                 poll_options = ?, poll_allow_suggestions = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
             (
                 payload.section,
@@ -3749,13 +3742,11 @@ def put_content(
                 int(payload.poll_allow_suggestions)
                 if payload.section == "polls" else 0,
                 row_id,
+                _active_club_id(db),
             ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -3765,17 +3756,13 @@ def delete_content(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        row = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        row = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(row["section"], user)
-        db.execute("DELETE FROM content_images WHERE content_id = ?", (row_id,))
-        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (row_id,))
-        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (row_id,))
-        db.execute("DELETE FROM content_items WHERE id = ?", (row_id,))
+        club_id = _active_club_id(db)
+        db.execute("DELETE FROM content_images WHERE content_id = ? AND club_id = ?", (row_id, club_id))
+        db.execute("DELETE FROM poll_votes WHERE poll_id = ? AND club_id = ?", (row_id, club_id))
+        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ? AND club_id = ?", (row_id, club_id))
+        db.execute("DELETE FROM content_items WHERE id = ? AND club_id = ?", (row_id, club_id))
         db.commit()
 
 
