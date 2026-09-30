@@ -630,6 +630,7 @@ def _backup_info(path: Path) -> dict[str, Any]:
     stat = path.stat()
     return {
         "name": path.name,
+        "instance_id": INSTANCE_ID,
         "size_bytes": stat.st_size,
         "created_at": datetime.fromtimestamp(
             stat.st_mtime,
@@ -2559,9 +2560,12 @@ def download_backup(
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> FileResponse:
     candidate = BACKUP_DIR / Path(filename).name
+    valid_prefix = candidate.name.startswith(f"{INSTANCE_ID}-")
+    if INSTANCE_ID == "flapamamaku":
+        valid_prefix = valid_prefix or candidate.name.startswith("flapamamaku-")
     if (
         candidate.parent != BACKUP_DIR
-        or not candidate.name.startswith("flapamamaku-")
+        or not valid_prefix
         or candidate.suffix != ".db"
         or not candidate.is_file()
     ):
