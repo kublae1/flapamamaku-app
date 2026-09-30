@@ -174,6 +174,9 @@ FLAPAMAMAKU bleibt das Standardprofil und damit die Referenzinstanz.
 
 Beim manuellen Android-Build kann über den Workflow-Eingabewert `profile` ein anderes Profil ausgewählt werden. Dadurch kann später für Verein 2 bis Verein 10 jeweils ein eigener Build erzeugt werden, ohne die FLAPAMAMAKU-Konfiguration umzuschreiben.
 
+Alle Profile werden zusätzlich durch den Workflow
+`.github/workflows/validate-white-label-profiles.yml` gemeinsam geprüft. Dabei werden unter anderem doppelte `instance_id`, doppelte öffentliche API-Adressen, ungültige HTTPS-Adressen, fehlende Pflichtfelder und aktuell mehr als 10 Testprofile blockiert.
+
 Wichtig: Das Build-Profil ersetzt **nicht** die autonome Vereinsverwaltung. Laufende Inhalte und Vereinsdaten wie Mitglieder, Termine, News, Bilder, Dokumente, Module, Farben, Kontaktdaten, Benutzer und Berechtigungen werden weiterhin über die jeweilige Admin-Oberfläche und das jeweilige Backend verwaltet.
 
 Ein Verein benötigt dafür keinen eigenen Docker-Server. Das gleiche Profil-/Instanzmodell kann sowohl auf einem eigenen Docker-Host als auch auf einer zentral betriebenen Cloud-Infrastruktur verwendet werden.
