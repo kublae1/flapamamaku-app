@@ -1,32 +1,30 @@
-# Öffentlicher Betrieb / White Label
+# Öffentlicher Betrieb / Multi-Verein / White Label
 
-Die öffentliche Bereitstellung ist bewusst White-Label-fähig aufgebaut. FLAPAMAMAKU ist die erste Instanz; weitere Vereine verwenden dieselbe Codebasis mit eigener Domain und eigener Konfiguration.
+Der Standardbetrieb ist die gemeinsame Multi-Vereins-Plattform:
 
-## Öffentliche Adresse je Verein
+- **eine Codebasis**
+- **ein Backend**
+- **eine gemeinsame Datenbank**
+- saubere Mandantentrennung über `club_id`
+- FLAPAMAMAKU bleibt Verein / Tenant 1
+- weitere Vereine werden über die Super-Admin-Oberfläche angelegt
+- Benutzer mit einem Verein öffnen diesen direkt; Benutzer mit mehreren Vereinen können wechseln
+- Super-Admins können zwischen Vereinen wechseln
 
-Jede Instanz erhält eine eigene HTTPS-Adresse, zum Beispiel:
+Separate Codekopien oder ein eigener Server pro Verein sind **nicht** die Standardlösung.
+
+## Öffentliche Adresse
+
+Im zentralen Multi-Tenant-Betrieb verwenden alle Vereine dieselbe öffentliche HTTPS-Adresse des gemeinsamen Backends, zum Beispiel:
 
 ```
-https://app.verein-a.ch
-https://app.verein-b.ch
+https://vereinsplattform.example.ch
 ```
 
-Für Builds und externe Prüfungen wird bevorzugt die Repository-Variable
-`WHITE_LABEL_API_BASE_URL` verwendet.
-
-Für die bestehende FLAPAMAMAKU-Instanz bleibt
+Für die bestehende FLAPAMAMAKU-Installation bleibt
 `FLAPAMAMAKU_API_BASE_URL` als kompatibler Fallback erhalten.
 
-Zusätzlich wird die erwartete Vereinsinstanz geprüft. Dafür kann
-`WHITE_LABEL_INSTANCE_ID` gesetzt werden. Für FLAPAMAMAKU bleibt
-`FLAPAMAMAKU_INSTANCE_ID` als Fallback erhalten; ohne Variable wird
-`flapamamaku` erwartet.
-
-Ohne gesetzte Variable verwendet dieses Repository weiterhin:
-
-```
-https://flapamamaku.kublaecloud.synology.me
-```
+Build-Profile unter `config/white-label/` bleiben für Branding- und optionale dedizierte Builds bestehen. Sie ändern jedoch nichts an der serverseitigen `club_id`-Mandantentrennung.
 
 ## Zielarchitektur
 
@@ -35,30 +33,39 @@ Android / iPhone / Browser
           |
         HTTPS
           |
-  Reverse Proxy / TLS
+ Reverse Proxy / Plattform-TLS
           |
-   Backend-Container
+   gemeinsamer Backend-Container
           |
- Vereins-Datenbank
+ gemeinsame Datenbank
+          |
+       club_id
+   /      |      \
+Verein 1 Verein 2 ... Verein 10
 ```
 
-Die Datenbank wird niemals direkt veröffentlicht. Öffentlich erreichbar ist nur die HTTPS-Adresse des jeweiligen Backends.
+Die Datenbank wird niemals direkt veröffentlicht. Öffentlich erreichbar ist nur die HTTPS-Adresse des gemeinsamen Backends.
 
 ## Produktionsbetrieb
 
-Für jede Vereinsinstanz gelten dieselben Anforderungen:
+Für den zentralen Multi-Tenant-Betrieb gelten:
 
-- eigener HTTPS-Hostname
+- eine öffentliche HTTPS-Adresse
 - gültiges TLS-Zertifikat
-- Backend nur hinter Reverse Proxy erreichbar
+- Backend ausschließlich hinter HTTPS / Reverse Proxy
 - `FLAPAMAMAKU_ENV=production`
-- eindeutige `FLAPAMAMAKU_INSTANCE_ID` pro Vereinsinstanz
-- `FLAPAMAMAKU_ALLOWED_ORIGINS` auf die konkrete HTTPS-Adresse der Instanz beschränken
-- eigene persistente Daten
-- eigenes Backup/Restore
-- eigene Benutzer und Berechtigungen
+- `FLAPAMAMAKU_ALLOWED_ORIGINS` auf die produktive HTTPS-Adresse beschränken
+- persistente Daten unter `/data`
+- regelmäßige Backups und kontrollierte Restore-Tests
+- Vereinsdaten ausschließlich über `club_id` trennen
+- keine direkten Datenbankzugriffe aus Android/iOS
+- Benutzer, Rollen, Module und Abrechnung bleiben vereinsbezogen
 
-Die Namen der bestehenden Backend-Umgebungsvariablen bleiben vorerst kompatibel, damit die laufende FLAPAMAMAKU-Installation nicht umgebaut werden muss.
+Die vorhandenen Umgebungsvariablen bleiben kompatibel, damit die bestehende FLAPAMAMAKU-Installation nicht umgebaut werden muss.
+
+### Optionaler dedizierter Betrieb
+
+Die bestehende Profil-/Instanzlogik kann weiterhin für einen bewusst separat betriebenen White-Label-Backend-Host genutzt werden. Das ist eine optionale Sonderform und nicht die Standardarchitektur für die zentrale Vereinsplattform.
 
 ## GitHub Public HTTPS Smoke Test
 
@@ -179,4 +186,31 @@ Alle Profile werden zusätzlich durch den Workflow
 
 Wichtig: Das Build-Profil ersetzt **nicht** die autonome Vereinsverwaltung. Laufende Inhalte und Vereinsdaten wie Mitglieder, Termine, News, Bilder, Dokumente, Module, Farben, Kontaktdaten, Benutzer und Berechtigungen werden weiterhin über die jeweilige Admin-Oberfläche und das jeweilige Backend verwaltet.
 
-Ein Verein benötigt dafür keinen eigenen Docker-Server. Das gleiche Profil-/Instanzmodell kann sowohl auf einem eigenen Docker-Host als auch auf einer zentral betriebenen Cloud-Infrastruktur verwendet werden.
+Ein Verein benötigt dafür keinen eigenen Docker-Server. Im Standardbetrieb greifen alle Vereine auf das zentrale Multi-Tenant-Backend zu.
+
+## Empfohlener Cloud-Pfad: Infomaniak Jelastic Cloud
+
+Für den aktuellen Docker-Stand ist Jelastic Cloud der bevorzugte erste Cloud-Test, weil benutzerdefinierte Docker-Container unterstützt werden und die Plattform die zugrunde liegende Systemadministration weitgehend übernimmt.
+
+Für den ersten Testbetrieb mit bis zu 10 Vereinen:
+
+1. einen **einzelnen** Backend-Container aus dem bestehenden Image bereitstellen
+2. Container-Port `8000` nur über die öffentliche HTTPS-Route freigeben
+3. einen persistenten Datenträger nach `/data` einbinden
+4. `FLAPAMAMAKU_DB=/data/flapamamaku.db` verwenden
+5. `FLAPAMAMAKU_ENV=production` setzen
+6. `FLAPAMAMAKU_ALLOWED_ORIGINS` auf die produktive HTTPS-Adresse begrenzen
+7. automatische Plattform-Backups plus den vorhandenen App-Backup/Restore-Test verwenden
+8. zunächst **nur einen Applikationsknoten** betreiben; SQLite darf nicht gleichzeitig von mehreren horizontal skalierten Backend-Knoten beschrieben werden
+9. zuerst FLAPAMAMAKU und den neutralen Testverein als zwei Mandanten auf derselben Datenbank prüfen
+10. erst nach erfolgreichem Restore-, Login-, Medien-, Abrechnungs- und Isolationstest weitere Vereine freigeben
+
+### Datenbankstrategie
+
+Der aktuelle stabile Stand verwendet SQLite. Für den Test mit wenigen Vereinen bleibt das die Variante mit dem geringsten Umbau.
+
+Eine spätere Migration auf PostgreSQL ist sinnvoll, wenn echte horizontale Skalierung, mehrere gleichzeitig schreibende Backend-Knoten oder deutlich höhere Last erforderlich werden. Diese Migration ist **kein** Bestandteil des ersten Cloud-Rollouts und darf nicht nebenbei in den stabilen Stand eingebaut werden.
+
+### Supabase
+
+Supabase bleibt eine mögliche spätere PostgreSQL-Plattform. Für den jetzigen Stand wäre dafür aber eine bewusste Datenbankmigration von SQLite auf PostgreSQL nötig. Deshalb wird Supabase nicht als erster produktiver Cloud-Schritt verwendet.
