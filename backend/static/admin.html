@@ -454,9 +454,65 @@
         <div id="tenant-switch-wrap" class="hidden" style="margin-left:auto;min-width:260px">
           <label for="tenant-switch">Verein wechseln</label>
           <select id="tenant-switch"></select>
+          <button type="button" id="club-create-open" style="margin-top:8px;width:100%">+ Neuer Verein</button>
         </div>
       </div>
       <div class="meta" id="tenant-context-features" style="margin-top:10px">Module werden geladen …</div>
+    </div>
+
+    <div id="club-create-card" class="card hidden" style="grid-column:1/-1;margin-bottom:0">
+      <div class="preview-heading">
+        <div>
+          <div class="meta">White Label</div>
+          <h2 style="margin:2px 0">Neuen Verein vollständig einrichten</h2>
+        </div>
+        <button type="button" id="club-create-close">Schliessen</button>
+      </div>
+      <form id="club-create-form" class="grid" style="margin-top:14px">
+        <div>
+          <label>Vereinsname</label>
+          <input name="name" maxlength="120" required>
+          <label>Slug</label>
+          <input name="slug" maxlength="80" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="mein-verein" required>
+          <label>Kurzname</label>
+          <input name="short_name" maxlength="80">
+          <label>Untertitel</label>
+          <input name="subtitle" maxlength="120">
+          <label>Hauptfarbe</label>
+          <input name="primary_color" type="color" value="#8A101B">
+          <label>Nebenfarbe</label>
+          <input name="secondary_color" type="color" value="#FFFFFF">
+          <label>Vereinslogo</label>
+          <input name="logo_file" type="file" accept="image/jpeg,image/png,image/webp">
+        </div>
+        <div>
+          <h3>Module</h3>
+          <p class="meta">Die Auswahl gilt nur für den neuen Verein.</p>
+          <div id="club-create-features" class="permission-grid">
+            <label><input type="checkbox" data-key="news" data-label="News" checked> News</label>
+            <label><input type="checkbox" data-key="events" data-label="Termine" checked> Termine</label>
+            <label><input type="checkbox" data-key="members" data-label="Mitglieder" checked> Mitglieder</label>
+            <label><input type="checkbox" data-key="documents" data-label="Dokumente" checked> Dokumente</label>
+            <label><input type="checkbox" data-key="gallery" data-label="Galerie" checked> Galerie</label>
+            <label><input type="checkbox" data-key="photos" data-label="Fotoalben" checked> Fotoalben</label>
+            <label><input type="checkbox" data-key="sujet_next" data-label="Sujet nächstes Jahr" checked> Sujet nächstes Jahr</label>
+            <label><input type="checkbox" data-key="sujet_archive" data-label="Vergangene Sujet" checked> Vergangene Sujet</label>
+            <label><input type="checkbox" data-key="push" data-label="Push" checked> Push</label>
+            <label><input type="checkbox" data-key="calendar" data-label="Kalender" checked> Kalender</label>
+            <label><input type="checkbox" data-key="participants" data-label="Teilnehmerlisten" checked> Teilnehmerlisten</label>
+            <label><input type="checkbox" data-key="polls" data-label="Umfragen" checked> Umfragen</label>
+            <label><input type="checkbox" data-key="links" data-label="Links" checked> Links</label>
+          </div>
+          <h3 style="margin-top:18px">Vereinsadmin</h3>
+          <label>Benutzername</label>
+          <input name="admin_username" maxlength="120" required>
+          <label>Passwort</label>
+          <input name="admin_password" type="password" minlength="6" maxlength="200" required>
+          <p class="meta">Der Vereinsadmin wird direkt dem neu angelegten Verein zugeordnet.</p>
+          <p><button class="primary" type="submit">Verein anlegen und einrichten</button></p>
+          <p id="club-create-status" class="meta"></p>
+        </div>
+      </form>
     </div>
     <nav>
       <button class="active" data-panel="news" data-permission="can_news">News</button>
@@ -1213,6 +1269,8 @@ async function loadTenantContext() {
   const wrap = document.getElementById("tenant-switch-wrap");
   const select = document.getElementById("tenant-switch");
   wrap.classList.toggle("hidden", !currentUser.is_super_admin);
+  document.getElementById("club-create-card")
+    ?.classList.toggle("hidden", !currentUser.is_super_admin || document.getElementById("club-create-card")?.dataset.open !== "1");
   select.innerHTML = "";
   accessibleClubs.forEach(club => {
     const option = document.createElement("option");
@@ -1244,6 +1302,130 @@ async function loadTenantContext() {
       !featureVisibility.push || !currentUser.can_manage_users,
     );
 }
+
+document.getElementById("club-create-open").addEventListener("click", () => {
+  if (!currentUser?.is_super_admin) return;
+  const card = document.getElementById("club-create-card");
+  card.dataset.open = "1";
+  card.classList.remove("hidden");
+  card.scrollIntoView({behavior: "smooth", block: "start"});
+});
+
+document.getElementById("club-create-close").addEventListener("click", () => {
+  const card = document.getElementById("club-create-card");
+  card.dataset.open = "0";
+  card.classList.add("hidden");
+});
+
+function neutralClubSlug(value) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+document.querySelector('#club-create-form input[name="name"]').addEventListener("input", event => {
+  const form = document.getElementById("club-create-form");
+  const slug = form.elements.slug;
+  if (!slug.dataset.manual || slug.dataset.manual === "0") {
+    slug.value = neutralClubSlug(event.currentTarget.value);
+  }
+});
+
+document.querySelector('#club-create-form input[name="slug"]').addEventListener("input", event => {
+  event.currentTarget.dataset.manual = "1";
+});
+
+document.getElementById("club-create-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser?.is_super_admin) return;
+
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const status = document.getElementById("club-create-status");
+  button.disabled = true;
+  status.textContent = "Verein wird angelegt …";
+
+  try {
+    const name = form.elements.name.value.trim();
+    const slug = form.elements.slug.value.trim().toLowerCase();
+    const created = await api("/api/clubs", {
+      method: "POST",
+      body: JSON.stringify({
+        slug,
+        name,
+        short_name: form.elements.short_name.value.trim() || name,
+        subtitle: form.elements.subtitle.value.trim(),
+        primary_color: form.elements.primary_color.value.toUpperCase(),
+        secondary_color: form.elements.secondary_color.value.toUpperCase(),
+        description: "",
+        website: "",
+        email: "",
+        phone: "",
+        address: "",
+        city: "",
+        country: "",
+        app_title: name,
+        welcome_text: "",
+      }),
+    });
+
+    status.textContent = "Verein angelegt. Mandant wird eingerichtet …";
+    await api("/api/auth/club", {
+      method: "POST",
+      body: JSON.stringify({club_id: Number(created.id)}),
+    });
+    currentUser = await api("/api/auth/me");
+
+    const features = {};
+    const labels = {};
+    document.querySelectorAll("#club-create-features [data-key]").forEach(input => {
+      features[input.dataset.key] = input.checked;
+      labels[input.dataset.key] = input.dataset.label || input.dataset.key;
+    });
+    await api("/api/app-config/features", {
+      method: "PUT",
+      body: JSON.stringify({features, labels}),
+    });
+
+    const logoFile = form.elements.logo_file.files?.[0];
+    if (logoFile) {
+      status.textContent = "Logo wird gespeichert …";
+      const upload = new FormData();
+      upload.append("logo", logoFile);
+      await api("/api/app-config/logo", {method: "POST", body: upload});
+    }
+
+    status.textContent = "Vereinsadmin wird erstellt …";
+    await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username: form.elements.admin_username.value.trim(),
+        password: form.elements.admin_password.value,
+        active: true,
+        role_key: "admin",
+        permission_overrides: {},
+      }),
+    });
+
+    status.textContent = "Verein ist einsatzbereit.";
+    alert("Der neue Verein wurde vollständig eingerichtet.");
+    window.location.reload();
+  } catch (error) {
+    status.textContent = "Einrichtung konnte nicht vollständig abgeschlossen werden.";
+    alert("Der neue Verein konnte nicht vollständig eingerichtet werden.");
+    console.error(error);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 document.getElementById("tenant-switch").addEventListener("change", async event => {
   if (!currentUser?.is_super_admin) return;
