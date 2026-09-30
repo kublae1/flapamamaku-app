@@ -74,6 +74,14 @@ class AppStore extends ChangeNotifier {
   String contactPhone = '';
   String clubAddress = '';
 
+  bool showNews = true;
+  bool showEvents = true;
+  bool showMembers = true;
+  bool showGallery = true;
+  bool showPushNotifications = true;
+  bool showCalendar = true;
+  bool showParticipantLists = true;
+
   bool showSujet = true;
   String labelSujet = 'Sujet nächstes Jahr';
   bool showArchive = true;
@@ -102,6 +110,13 @@ class AppStore extends ChangeNotifier {
         'contact_phone': contactPhone,
         'club_address': clubAddress,
         'theme_color_value': themeColorValue,
+        'show_news': showNews,
+        'show_events': showEvents,
+        'show_members': showMembers,
+        'show_gallery': showGallery,
+        'show_push_notifications': showPushNotifications,
+        'show_calendar': showCalendar,
+        'show_participant_lists': showParticipantLists,
         'show_sujet': showSujet,
         'label_sujet': labelSujet,
         'show_archive': showArchive,
@@ -130,6 +145,13 @@ class AppStore extends ChangeNotifier {
     themeColorValue = value['theme_color_value'] is int
         ? value['theme_color_value'] as int
         : themeColorValue;
+    showNews = value['show_news'] != false;
+    showEvents = value['show_events'] != false;
+    showMembers = value['show_members'] != false;
+    showGallery = value['show_gallery'] != false;
+    showPushNotifications = value['show_push_notifications'] != false;
+    showCalendar = value['show_calendar'] != false;
+    showParticipantLists = value['show_participant_lists'] != false;
     showSujet = value['show_sujet'] != false;
     labelSujet = value['label_sujet']?.toString() ?? labelSujet;
     showArchive = value['show_archive'] != false;
@@ -280,6 +302,13 @@ class AppStore extends ChangeNotifier {
       contactPhone = config['contact_phone']?.toString().trim() ?? '';
       clubAddress = config['club_address']?.toString().trim() ?? '';
 
+      showNews = config['show_news'] != false;
+      showEvents = config['show_events'] != false;
+      showMembers = config['show_members'] != false;
+      showGallery = config['show_gallery'] != false;
+      showPushNotifications = config['show_push_notifications'] != false;
+      showCalendar = config['show_calendar'] != false;
+      showParticipantLists = config['show_participant_lists'] != false;
       showSujet = config['show_sujet'] != false;
       labelSujet = config['label_sujet']?.toString().trim().isNotEmpty == true
           ? config['label_sujet'].toString().trim()
@@ -469,7 +498,7 @@ class AppStore extends ChangeNotifier {
       biometricUnlockPending = false;
       authError = null;
       await refreshFromServer();
-      if (pushEnabled) {
+      if (pushEnabled && showPushNotifications) {
         await pushService.enable();
       }
     } catch (_) {
@@ -751,12 +780,20 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final remoteNews = await api.fetchNews();
-      final remoteEvents = await api.fetchEvents();
-      final remoteMembers = await api.fetchMembers();
-      final remoteMemberFilters = await api.fetchMemberFilters();
+      final prefs = await SharedPreferences.getInstance();
+      await _loadRemoteBranding(prefs);
+
+      final remoteNews =
+          showNews ? await api.fetchNews() : <NewsItem>[];
+      final remoteEvents =
+          showEvents ? await api.fetchEvents() : <EventItem>[];
+      final remoteMembers =
+          showMembers ? await api.fetchMembers() : <MemberItem>[];
+      final remoteMemberFilters =
+          showMembers ? await api.fetchMemberFilters() : <MemberFilterItem>[];
       final remoteContent = await api.fetchContent();
-      final remotePolls = await api.fetchPolls();
+      final remotePolls =
+          showPolls ? await api.fetchPolls() : <ContentItem>[];
 
       news
         ..clear()
@@ -772,7 +809,29 @@ class AppStore extends ChangeNotifier {
         ..addAll(remoteMemberFilters);
       content
         ..clear()
-        ..addAll(remoteContent)
+        ..addAll(
+          remoteContent.where((item) {
+            switch (item.section) {
+              case 'gallery':
+                return showGallery;
+              case 'sujet':
+                return showSujet;
+              case 'archive':
+                return showArchive;
+              case 'photos':
+                return showPhotos;
+              case 'documents':
+                return showDocuments;
+              case 'links':
+              case 'whatsapp':
+                return showLinks;
+              case 'polls':
+                return showPolls;
+              default:
+                return true;
+            }
+          }),
+        )
         ..addAll(remotePolls);
 
       _sortNews();
