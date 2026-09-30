@@ -1,0 +1,208 @@
+name: Build Signed iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "White-label build profile"
+        required: false
+        default: "flapamamaku"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
+      IOS_BUNDLE_ID: ${{ vars.FLAPAMAMAKU_IOS_BUNDLE_ID || 'ch.flapamamaku.app' }}
+      IOS_CERTIFICATE_BASE64: ${{ secrets.FLAPAMAMAKU_IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.FLAPAMAMAKU_IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.FLAPAMAMAKU_IOS_PROVISIONING_PROFILE_BASE64 }}
+      FIREBASE_API_KEY_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_API_KEY || secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+      FIREBASE_APP_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_IOS_APP_ID || secrets.FLAPAMAMAKU_FIREBASE_IOS_APP_ID }}
+      FIREBASE_MESSAGING_SENDER_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_MESSAGING_SENDER_ID || secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_PROJECT_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_PROJECT_ID || secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        shell: bash
+        run: |
+          missing=0
+          for name in IOS_CERTIFICATE_BASE64 IOS_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required GitHub secret for $name"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
+
+      - name: Load white label profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          profile = os.environ["BUILD_PROFILE"].strip()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile):
+              raise SystemExit("Invalid profile")
+          data = json.loads((Path("config/white-label") / f"{profile}.json").read_text())
+          if data["id"] != profile:
+              raise SystemExit("Profile id mismatch")
+          if not isinstance(data["allow_server_change"], bool):
+              raise SystemExit("allow_server_change must be boolean")
+          values = {
+              "CLUB_INSTANCE_ID": str(data["instance_id"]).strip().lower(),
+              "APP_DISPLAY_NAME": str(data["app_name"]).strip(),
+              "APP_DISPLAY_SUBTITLE": str(data["app_subtitle"]).strip(),
+              "API_BASE_URL": str(data["api_base_url"]).rstrip("/"),
+              "ALLOW_SERVER_CHANGE": "true" if data["allow_server_change"] else "false",
+          }
+          with Path(os.environ["GITHUB_ENV"]).open("a") as h:
+              for k,v in values.items():
+                  h.write(f"{k}={v}\n")
+          PY
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate iOS platform files
+        run: |
+          if [ ! -d ios ]; then
+            flutter create --platforms=ios --project-name flapamamaku_app .
+          fi
+
+      - name: Configure iOS app
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, plistlib, re
+          from pathlib import Path
+          bundle_id = os.environ["IOS_BUNDLE_ID"].strip()
+          app_name = os.environ["APP_DISPLAY_NAME"].strip()
+
+          project = Path("ios/Runner.xcodeproj/project.pbxproj")
+          text = project.read_text()
+          text, count = re.subn(
+              r"PRODUCT_BUNDLE_IDENTIFIER = [^;]+;",
+              f"PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};",
+              text,
+          )
+          if count == 0:
+              raise SystemExit("Could not set bundle id")
+          project.write_text(text)
+
+          plist_path = Path("ios/Runner/Info.plist")
+          with plist_path.open("rb") as h:
+              plist = plistlib.load(h)
+          plist["CFBundleDisplayName"] = app_name
+          plist["NSFaceIDUsageDescription"] = f"{app_name} verwendet Face ID zum sicheren Entsperren der App."
+          plist["NSCameraUsageDescription"] = f"{app_name} benötigt die Kamera zum Aufnehmen von Vereinsfotos."
+          plist["NSPhotoLibraryUsageDescription"] = f"{app_name} benötigt Zugriff auf Fotos für Vereinsinhalte."
+          plist["NSPhotoLibraryAddUsageDescription"] = f"{app_name} darf Bilder in deiner Fotomediathek speichern."
+          plist["UIBackgroundModes"] = ["remote-notification"]
+          with plist_path.open("wb") as h:
+              plistlib.dump(plist, h)
+          PY
+
+      - name: Install signing certificate and profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/distribution.p12"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          KEYCHAIN_PATH="$RUNNER_TEMP/flapamamaku-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "$IOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$PROFILE_PLIST")
+          TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" "$PROFILE_PLIST")
+          APP_IDENTIFIER=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" "$PROFILE_PLIST")
+          APS_ENV=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:aps-environment" "$PROFILE_PLIST" 2>/dev/null || true)
+
+          if [ -z "$APS_ENV" ]; then
+            echo "::error::Provisioning profile has no Push Notifications entitlement"
+            exit 1
+          fi
+
+          PROFILE_BUNDLE_ID="${APP_IDENTIFIER#$TEAM_ID.}"
+          if [ "$PROFILE_BUNDLE_ID" != "$IOS_BUNDLE_ID" ]; then
+            echo "::error::Provisioning profile bundle id '$PROFILE_BUNDLE_ID' does not match '$IOS_BUNDLE_ID'"
+            exit 1
+          fi
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+          {
+            echo "IOS_TEAM_ID=$TEAM_ID"
+            echo "IOS_PROFILE_NAME=$PROFILE_NAME"
+            echo "IOS_APS_ENV=$APS_ENV"
+          } >> "$GITHUB_ENV"
+
+      - name: Write Runner entitlements
+        shell: bash
+        run: |
+          cat > ios/Runner/Runner.entitlements <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>aps-environment</key>
+            <string>$IOS_APS_ENV</string>
+          </dict>
+          </plist>
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("ios/Runner.xcodeproj/project.pbxproj")
+          text = p.read_text()
+          marker = "CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;"
+          if marker not in text:
+              text = text.replace(
+                  "PRODUCT_NAME = "$(TARGET_NAME)";",
+                  "CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;\n\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";",
+              )
+          p.write_text(text)
+          PY
+
+      - name: Build signed IPA
+        shell: bash
+        run: |
+          flutter build ipa --release \
+            --export-method app-store \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_NAME="$APP_DISPLAY_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_DISPLAY_SUBTITLE" \
+            --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY_VALUE" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID_VALUE" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID_VALUE" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID_VALUE"
+
+      - name: Verify signed IPA
+        shell: bash
+        run: |
+          test -n "$(find build/ios/ipa -name '*.ipa' -print -quit)"
+          echo "Signed IPA build passed."
