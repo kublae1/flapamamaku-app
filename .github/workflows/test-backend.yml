@@ -1122,7 +1122,7 @@ jobs:
               'api("/api/app-config/features"',
               'api("/api/app-config/logo"',
               'api("/api/users"',
-              '"role_key": "admin"',
+              'role_key: "admin"',
               'Verein ist einsatzbereit.',
           )
           for marker in required:
