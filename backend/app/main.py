@@ -2021,6 +2021,145 @@ def _invoice_row(item: sqlite3.Row) -> dict[str, Any]:
     return result
 
 
+def _display_invoice_date(value: str) -> str:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except ValueError:
+        return value
+
+
+def _invoice_pdf_bytes(
+    invoice: dict[str, Any],
+    club: dict[str, Any],
+) -> bytes:
+    canvas = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(canvas)
+    title_font = ImageFont.load_default(size=48)
+    heading_font = ImageFont.load_default(size=30)
+    body_font = ImageFont.load_default(size=24)
+    small_font = ImageFont.load_default(size=20)
+
+    margin_x = 90
+    y = 80
+    draw.text((margin_x, y), "Vereinsrechnung", fill="black", font=title_font)
+    y += 88
+
+    issuer_lines = [BILLING_ISSUER_NAME]
+    if BILLING_ISSUER_ADDRESS:
+        issuer_lines.extend(
+            line.strip()
+            for line in BILLING_ISSUER_ADDRESS.splitlines()
+            if line.strip()
+        )
+    draw.multiline_text(
+        (margin_x, y),
+        "\n".join(issuer_lines),
+        fill="black",
+        font=body_font,
+        spacing=8,
+    )
+
+    recipient_lines = [str(club.get("name") or club.get("slug") or "Verein")]
+    address = str(club.get("address") or "").strip()
+    city = str(club.get("city") or "").strip()
+    country = str(club.get("country") or "").strip()
+    billing_email = str(club.get("billing_email") or "").strip()
+    for value in (address, city, country, billing_email):
+        if value:
+            recipient_lines.extend(
+                line.strip()
+                for line in value.splitlines()
+                if line.strip()
+            )
+    draw.multiline_text(
+        (700, y),
+        "\n".join(recipient_lines),
+        fill="black",
+        font=body_font,
+        spacing=8,
+    )
+
+    y = 420
+    draw.text(
+        (margin_x, y),
+        f"Rechnung Nr. {invoice['invoice_number']}",
+        fill="black",
+        font=heading_font,
+    )
+    y += 56
+    details = [
+        ("Rechnungsdatum", _display_invoice_date(str(invoice["issue_date"]))),
+        ("Zahlungsziel", _display_invoice_date(str(invoice["due_date"]))),
+        (
+            "Leistungsperiode",
+            f"{_display_invoice_date(str(invoice['period_start']))} bis "
+            f"{_display_invoice_date(str(invoice['period_end']))}",
+        ),
+    ]
+    for label, value in details:
+        draw.text((margin_x, y), f"{label}: {value}", fill="black", font=body_font)
+        y += 42
+
+    y += 48
+    draw.text((margin_x, y), "Leistung", fill="black", font=heading_font)
+    draw.text((900, y), "Betrag", fill="black", font=heading_font)
+    y += 54
+    draw.line((margin_x, y, 1150, y), fill="black", width=2)
+    y += 28
+
+    description = (
+        "Nutzung der Vereinsplattform für die Leistungsperiode "
+        f"{_display_invoice_date(str(invoice['period_start']))} bis "
+        f"{_display_invoice_date(str(invoice['period_end']))}"
+    )
+    draw.text((margin_x, y), description, fill="black", font=body_font)
+    amount = f"CHF {int(invoice['amount_rappen']) / 100:.2f}"
+    draw.text((900, y), amount, fill="black", font=body_font)
+    y += 84
+    draw.line((margin_x, y, 1150, y), fill="black", width=2)
+    y += 28
+    draw.text((760, y), "Gesamtbetrag", fill="black", font=heading_font)
+    draw.text((900, y + 48), amount, fill="black", font=heading_font)
+
+    y += 180
+    draw.text((margin_x, y), "Zahlungsinformationen", fill="black", font=heading_font)
+    y += 48
+    payment_text = BILLING_PAYMENT_INFO or (
+        "Bitte den Rechnungsbetrag gemäss vereinbarter Zahlungsart begleichen "
+        "und die Rechnungsnummer als Referenz angeben."
+    )
+    payment_lines = []
+    for raw_line in payment_text.splitlines() or [payment_text]:
+        words = raw_line.split()
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if len(candidate) > 78 and current:
+                payment_lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            payment_lines.append(current)
+    draw.multiline_text(
+        (margin_x, y),
+        "\n".join(payment_lines),
+        fill="black",
+        font=body_font,
+        spacing=8,
+    )
+
+    footer = (
+        f"Rechnung {invoice['invoice_number']} · "
+        f"Status: {'bezahlt' if invoice.get('status') == 'paid' else 'offen'}"
+    )
+    draw.text((margin_x, 1640), footer, fill="black", font=small_font)
+
+    buffer = io.BytesIO()
+    canvas.save(buffer, format="PDF", resolution=150.0)
+    return buffer.getvalue()
+
+
 def _run_billing_cycle() -> dict[str, int]:
     today_dt = datetime.now(timezone.utc)
     today = today_dt.date().isoformat()
@@ -2032,7 +2171,7 @@ def _run_billing_cycle() -> dict[str, int]:
             """
             SELECT
                 id, billing_amount_rappen, billing_interval_months,
-                billing_due_days, billing_next_invoice_date,
+                billing_due_days, billing_grace_days, billing_next_invoice_date,
                 billing_auto_suspend
             FROM clubs
             WHERE active = 1
@@ -2102,7 +2241,10 @@ def _run_billing_cycle() -> dict[str, int]:
             WHERE c.active = 1
               AND c.billing_auto_suspend = 1
               AND i.status = 'open'
-              AND i.due_date < ?
+              AND date(
+                    i.due_date,
+                    '+' || MAX(0, c.billing_grace_days) || ' days'
+                  ) < ?
             """,
             (today,),
         ).fetchall()
