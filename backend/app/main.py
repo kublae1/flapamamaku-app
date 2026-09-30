@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.54"
+API_VERSION = "0.8.55"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +68,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -183,6 +183,7 @@ PERMISSION_FIELDS = (
     "can_contact",
     "can_about",
     "can_admin_page",
+    "can_manage_settings",
     "can_manage_users",
 )
 
@@ -377,6 +378,7 @@ class UserPayload(BaseModel):
     can_contact: bool = False
     can_about: bool = False
     can_admin_page: bool = False
+    can_manage_settings: bool = False
     can_manage_users: bool = False
     role_key: str = Field(default="member", max_length=40)
     permission_overrides: dict[str, bool] = Field(default_factory=dict)
@@ -576,6 +578,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (5, "app-config-modules"),
         (6, "user-roles-and-permission-overrides"),
         (7, "club-instance-binding"),
+        (8, "club-settings-permission"),
     ]
     applied = {
         int(row["version"])
@@ -1071,6 +1074,15 @@ def init_db() -> None:
         _ensure_column(db, "members", "status", "TEXT NOT NULL DEFAULT 'Aktiv'")
         _ensure_column(db, "members", "member_group", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "engagement", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "users", "can_manage_settings", "INTEGER NOT NULL DEFAULT 0")
+        db.execute(
+            """
+            UPDATE users
+            SET can_manage_settings = 1
+            WHERE can_manage_users = 1 AND can_manage_settings = 0
+            """
+        )
+
         _ensure_column(db, "members", "sort_order", "INTEGER NOT NULL DEFAULT 0")
         db.execute(
             """
@@ -2258,7 +2270,7 @@ def get_app_config() -> dict[str, Any]:
 @app.put("/api/app-config")
 def put_app_config(
     payload: AppConfigPayload,
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
 ) -> dict[str, Any]:
     values = payload.model_dump()
     now = datetime.now(timezone.utc).isoformat()
@@ -2358,7 +2370,7 @@ def get_app_logo() -> Response:
 @app.post("/api/app-config/logo")
 async def upload_app_logo(
     logo: UploadFile = File(...),
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
 ) -> dict[str, Any]:
     raw = await logo.read()
     optimized, mime = _optimize_image(raw, logo.content_type or "")
@@ -2381,7 +2393,7 @@ async def upload_app_logo(
 
 @app.delete("/api/app-config/logo", status_code=204)
 def delete_app_logo(
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
 ) -> None:
     with connect() as db:
         db.execute(
@@ -2532,7 +2544,7 @@ def system_readiness(
 
 @app.get("/api/system/setup-status")
 def system_setup_status(
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
 ) -> dict[str, Any]:
     return _club_setup_status()
 
