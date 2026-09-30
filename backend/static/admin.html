@@ -521,6 +521,7 @@
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
       <button data-panel="content" id="content-nav">Medien & Inhalte</button>
       <button data-panel="push" id="push-nav" data-permission="can_manage_users">Push</button>
+      <button data-panel="billing" id="billing-nav">Vereinsabrechnung</button>
       <button data-panel="system" id="system-nav" data-permission="can_manage_settings">Verein & System</button>
       <button id="logout-button">Abmelden</button>
     </nav>
@@ -1038,6 +1039,53 @@
       </div>
     </section>
 
+    <section id="billing" class="panel">
+      <div class="workspace-title">
+        <div>
+          <h2>Vereinsabrechnung</h2>
+          <p class="meta">Nur für Super-Admins. Rechnungen, Zahlungssperren und Wiederfreigaben gelten auf Vereinsebene.</p>
+        </div>
+        <button type="button" id="billing-run" class="primary">Rechnungslauf jetzt ausführen</button>
+      </div>
+      <div class="grid">
+        <form class="card" id="billing-settings-form">
+          <h2>Abrechnung einstellen</h2>
+          <label>Verein</label>
+          <select name="club_id" id="billing-club-select"></select>
+          <label>Rechnungs-E-Mail</label>
+          <input name="billing_email" type="email" maxlength="320">
+          <label>Betrag pro Periode in CHF</label>
+          <input name="amount_chf" type="number" min="0" step="0.05" value="0">
+          <label>Abrechnungsintervall in Monaten</label>
+          <input name="interval_months" type="number" min="1" max="24" value="12">
+          <label>Zahlungsziel in Tagen</label>
+          <input name="due_days" type="number" min="1" max="90" value="30">
+          <label>Nächstes Rechnungsdatum</label>
+          <input name="next_invoice_date" type="date">
+          <label style="display:flex;align-items:center;gap:8px">
+            <input name="auto_suspend" type="checkbox" checked>
+            Verein bei überfälliger Rechnung automatisch sperren
+          </label>
+          <p><button class="primary" type="submit">Abrechnung speichern</button></p>
+          <div class="actions">
+            <button type="button" id="billing-suspend">Verein sperren</button>
+            <button type="button" id="billing-reactivate">Verein wieder freigeben</button>
+          </div>
+          <p id="billing-settings-status" class="meta"></p>
+        </form>
+        <div>
+          <div class="card">
+            <h2>Vereine</h2>
+            <div id="billing-club-list"></div>
+          </div>
+          <div class="card">
+            <h2>Rechnungen des gewählten Vereins</h2>
+            <div id="billing-invoice-list"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="system" class="panel">
       <div id="onboarding-card" class="card hidden" style="margin-bottom:16px">
         <h2>Verein jetzt einrichten</h2>
@@ -1178,6 +1226,7 @@ let memberFilters = [];
 let roleDefinitions = [];
 let accessibleClubs = [];
 let activeClubConfig = null;
+let billingClubs = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
@@ -1446,6 +1495,212 @@ document.getElementById("tenant-switch").addEventListener("change", async event 
   }
 });
 
+
+function formatCHF(rappen) {
+  return (Number(rappen || 0) / 100).toLocaleString("de-CH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }) + " CHF";
+}
+
+function selectedBillingClub() {
+  const id = Number(document.getElementById("billing-club-select")?.value || 0);
+  return billingClubs.find(club => Number(club.id) === id) || null;
+}
+
+function fillBillingSettings(club) {
+  const form = document.getElementById("billing-settings-form");
+  if (!form || !club) return;
+  form.elements.billing_email.value = club.billing_email || "";
+  form.elements.amount_chf.value = (Number(club.billing_amount_rappen || 0) / 100).toFixed(2);
+  form.elements.interval_months.value = Number(club.billing_interval_months || 12);
+  form.elements.due_days.value = Number(club.billing_due_days || 30);
+  form.elements.next_invoice_date.value = club.billing_next_invoice_date || "";
+  form.elements.auto_suspend.checked = club.billing_auto_suspend !== false;
+  document.getElementById("billing-settings-status").textContent =
+    club.billing_status === "suspended"
+      ? "Status: GESPERRT – " + (club.billing_suspension_reason || "Ausstehende Zahlung")
+      : "Status: aktiv";
+}
+
+async function loadBillingInvoices(clubId) {
+  const box = document.getElementById("billing-invoice-list");
+  if (!box || !clubId) return;
+  box.innerHTML = '<p class="meta">Rechnungen werden geladen …</p>';
+  try {
+    const invoices = await api(`/api/operator/billing/clubs/${clubId}/invoices`);
+    if (!invoices.length) {
+      box.innerHTML = '<p class="meta">Noch keine Rechnungen vorhanden.</p>';
+      return;
+    }
+    box.innerHTML = "";
+    invoices.forEach(invoice => {
+      const row = document.createElement("div");
+      row.className = "entry";
+      row.innerHTML = `
+        <h3>${invoice.invoice_number}</h3>
+        <div class="meta">
+          Periode ${invoice.period_start} bis ${invoice.period_end}<br>
+          Rechnungsdatum ${invoice.issue_date} · Fällig ${invoice.due_date}<br>
+          Betrag ${formatCHF(invoice.amount_rappen)} · Status:
+          <strong>${invoice.status === "paid" ? "bezahlt" : "offen"}</strong>
+        </div>
+        ${invoice.status === "open" ? `
+          <div class="actions">
+            <button type="button" data-billing-paid="${invoice.id}">Als bezahlt verbuchen</button>
+          </div>
+        ` : ""}
+      `;
+      box.appendChild(row);
+    });
+    box.querySelectorAll("[data-billing-paid]").forEach(button => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api(`/api/operator/billing/invoices/${button.dataset.billingPaid}/paid`, {
+            method: "POST",
+          });
+          await loadBillingAdmin();
+        } catch (error) {
+          alert("Zahlung konnte nicht verbucht werden.");
+          console.error(error);
+          button.disabled = false;
+        }
+      });
+    });
+  } catch (error) {
+    box.innerHTML = '<p class="error">Rechnungen konnten nicht geladen werden.</p>';
+    console.error(error);
+  }
+}
+
+async function loadBillingAdmin() {
+  if (!currentUser?.is_super_admin) return;
+  const list = document.getElementById("billing-club-list");
+  const select = document.getElementById("billing-club-select");
+  if (!list || !select) return;
+  list.innerHTML = '<p class="meta">Vereine werden geladen …</p>';
+  try {
+    const previous = Number(select.value || currentUser.current_club_id || 0);
+    billingClubs = await api("/api/operator/billing/clubs");
+    select.innerHTML = "";
+    billingClubs.forEach(club => {
+      const option = document.createElement("option");
+      option.value = club.id;
+      option.textContent = club.name || club.slug;
+      select.appendChild(option);
+    });
+    const chosen = billingClubs.some(club => Number(club.id) === previous)
+      ? previous
+      : Number(billingClubs[0]?.id || 0);
+    if (chosen) select.value = String(chosen);
+
+    list.innerHTML = "";
+    billingClubs.forEach(club => {
+      const row = document.createElement("div");
+      row.className = "entry";
+      const suspended = club.billing_status === "suspended";
+      row.innerHTML = `
+        <h3>${club.name || club.slug}</h3>
+        <div class="meta">
+          Status: <strong>${suspended ? "GESPERRT" : "aktiv"}</strong>
+          ${suspended && club.billing_suspension_reason ? " · " + club.billing_suspension_reason : ""}<br>
+          Periodenbetrag: ${formatCHF(club.billing_amount_rappen)} ·
+          Offen: ${formatCHF(club.open_amount_rappen)} in ${club.open_invoice_count || 0} Rechnung(en)<br>
+          Nächste Rechnung: ${club.billing_next_invoice_date || "nicht eingerichtet"}
+        </div>
+      `;
+      list.appendChild(row);
+    });
+
+    const club = selectedBillingClub();
+    fillBillingSettings(club);
+    if (club) await loadBillingInvoices(Number(club.id));
+  } catch (error) {
+    list.innerHTML = '<p class="error">Vereinsabrechnung konnte nicht geladen werden.</p>';
+    console.error(error);
+  }
+}
+
+document.getElementById("billing-nav")?.addEventListener("click", loadBillingAdmin);
+
+document.getElementById("billing-club-select")?.addEventListener("change", async () => {
+  const club = selectedBillingClub();
+  fillBillingSettings(club);
+  if (club) await loadBillingInvoices(Number(club.id));
+});
+
+document.getElementById("billing-settings-form")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser?.is_super_admin) return;
+  const form = event.currentTarget;
+  const clubId = Number(form.elements.club_id.value || 0);
+  if (!clubId) return;
+  const amountRappen = Math.round(Number(form.elements.amount_chf.value || 0) * 100);
+  try {
+    await api(`/api/operator/billing/clubs/${clubId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        billing_email: form.elements.billing_email.value.trim(),
+        amount_rappen: amountRappen,
+        interval_months: Number(form.elements.interval_months.value || 12),
+        due_days: Number(form.elements.due_days.value || 30),
+        next_invoice_date: form.elements.next_invoice_date.value || "",
+        auto_suspend: form.elements.auto_suspend.checked,
+      }),
+    });
+    await loadBillingAdmin();
+    alert("Vereinsabrechnung wurde gespeichert.");
+  } catch (error) {
+    alert("Vereinsabrechnung konnte nicht gespeichert werden.");
+    console.error(error);
+  }
+});
+
+document.getElementById("billing-run")?.addEventListener("click", async event => {
+  if (!currentUser?.is_super_admin) return;
+  event.currentTarget.disabled = true;
+  try {
+    const result = await api("/api/operator/billing/run", {method: "POST"});
+    await loadBillingAdmin();
+    alert(`Rechnungslauf abgeschlossen. Neue Rechnungen: ${result.created_invoices}. Neu gesperrte Vereine: ${result.suspended_clubs}.`);
+  } catch (error) {
+    alert("Rechnungslauf konnte nicht ausgeführt werden.");
+    console.error(error);
+  } finally {
+    event.currentTarget.disabled = false;
+  }
+});
+
+document.getElementById("billing-suspend")?.addEventListener("click", async () => {
+  const club = selectedBillingClub();
+  if (!currentUser?.is_super_admin || !club) return;
+  try {
+    await api(`/api/operator/billing/clubs/${club.id}/suspend`, {
+      method: "POST",
+      body: JSON.stringify({reason: "Ausstehende Zahlung"}),
+    });
+    await loadBillingAdmin();
+  } catch (error) {
+    alert("Verein konnte nicht gesperrt werden.");
+    console.error(error);
+  }
+});
+
+document.getElementById("billing-reactivate")?.addEventListener("click", async () => {
+  const club = selectedBillingClub();
+  if (!currentUser?.is_super_admin || !club) return;
+  try {
+    await api(`/api/operator/billing/clubs/${club.id}/reactivate`, {
+      method: "POST",
+    });
+    await loadBillingAdmin();
+  } catch (error) {
+    alert("Verein konnte nicht wieder freigegeben werden.");
+    console.error(error);
+  }
+});
+
 function showAuth() {
   document.getElementById("auth-view").classList.remove("hidden");
   document.getElementById("admin-view").classList.add("hidden");
@@ -1463,6 +1718,8 @@ function applyPermissions() {
     ?.classList.toggle("hidden", !currentUser?.can_manage_users);
   document.getElementById("system-admin-backup-card")
     ?.classList.toggle("hidden", !currentUser?.can_manage_users);
+  document.getElementById("billing-nav")
+    ?.classList.toggle("hidden", !currentUser?.is_super_admin);
 
   document.querySelectorAll("[data-permission]").forEach(button => {
     button.classList.toggle("hidden", !currentUser?.[button.dataset.permission]);
