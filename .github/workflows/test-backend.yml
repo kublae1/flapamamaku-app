@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -239,6 +239,117 @@ jobs:
                   assert "club_id" in columns, table
 
           print("FLAPAMAMAKU package 2 migration ok")
+          PY
+
+      - name: Test package 3 API tenant isolation
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-package3-isolation.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-package3-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-package3-isolation.db
+          rm -rf /tmp/flapamamaku-package3-backups
+          python - <<'PY'
+          from fastapi import HTTPException
+          from app.main import (
+              NewsPayload,
+              ContentPayload,
+              connect,
+              create_row,
+              delete_content,
+              get_content,
+              init_db,
+              list_rows,
+              update_row,
+          )
+
+          init_db()
+          with connect() as db:
+              now = "2026-09-30T00:00:00+00:00"
+              cursor = db.execute(
+                  """
+                  INSERT INTO clubs (
+                      slug, name, short_name, active,
+                      primary_color, secondary_color,
+                      created_at, updated_at
+                  ) VALUES (?, ?, ?, 1, '#000000', '#FFFFFF', ?, ?)
+                  """,
+                  ("testverein", "Testverein", "Testverein", now, now),
+              )
+              foreign_club_id = cursor.lastrowid
+              db.execute(
+                  """
+                  INSERT INTO news (
+                      title, text, date, sort_order, created_at, club_id
+                  ) VALUES (?, ?, ?, 1, ?, ?)
+                  """,
+                  ("Fremde News", "Nur Testverein", "30.09.2026", now, foreign_club_id),
+              )
+              foreign_news_id = db.execute(
+                  "SELECT id FROM news WHERE title = 'Fremde News'"
+              ).fetchone()[0]
+              db.execute(
+                  """
+                  INSERT INTO content_items (
+                      section, title, text, link_url, sort_order, created_at, club_id
+                  ) VALUES ('gallery', ?, '', '', 1, ?, ?)
+                  """,
+                  ("Fremder Inhalt", now, foreign_club_id),
+              )
+              foreign_content_id = db.execute(
+                  "SELECT id FROM content_items WHERE title = 'Fremder Inhalt'"
+              ).fetchone()[0]
+              db.commit()
+
+          own = create_row(
+              "news",
+              NewsPayload(title="Eigene News", text="FLAPAMAMAKU", date="30.09.2026"),
+          )
+          rows = list_rows("news")
+          titles = {row["title"] for row in rows}
+          assert "Eigene News" in titles
+          assert "Fremde News" not in titles
+          assert own["club_id"] == 1
+
+          try:
+              update_row(
+                  "news",
+                  foreign_news_id,
+                  NewsPayload(title="Manipuliert", text="Nein", date="30.09.2026"),
+              )
+              raise AssertionError("foreign news update was accepted")
+          except HTTPException as exc:
+              assert exc.status_code == 404
+
+          fake_user = {
+              "id": 1,
+              "can_photos": True,
+              "can_documents": True,
+              "can_polls": True,
+              "can_links": True,
+              "can_contact": True,
+              "can_about": True,
+          }
+          content = get_content(section="gallery", user=fake_user)
+          assert all(item.get("title") != "Fremder Inhalt" for item in content)
+
+          try:
+              delete_content(foreign_content_id, user=fake_user)
+              raise AssertionError("foreign content delete was accepted")
+          except HTTPException as exc:
+              assert exc.status_code == 404
+
+          with connect() as db:
+              assert db.execute(
+                  "SELECT COUNT(*) FROM news WHERE id = ?",
+                  (foreign_news_id,),
+              ).fetchone()[0] == 1
+              assert db.execute(
+                  "SELECT COUNT(*) FROM content_items WHERE id = ?",
+                  (foreign_content_id,),
+              ).fetchone()[0] == 1
+
+          print("package 3 API tenant isolation ok")
           PY
 
       - name: Test backup and restore
