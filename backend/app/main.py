@@ -1426,6 +1426,37 @@ def init_db() -> None:
             (membership_now, membership_now),
         )
 
+        super_admin_exists = db.execute(
+            """
+            SELECT 1 FROM user_clubs
+            WHERE role = 'super_admin' AND active = 1
+            LIMIT 1
+            """
+        ).fetchone()
+        if super_admin_exists is None:
+            platform_admin = db.execute(
+                """
+                SELECT uc.user_id
+                FROM user_clubs uc
+                JOIN users u ON u.id = uc.user_id
+                WHERE uc.club_id = 1
+                  AND uc.active = 1
+                  AND u.active = 1
+                  AND u.can_manage_users = 1
+                ORDER BY u.id ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if platform_admin is not None:
+                db.execute(
+                    """
+                    UPDATE user_clubs
+                    SET role = 'super_admin', updated_at = ?
+                    WHERE user_id = ? AND club_id = 1
+                    """,
+                    (membership_now, platform_admin["user_id"]),
+                )
+
         _ensure_column(
             db,
             "content_items",
@@ -3353,7 +3384,7 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
             """
             INSERT INTO user_clubs (
                 user_id, club_id, role, active, created_at, updated_at
-            ) VALUES (?, ?, 'club_admin', 1, ?, ?)
+            ) VALUES (?, ?, 'super_admin', 1, ?, ?)
             """,
             (user_id, _active_club_id(db), now, now),
         )
@@ -3371,13 +3402,10 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
             """
             SELECT u.*
             FROM users u
-            JOIN user_clubs uc ON uc.user_id = u.id
             WHERE u.username = ? COLLATE NOCASE
               AND u.active = 1
-              AND uc.club_id = ?
-              AND uc.active = 1
             """,
-            (payload.username.strip(), _active_club_id(db)),
+            (payload.username.strip(),),
         ).fetchone()
         if row is None or not _check_password(
             payload.password,
@@ -3386,6 +3414,11 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
         ):
             _record_login_failure(rate_key)
             raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
+
+        instance_club_id = _instance_club_id(db)
+        if _user_club_access(db, int(row["id"]), instance_club_id) is None:
+            _record_login_failure(rate_key)
+            raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
 
         _clear_login_failures(rate_key)
         token = secrets.token_urlsafe(48)
@@ -3400,14 +3433,17 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
         )
         db.execute(
             """
-            INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO sessions (
+                token_hash, user_id, expires_at, created_at, active_club_id
+            )
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 _token_hash(token),
                 row["id"],
                 expires,
                 now_dt.isoformat(),
+                instance_club_id,
             ),
         )
         db.commit()
@@ -3431,6 +3467,78 @@ def logout(
 @app.get("/api/auth/me")
 def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     return _user_profile(user["id"])
+
+
+@app.get("/api/clubs/accessible")
+def accessible_clubs(
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        if bool(user.get("is_super_admin")):
+            rows = db.execute(
+                """
+                SELECT id, slug, name, short_name, active, primary_color
+                FROM clubs
+                WHERE active = 1
+                ORDER BY name COLLATE NOCASE, id
+                """
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT c.id, c.slug, c.name, c.short_name, c.active, c.primary_color
+                FROM clubs c
+                JOIN user_clubs uc ON uc.club_id = c.id
+                WHERE uc.user_id = ?
+                  AND uc.active = 1
+                  AND c.active = 1
+                ORDER BY c.name COLLATE NOCASE, c.id
+                """,
+                (user["id"],),
+            ).fetchall()
+    return [
+        {
+            **dict(row),
+            "current": int(row["id"]) == int(user["current_club_id"]),
+        }
+        for row in rows
+    ]
+
+
+@app.post("/api/auth/club")
+def switch_active_club(
+    payload: ClubSwitchPayload,
+    authorization: str | None = Header(default=None),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    token = _extract_token(authorization)
+    with connect() as db:
+        club = db.execute(
+            "SELECT id, slug, name, active FROM clubs WHERE id = ? AND active = 1",
+            (payload.club_id,),
+        ).fetchone()
+        if club is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        role = _user_club_access(db, int(user["id"]), int(payload.club_id))
+        if role is None:
+            raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Verein")
+        cursor = db.execute(
+            """
+            UPDATE sessions
+            SET active_club_id = ?
+            WHERE token_hash = ? AND user_id = ?
+            """,
+            (payload.club_id, _token_hash(token), user["id"]),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=401, detail="Sitzung nicht gefunden")
+        db.commit()
+    return {
+        "club_id": int(club["id"]),
+        "slug": str(club["slug"]),
+        "name": str(club["name"]),
+        "club_role": role,
+    }
 
 
 @app.get("/api/roles")
