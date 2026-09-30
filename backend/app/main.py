@@ -2061,9 +2061,12 @@ def current_user(
     with connect() as db:
         row = db.execute(
             """
-            SELECT u.*, s.active_club_id
+            SELECT u.*, s.active_club_id, m.name AS member_name
             FROM sessions s
             JOIN users u ON u.id = s.user_id
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = s.active_club_id
             WHERE s.token_hash = ?
               AND s.expires_at > ?
               AND u.active = 1
@@ -3466,7 +3469,7 @@ def logout(
 
 @app.get("/api/auth/me")
 def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-    return _user_profile(user["id"])
+    return user
 
 
 @app.get("/api/clubs/accessible")
