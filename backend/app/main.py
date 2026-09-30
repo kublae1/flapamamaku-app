@@ -5662,35 +5662,55 @@ def reorder_members(
         return []
 
     with connect() as db:
+        club_id = _active_club_id(db)
+        placeholders = ",".join("?" for _ in payload.item_ids)
         rows = db.execute(
             f"""
             SELECT id
             FROM members
-            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
+            WHERE id IN ({placeholders}) AND club_id = ?
             """,
-            payload.item_ids,
+            [*payload.item_ids, club_id],
         ).fetchall()
-
         if len(rows) != len(set(payload.item_ids)):
             raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
 
-        current_ids = {
-            row["id"] for row in db.execute("SELECT id FROM members").fetchall()
-        }
-        if set(payload.item_ids) != current_ids:
-            raise HTTPException(
-                status_code=422,
-                detail="Mitgliederreihenfolge ist unvollständig",
-            )
+        all_ids = [
+            row["id"]
+            for row in db.execute(
+                """
+                SELECT id
+                FROM members
+                WHERE club_id = ?
+                ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC
+                """,
+                (club_id,),
+            ).fetchall()
+        ]
+        if set(all_ids) != set(payload.item_ids):
+            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist unvollständig")
 
         for position, member_id in enumerate(payload.item_ids, start=1):
             db.execute(
-                "UPDATE members SET sort_order = ? WHERE id = ?",
-                (position, member_id),
+                """
+                UPDATE members
+                SET sort_order = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (position, member_id, club_id),
             )
         db.commit()
+        ordered = db.execute(
+            """
+            SELECT *
+            FROM members
+            WHERE club_id = ?
+            ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC
+            """,
+            (club_id,),
+        ).fetchall()
 
-    return list_rows("members")
+    return [_serialize_member(row) for row in ordered]
 
 
 @app.post("/api/members")
@@ -5700,55 +5720,29 @@ def post_members(
 ) -> dict[str, Any]:
     item = create_row("members", payload)
     with connect() as db:
+        club_id = _active_club_id(db)
         max_order = db.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM members WHERE id != ?",
-            (item["id"],),
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM members
+            WHERE id != ? AND club_id = ?
+            """,
+            (item["id"], club_id),
         ).fetchone()[0]
         db.execute(
-            "UPDATE members SET sort_order = ? WHERE id = ?",
-            (int(max_order or 0) + 1, item["id"]),
+            """
+            UPDATE members
+            SET sort_order = ?
+            WHERE id = ? AND club_id = ?
+            """,
+            (int(max_order or 0) + 1, item["id"], club_id),
         )
         db.commit()
         row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (item["id"],),
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (item["id"], club_id),
         ).fetchone()
     return _serialize_member(row)
-
-
-@app.put("/api/members/order")
-def reorder_members(
-    payload: ContentOrderPayload,
-    _: dict[str, Any] = Depends(require("can_members")),
-) -> list[dict[str, Any]]:
-    if not payload.item_ids:
-        return []
-
-    with connect() as db:
-        rows = db.execute(
-            f"SELECT id FROM members WHERE id IN ({','.join('?' for _ in payload.item_ids)})",
-            payload.item_ids,
-        ).fetchall()
-        if len(rows) != len(set(payload.item_ids)):
-            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
-
-        all_ids = [row["id"] for row in db.execute(
-            "SELECT id FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
-        ).fetchall()]
-        if set(all_ids) != set(payload.item_ids):
-            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist unvollständig")
-
-        for position, member_id in enumerate(payload.item_ids, start=1):
-            db.execute(
-                "UPDATE members SET sort_order = ? WHERE id = ?",
-                (position, member_id),
-            )
-        db.commit()
-        ordered = db.execute(
-            "SELECT * FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
-        ).fetchall()
-
-    return [_serialize_member(row) for row in ordered]
 
 
 @app.put("/api/members/{row_id}")
