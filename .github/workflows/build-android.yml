@@ -8,7 +8,7 @@ on:
         required: false
         default: "flapamamaku"
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1, feature/white-label-push-v1, feature/white-label-profiles-v1, feature/club-instance-identity-v1 ]
+    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/white-label-colors-v1, feature/white-label-server-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/offline-cache-v1, feature/friendly-errors-v1, feature/e2e-tests-v1, feature/release-pipeline-v1, feature/public-smoke-v1, feature/prelogin-branding-v1, feature/white-label-app-icon-v1, feature/white-label-push-v1, feature/white-label-profiles-v1, feature/club-instance-identity-v1, feature/managed-server-mode-v1 ]
     tags:
       - 'v*'
 
@@ -47,7 +47,7 @@ jobs:
               raise SystemExit(f"White-label profile not found: {path}")
 
           data = json.loads(path.read_text())
-          required = ["id", "instance_id", "app_name", "app_subtitle", "api_base_url", "app_icon_url"]
+          required = ["id", "instance_id", "app_name", "app_subtitle", "api_base_url", "app_icon_url", "allow_server_change"]
           missing = [key for key in required if key not in data]
           if missing:
               raise SystemExit("Missing profile fields: " + ", ".join(missing))
@@ -68,6 +68,7 @@ jobs:
               "APP_DISPLAY_SUBTITLE": str(data["app_subtitle"]).strip(),
               "API_BASE_URL": str(data["api_base_url"]).rstrip("/"),
               "WHITE_LABEL_APP_ICON_URL": icon,
+              "ALLOW_SERVER_CHANGE": "true" if bool(data["allow_server_change"]) else "false",
           }
           if not values["APP_DISPLAY_NAME"]:
               raise SystemExit("Profile app_name must not be empty")
@@ -522,6 +523,7 @@ jobs:
             --dart-define=APP_NAME="$APP_NAME" \
             --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
             --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
             --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
             --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
@@ -547,6 +549,7 @@ jobs:
             --dart-define=APP_NAME="$APP_NAME" \
             --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
             --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
             --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
             --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
@@ -572,6 +575,7 @@ jobs:
             --dart-define=APP_NAME="$APP_NAME" \
             --dart-define=APP_SUBTITLE="$APP_SUBTITLE" \
             --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE" \
             --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
             --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID" \
             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
