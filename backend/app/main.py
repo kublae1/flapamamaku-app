@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.57"
+API_VERSION = "0.8.58"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +68,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -566,6 +566,17 @@ def _ensure_column(
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _ensure_club_column(db: sqlite3.Connection, table: str) -> None:
+    """Add the first tenant ownership column without changing legacy record IDs."""
+    _ensure_column(db, table, "club_id", "INTEGER NOT NULL DEFAULT 1")
+    db.execute(
+        f"UPDATE {table} SET club_id = 1 WHERE club_id IS NULL OR club_id = 0"
+    )
+    db.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{table}_club_id ON {table}(club_id)"
+    )
+
+
 def _apply_schema_migrations(db: sqlite3.Connection) -> None:
     """Record ordered schema migrations after the legacy bootstrap is reconciled."""
     db.execute(
@@ -587,6 +598,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (7, "club-instance-binding"),
         (8, "club-settings-permission"),
         (9, "multi-tenant-clubs-foundation"),
+        (10, "flapamamaku-club-data-migration"),
     ]
     applied = {
         int(row["version"])
@@ -1287,6 +1299,69 @@ def init_db() -> None:
                 SET phone_mobile = phone
                 WHERE phone_mobile = '' AND phone <> ''
                 """
+            )
+
+        # Package 2: assign all existing FLAPAMAMAKU-owned records to club 1.
+        # API filtering and multi-club user membership are intentionally deferred
+        # to the following controlled packages.
+        direct_club_tables = (
+            "news",
+            "events",
+            "members",
+            "app_config",
+            "member_filters",
+            "content_items",
+            "content_images",
+            "gallery_snapshots",
+            "push_notifications",
+        )
+        relation_club_tables = (
+            "member_filter_links",
+            "poll_votes",
+            "poll_suggestions",
+            "push_deliveries",
+            "event_registrations",
+        )
+        for table in (*direct_club_tables, *relation_club_tables):
+            _ensure_club_column(db, table)
+
+        # Keep current FLAPAMAMAKU appearance/configuration as the source of truth
+        # while introducing the central clubs row. Nothing in the app reads these
+        # copied fields yet, so existing runtime behaviour remains unchanged.
+        config = db.execute("SELECT * FROM app_config WHERE id = 1").fetchone()
+        if config is not None:
+            db.execute(
+                """
+                UPDATE clubs
+                SET
+                    name = ?,
+                    short_name = ?,
+                    logo = ?,
+                    logo_mime = ?,
+                    primary_color = ?,
+                    description = ?,
+                    website = ?,
+                    email = ?,
+                    phone = ?,
+                    address = ?,
+                    app_title = ?,
+                    updated_at = ?
+                WHERE id = 1 AND slug = 'flapamamaku'
+                """,
+                (
+                    str(config["app_name"] or "FLAPAMAMAKU"),
+                    str(config["app_name"] or "FLAPAMAMAKU"),
+                    config["logo_data"],
+                    str(config["logo_mime"] or ""),
+                    str(config["primary_color"] or "#8A101B"),
+                    str(config["club_description"] or ""),
+                    str(config["website_url"] or ""),
+                    str(config["contact_email"] or ""),
+                    str(config["contact_phone"] or ""),
+                    str(config["club_address"] or ""),
+                    str(config["app_name"] or "FLAPAMAMAKU"),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
 
         _apply_schema_migrations(db)
