@@ -4391,13 +4391,15 @@ def reorder_content_items(
         return []
 
     with connect() as db:
+        club_id = _active_club_id(db)
+        placeholders = ",".join("?" for _ in payload.item_ids)
         rows = db.execute(
             f"""
             SELECT id, section
             FROM content_items
-            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
+            WHERE id IN ({placeholders}) AND club_id = ?
             """,
-            payload.item_ids,
+            [*payload.item_ids, club_id],
         ).fetchall()
 
         if len(rows) != len(set(payload.item_ids)):
@@ -4412,15 +4414,16 @@ def reorder_content_items(
 
         section = next(iter(sections))
         _require_content_permission(section, user)
+        _require_section_feature(db, section)
 
         current_rows = db.execute(
             """
             SELECT id
             FROM content_items
-            WHERE section = ?
+            WHERE section = ? AND club_id = ?
             ORDER BY sort_order ASC, id ASC
             """,
-            (section,),
+            (section, club_id),
         ).fetchall()
         current_ids = [row["id"] for row in current_rows]
         if set(current_ids) != set(payload.item_ids):
@@ -4434,9 +4437,9 @@ def reorder_content_items(
                 """
                 UPDATE content_items
                 SET sort_order = ?
-                WHERE id = ? AND section = ?
+                WHERE id = ? AND section = ? AND club_id = ?
                 """,
-                (position, item_id, section),
+                (position, item_id, section, club_id),
             )
         db.commit()
 
@@ -4444,13 +4447,12 @@ def reorder_content_items(
             """
             SELECT *
             FROM content_items
-            WHERE section = ?
+            WHERE section = ? AND club_id = ?
             ORDER BY sort_order ASC, id ASC
             """,
-            (section,),
+            (section, club_id),
         ).fetchall()
-    return [_serialize_content(row) for row in ordered]
-
+    return [_serialize_content(row, user["id"]) for row in ordered]
 
 @app.post("/api/content")
 def post_content(
@@ -4503,10 +4505,7 @@ def post_content(
                 route=route,
             )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (cursor.lastrowid,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", cursor.lastrowid)
     return _serialize_content(row, user["id"])
 
 
@@ -4570,12 +4569,7 @@ async def upload_content_document(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         if existing["section"] != "documents":
             raise HTTPException(status_code=422, detail="PDF nur bei Dokumenten erlaubt")
@@ -4595,15 +4589,12 @@ async def upload_content_document(
             """
             UPDATE content_items
             SET document_data = ?, document_mime = 'application/pdf', document_name = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, filename, row_id),
+            (data, filename, row_id, _active_club_id(db)),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row, user["id"])
 
 
@@ -4617,9 +4608,9 @@ def get_content_document(
             """
             SELECT document_data, document_mime, document_name
             FROM content_items
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if row is None or row["document_data"] is None:
         raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
@@ -4640,20 +4631,15 @@ def delete_content_document(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         db.execute(
             """
             UPDATE content_items
             SET document_data = NULL, document_mime = '', document_name = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         db.commit()
 
