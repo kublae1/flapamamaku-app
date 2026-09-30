@@ -597,7 +597,7 @@ def main() -> None:
     )
     ok(
         client.get(
-            f"/api/gallery/snapshots/{snapshot['id']}/image",
+            f"/api/gallery/snapshots/{snapshot['snapshot_id']}/image",
             headers=club_headers,
         )
     )
@@ -647,7 +647,7 @@ def main() -> None:
         headers=super_headers,
     ).status_code == 404
     assert client.get(
-        f"/api/gallery/snapshots/{snapshot['id']}/image",
+        f"/api/gallery/snapshots/{snapshot['snapshot_id']}/image",
         headers=super_headers,
     ).status_code == 404
 
