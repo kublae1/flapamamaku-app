@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -199,6 +199,44 @@ jobs:
           status = health()
           assert status["instance_id"] == "test-verein", status
           print("club instance identity ok")
+          PY
+
+      - name: Test club setup status
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-setup-status.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-setup-status-backups
+          FLAPAMAMAKU_INSTANCE_ID: test-verein
+        run: |
+          rm -f /tmp/flapamamaku-setup-status.db
+          rm -rf /tmp/flapamamaku-setup-status-backups
+          python - <<'PY'
+          from app.main import _club_setup_status, connect, init_db
+
+          init_db()
+          initial = _club_setup_status()
+          assert initial["required_complete"] is False
+          assert initial["required"]["administrator"]["ok"] is False
+          assert initial["required"]["identity"]["ok"] is False
+          assert initial["required"]["contact"]["ok"] is False
+          assert initial["required"]["modules"]["ok"] is True
+
+          with connect() as db:
+              db.execute(
+                  """
+                  UPDATE app_config
+                  SET app_name = ?, contact_email = ?, club_description = ?
+                  WHERE id = 1
+                  """,
+                  ("Test Verein", "admin@test.invalid", "Testbeschreibung"),
+              )
+              db.commit()
+
+          updated = _club_setup_status()
+          assert updated["required"]["identity"]["ok"] is True
+          assert updated["required"]["contact"]["ok"] is True
+          assert updated["recommended"]["description"]["ok"] is True
+          assert updated["required_complete"] is False
+          print("club setup status ok")
           PY
 
       - name: Test production readiness
