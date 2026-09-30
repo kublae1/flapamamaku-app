@@ -5307,7 +5307,11 @@ def get_event_registrations(
     _: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     with connect() as db:
-        event = db.execute("SELECT id FROM events WHERE id = ?", (row_id,)).fetchone()
+        club_id = _active_club_id(db)
+        event = db.execute(
+            "SELECT id FROM events WHERE id = ? AND club_id = ?",
+            (row_id, club_id),
+        ).fetchone()
         if event is None:
             raise HTTPException(status_code=404, detail="Termin nicht gefunden")
         rows = db.execute(
@@ -5316,10 +5320,12 @@ def get_event_registrations(
             FROM event_registrations r
             JOIN users u ON u.id = r.user_id
             LEFT JOIN members m ON m.id = u.member_id
-            WHERE r.event_id = ? AND u.active = 1
+            WHERE r.event_id = ?
+              AND r.club_id = ?
+              AND u.active = 1
             ORDER BY name COLLATE NOCASE
             """,
-            (row_id,),
+            (row_id, club_id),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -5335,10 +5341,17 @@ def register_for_event(
             raise HTTPException(status_code=404, detail="Termin nicht gefunden")
         db.execute(
             """
-            INSERT OR IGNORE INTO event_registrations (event_id, user_id, created_at)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO event_registrations (
+                event_id, user_id, created_at, club_id
+            )
+            VALUES (?, ?, ?, ?)
             """,
-            (row_id, user["id"], datetime.now(timezone.utc).isoformat()),
+            (
+                row_id,
+                user["id"],
+                datetime.now(timezone.utc).isoformat(),
+                club_id,
+            ),
         )
         db.commit()
 
@@ -5349,9 +5362,19 @@ def unregister_from_event(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
+        club_id = _active_club_id(db)
+        event = db.execute(
+            "SELECT id FROM events WHERE id = ? AND club_id = ?",
+            (row_id, club_id),
+        ).fetchone()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
         db.execute(
-            "DELETE FROM event_registrations WHERE event_id = ? AND user_id = ?",
-            (row_id, user["id"]),
+            """
+            DELETE FROM event_registrations
+            WHERE event_id = ? AND user_id = ? AND club_id = ?
+            """,
+            (row_id, user["id"], club_id),
         )
         db.commit()
 
@@ -5362,7 +5385,11 @@ def delete_events(
     _: dict[str, Any] = Depends(require("can_events")),
 ) -> None:
     with connect() as db:
-        db.execute("DELETE FROM event_registrations WHERE event_id = ?", (row_id,))
+        club_id = _active_club_id(db)
+        db.execute(
+            "DELETE FROM event_registrations WHERE event_id = ? AND club_id = ?",
+            (row_id, club_id),
+        )
         db.commit()
     delete_row("events", row_id)
 
