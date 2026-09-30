@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -33,6 +33,90 @@ jobs:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-test.db
           FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-backups
         run: python -c "from app.main import init_db; init_db(); print('database ok')"
+
+      - name: Test multi-tenant clubs foundation
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-tenant-foundation.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-tenant-foundation-backups
+        run: |
+          rm -f /tmp/flapamamaku-tenant-foundation.db
+          rm -rf /tmp/flapamamaku-tenant-foundation-backups
+          python - <<'PY'
+          from app.main import CURRENT_SCHEMA_VERSION, connect, init_db
+
+          init_db()
+
+          with connect() as db:
+              tables = {
+                  row["name"]
+                  for row in db.execute(
+                      "SELECT name FROM sqlite_master WHERE type='table'"
+                  ).fetchall()
+              }
+              assert "clubs" in tables
+
+              columns = {
+                  row["name"]
+                  for row in db.execute("PRAGMA table_info(clubs)").fetchall()
+              }
+              required = {
+                  "id", "slug", "name", "short_name", "active", "logo",
+                  "primary_color", "secondary_color", "created_at", "updated_at",
+                  "description", "website", "email", "phone", "address",
+                  "city", "country", "app_title", "welcome_text",
+              }
+              assert required.issubset(columns), required - columns
+
+              club = db.execute(
+                  "SELECT * FROM clubs WHERE slug = ?",
+                  ("flapamamaku",),
+              ).fetchone()
+              assert club is not None
+              assert club["id"] == 1
+              assert club["name"] == "FLAPAMAMAKU"
+              assert club["short_name"] == "FLAPAMAMAKU"
+              assert club["active"] == 1
+
+              migration = db.execute(
+                  "SELECT name FROM schema_migrations WHERE version = 9"
+              ).fetchone()
+              assert migration is not None
+              assert migration["name"] == "multi-tenant-clubs-foundation"
+              assert CURRENT_SCHEMA_VERSION == 9
+
+              member = db.execute(
+                  """
+                  INSERT INTO members (name, role, since, created_at)
+                  VALUES (?, ?, ?, ?)
+                  """,
+                  ("Paket 1 Bestand", "Mitglied", "2026", "2026-09-30T00:00:00+00:00"),
+              )
+              member_id = member.lastrowid
+              news = db.execute(
+                  """
+                  INSERT INTO news (title, text, date, created_at)
+                  VALUES (?, ?, ?, ?)
+                  """,
+                  ("Paket 1 Bestand", "Unverändert", "30.09.2026", "2026-09-30T00:00:00+00:00"),
+              )
+              news_id = news.lastrowid
+              db.commit()
+
+          init_db()
+
+          with connect() as db:
+              assert db.execute("SELECT COUNT(*) FROM clubs").fetchone()[0] == 1
+              assert db.execute(
+                  "SELECT id FROM members WHERE name = ?",
+                  ("Paket 1 Bestand",),
+              ).fetchone()[0] == member_id
+              assert db.execute(
+                  "SELECT id FROM news WHERE title = ?",
+                  ("Paket 1 Bestand",),
+              ).fetchone()[0] == news_id
+
+          print("multi-tenant clubs foundation ok")
+          PY
 
       - name: Test backup and restore
         env:
@@ -351,7 +435,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 8
+          assert CURRENT_SCHEMA_VERSION == 9
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
           assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
