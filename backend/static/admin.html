@@ -969,6 +969,14 @@
           Für diese Vereinsverwaltung sind weder GitHub noch Docker-Kenntnisse erforderlich.
         </p>
       </div>
+      <div class="card" id="setup-status-card" style="margin-bottom:16px">
+        <div class="preview-heading">
+          <h2>Einrichtungsstatus</h2>
+          <span class="meta" id="setup-status-summary">Wird geprüft …</span>
+        </div>
+        <div id="setup-status-required"></div>
+        <div id="setup-status-recommended" style="margin-top:14px"></div>
+      </div>
       <div class="grid">
         <form class="card" id="app-config-form">
           <div class="preview-heading">
@@ -2544,11 +2552,30 @@ async function loadSystem() {
   const statusBox = document.getElementById("system-status");
   const backupList = document.getElementById("system-backup-list");
   try {
-    const [status, backups, readiness] = await Promise.all([
+    const [status, backups, readiness, setup] = await Promise.all([
       api("/api/system/status"),
       api("/api/system/backups"),
       api("/api/system/readiness"),
+      api("/api/system/setup-status"),
     ]);
+
+    const setupSummary = document.getElementById("setup-status-summary");
+    const requiredBox = document.getElementById("setup-status-required");
+    const recommendedBox = document.getElementById("setup-status-recommended");
+    if (setupSummary && requiredBox && recommendedBox) {
+      setupSummary.textContent = setup.required_complete
+        ? "Grundkonfiguration vollständig"
+        : `${setup.required_done}/${setup.required_total} Pflichtpunkte erledigt`;
+
+      const renderSetupItems = items => Object.values(items || {}).map(item =>
+        `<div style="margin:5px 0">${item.ok ? "✅" : "⬜"} ${item.label}</div>`
+      ).join("");
+
+      requiredBox.innerHTML =
+        '<h3>Pflicht</h3>' + renderSetupItems(setup.required);
+      recommendedBox.innerHTML =
+        '<h3>Empfohlen</h3>' + renderSetupItems(setup.recommended);
+    }
     const latest = status.latest_backup
       ? `${formatDateTimeCH(status.latest_backup.created_at)} · ${formatBytes(status.latest_backup.size_bytes)}`
       : "Noch kein Backup vorhanden";
