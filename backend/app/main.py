@@ -3426,6 +3426,7 @@ def _create_poll(
                 int(payload.allow_suggestions),
                 max_order + 1,
                 now,
+                _active_club_id(db),
             ),
         )
         rule = CONTENT_PUSH_RULES.get("polls")
@@ -3440,8 +3441,8 @@ def _create_poll(
             )
         db.commit()
         row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (cursor.lastrowid,),
+            "SELECT * FROM content_items WHERE id = ? AND club_id = ?",
+            (cursor.lastrowid, _active_club_id(db)),
         ).fetchone()
     return _serialize_content(row, user["id"])
 
@@ -3556,16 +3557,17 @@ def get_content(
     section: str | None = None,
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM content_items"
-    values: list[Any] = []
+    sql = "SELECT * FROM content_items WHERE club_id = ?"
     if section:
         _content_permission(section)
-        sql += " WHERE section = ?"
-        values.append(section)
+        sql += " AND section = ?"
     sql += " ORDER BY sort_order ASC, id ASC"
 
     with connect() as db:
         _cleanup_expired_snapshots(db)
+        values: list[Any] = [_active_club_id(db)]
+        if section:
+            values.append(section)
         rows = db.execute(sql, values).fetchall()
         snapshots: list[sqlite3.Row] = []
         if section is None or section == "gallery":
@@ -3575,10 +3577,10 @@ def get_content(
                 FROM gallery_snapshots gs
                 JOIN users u ON u.id = gs.user_id
                 LEFT JOIN members m ON m.id = u.member_id
-                WHERE gs.expires_at > ?
+                WHERE gs.expires_at > ? AND gs.club_id = ?
                 ORDER BY gs.created_at DESC, gs.id DESC
                 """,
-                (datetime.now(timezone.utc).isoformat(),),
+                (datetime.now(timezone.utc).isoformat(), _active_club_id(db)),
             ).fetchall()
         db.commit()
 
@@ -3669,16 +3671,16 @@ def post_content(
             """
             SELECT COALESCE(MAX(sort_order), 0)
             FROM content_items
-            WHERE section = ?
+            WHERE section = ? AND club_id = ?
             """,
-            (payload.section,),
+            (payload.section, _active_club_id(db)),
         ).fetchone()[0]
         cursor = db.execute(
             """
             INSERT INTO content_items (
                 section, title, text, link_url, poll_options,
-                poll_allow_suggestions, sort_order, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                poll_allow_suggestions, sort_order, created_at, club_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.section,
