@@ -5403,8 +5403,10 @@ def get_member_filters(
             """
             SELECT id, label, active, sort_order
             FROM member_filters
+            WHERE club_id = ?
             ORDER BY sort_order ASC, label COLLATE NOCASE ASC, id ASC
-            """
+            """,
+            (_active_club_id(db),),
         ).fetchall()
     return [
         {
@@ -5424,27 +5426,39 @@ def post_member_filter(
 ) -> dict[str, Any]:
     with connect() as db:
         sort_order = db.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM member_filters"
+            """
+            SELECT COALESCE(MAX(sort_order), 0) + 1
+            FROM member_filters
+            WHERE club_id = ?
+            """,
+            (_active_club_id(db),),
         ).fetchone()[0]
         try:
             cursor = db.execute(
                 """
-                INSERT INTO member_filters (label, active, sort_order, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO member_filters (
+                    label, active, sort_order, created_at, club_id
+                )
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     payload.label.strip(),
                     1 if payload.active else 0,
                     sort_order,
                     datetime.now(timezone.utc).isoformat(),
+                    _active_club_id(db),
                 ),
             )
             db.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Filter existiert bereits")
         row = db.execute(
-            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
-            (cursor.lastrowid,),
+            """
+            SELECT id, label, active, sort_order
+            FROM member_filters
+            WHERE id = ? AND club_id = ?
+            """,
+            (cursor.lastrowid, _active_club_id(db)),
         ).fetchone()
     return {
         "id": int(row["id"]),
@@ -5460,13 +5474,24 @@ def reorder_member_filters(
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> list[dict[str, Any]]:
     with connect() as db:
-        ids = {int(row["id"]) for row in db.execute("SELECT id FROM member_filters")}
+        club_id = _active_club_id(db)
+        ids = {
+            int(row["id"])
+            for row in db.execute(
+                "SELECT id FROM member_filters WHERE club_id = ?",
+                (club_id,),
+            )
+        }
         if set(payload.item_ids) != ids:
             raise HTTPException(status_code=422, detail="Filterreihenfolge ist unvollständig")
         for position, filter_id in enumerate(payload.item_ids, start=1):
             db.execute(
-                "UPDATE member_filters SET sort_order = ? WHERE id = ?",
-                (position, filter_id),
+                """
+                UPDATE member_filters
+                SET sort_order = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (position, filter_id, club_id),
             )
         db.commit()
     return get_member_filters(_)
@@ -5481,8 +5506,17 @@ def put_member_filter(
     with connect() as db:
         try:
             cursor = db.execute(
-                "UPDATE member_filters SET label = ?, active = ? WHERE id = ?",
-                (payload.label.strip(), 1 if payload.active else 0, filter_id),
+                """
+                UPDATE member_filters
+                SET label = ?, active = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (
+                    payload.label.strip(),
+                    1 if payload.active else 0,
+                    filter_id,
+                    _active_club_id(db),
+                ),
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Filter nicht gefunden")
@@ -5490,8 +5524,12 @@ def put_member_filter(
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Filter existiert bereits")
         row = db.execute(
-            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
-            (filter_id,),
+            """
+            SELECT id, label, active, sort_order
+            FROM member_filters
+            WHERE id = ? AND club_id = ?
+            """,
+            (filter_id, _active_club_id(db)),
         ).fetchone()
     return {
         "id": int(row["id"]),
@@ -5507,8 +5545,18 @@ def delete_member_filter(
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> None:
     with connect() as db:
-        db.execute("DELETE FROM member_filter_links WHERE filter_id = ?", (filter_id,))
-        cursor = db.execute("DELETE FROM member_filters WHERE id = ?", (filter_id,))
+        club_id = _active_club_id(db)
+        db.execute(
+            """
+            DELETE FROM member_filter_links
+            WHERE filter_id = ? AND club_id = ?
+            """,
+            (filter_id, club_id),
+        )
+        cursor = db.execute(
+            "DELETE FROM member_filters WHERE id = ? AND club_id = ?",
+            (filter_id, club_id),
+        )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Filter nicht gefunden")
         db.commit()
