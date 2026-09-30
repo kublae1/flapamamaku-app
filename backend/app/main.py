@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -57,7 +58,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.63"
+API_VERSION = "0.8.64"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +69,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -99,6 +100,11 @@ app = FastAPI(
     docs_url=None if IS_PRODUCTION else "/api/docs",
     openapi_url=None if IS_PRODUCTION else "/openapi.json",
     redoc_url=None,
+)
+
+_REQUEST_CLUB_ID: ContextVar[int | None] = ContextVar(
+    "flapamamaku_request_club_id",
+    default=None,
 )
 
 ALLOWED_ORIGINS = [
@@ -372,6 +378,10 @@ class ClubFeaturesPayload(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
 
 
+class ClubSwitchPayload(BaseModel):
+    club_id: int = Field(gt=0)
+
+
 class PollVotePayload(BaseModel):
     option_index: int = Field(ge=0, le=20)
 
@@ -629,6 +639,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (10, "flapamamaku-club-data-migration"),
         (11, "user-club-memberships"),
         (12, "club-features"),
+        (13, "session-active-club"),
     ]
     applied = {
         int(row["version"])
@@ -1254,6 +1265,14 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
+            """
+        )
+        _ensure_column(db, "sessions", "active_club_id", "INTEGER")
+        db.execute(
+            """
+            UPDATE sessions
+            SET active_club_id = 1
+            WHERE active_club_id IS NULL OR active_club_id = 0
             """
         )
 
@@ -1981,8 +2000,7 @@ def table_or_404(name: str) -> tuple[str, type[BaseModel]]:
     return table
 
 
-def _active_club_id(db: sqlite3.Connection) -> int:
-    """Resolve the server-side tenant from the configured instance identity."""
+def _instance_club_id(db: sqlite3.Connection) -> int:
     row = db.execute(
         "SELECT id FROM clubs WHERE slug = ? AND active = 1",
         (INSTANCE_ID,),
@@ -1990,6 +2008,19 @@ def _active_club_id(db: sqlite3.Connection) -> int:
     if row is None:
         raise RuntimeError(f"Active club not found for instance '{INSTANCE_ID}'")
     return int(row["id"])
+
+
+def _active_club_id(db: sqlite3.Connection) -> int:
+    """Resolve the current request club, falling back to the instance club."""
+    request_club_id = _REQUEST_CLUB_ID.get()
+    if request_club_id is not None:
+        row = db.execute(
+            "SELECT id FROM clubs WHERE id = ? AND active = 1",
+            (request_club_id,),
+        ).fetchone()
+        if row is not None:
+            return int(row["id"])
+    return _instance_club_id(db)
 
 
 def _club_features(
