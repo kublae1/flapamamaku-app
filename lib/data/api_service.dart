@@ -26,6 +26,11 @@ class ApiService {
               ),
         );
 
+  static const expectedInstanceId = String.fromEnvironment(
+    'CLUB_INSTANCE_ID',
+    defaultValue: 'flapamamaku',
+  );
+
   String _baseUrl;
   String get baseUrl => _baseUrl;
 
@@ -134,6 +139,23 @@ class ApiService {
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final serverInstanceId =
+        json['instance_id']?.toString().trim().toLowerCase() ?? '';
+    final expected = expectedInstanceId.trim().toLowerCase();
+    if (serverInstanceId.isEmpty) {
+      throw const ApiException(
+        'Der Vereinsserver hat keine gültige Instanz-ID.',
+        statusCode: 409,
+      );
+    }
+    if (expected.isNotEmpty && serverInstanceId != expected) {
+      throw ApiException(
+        'Dieser Server gehört zu einem anderen Verein '
+        '(erwartet: $expected, gefunden: $serverInstanceId).',
+        statusCode: 409,
+      );
+    }
+
     final logoUrl = json['logo_url']?.toString() ?? '';
     if (logoUrl.startsWith('/')) {
       json['logo_url'] = '$baseUrl$logoUrl';
