@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.62"
+API_VERSION = "0.8.63"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2064,6 +2064,50 @@ def _set_club_features(
         )
 
 
+RESOURCE_FEATURES: dict[str, str] = {
+    "news": "news",
+    "events": "events",
+    "members": "members",
+}
+
+SECTION_FEATURES: dict[str, str] = {
+    "documents": "documents",
+    "gallery": "gallery",
+    "photos": "photos",
+    "sujet": "sujet_next",
+    "archive": "sujet_archive",
+    "polls": "polls",
+    "links": "links",
+    "whatsapp": "links",
+}
+
+
+def _require_club_feature(
+    db: sqlite3.Connection,
+    feature_key: str,
+) -> None:
+    if not _club_feature_enabled(db, feature_key):
+        raise HTTPException(status_code=404, detail="Modul nicht aktiviert")
+
+
+def _require_resource_feature(
+    db: sqlite3.Connection,
+    resource: str,
+) -> None:
+    feature_key = RESOURCE_FEATURES.get(resource)
+    if feature_key is not None:
+        _require_club_feature(db, feature_key)
+
+
+def _require_section_feature(
+    db: sqlite3.Connection,
+    section: str,
+) -> None:
+    feature_key = SECTION_FEATURES.get(section)
+    if feature_key is not None:
+        _require_club_feature(db, feature_key)
+
+
 def _active_club_membership(
     db: sqlite3.Connection,
     user_id: int,
@@ -2177,6 +2221,7 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
         order = "name COLLATE NOCASE ASC, id ASC"
 
     with connect() as db:
+        _require_resource_feature(db, resource)
         club_id = _active_club_id(db)
         rows = db.execute(
             f"SELECT * FROM {resource} WHERE club_id = ? ORDER BY {order}",
@@ -2196,6 +2241,7 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     data["created_at"] = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        _require_resource_feature(db, resource)
         data["club_id"] = _active_club_id(db)
         if resource in {"members", "news"}:
             data["sort_order"] = db.execute(
@@ -2234,6 +2280,7 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
     member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     assignments = ", ".join(f"{column} = ?" for column in data)
     with connect() as db:
+        _require_resource_feature(db, resource)
         cursor = db.execute(
             f"UPDATE {resource} SET {assignments} WHERE id = ? AND club_id = ?",
             [*data.values(), row_id, _active_club_id(db)],
@@ -2265,6 +2312,7 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
 def delete_row(resource: str, row_id: int) -> None:
     table_or_404(resource)
     with connect() as db:
+        _require_resource_feature(db, resource)
         cursor = db.execute(
             f"DELETE FROM {resource} WHERE id = ? AND club_id = ?",
             (row_id, _active_club_id(db)),
@@ -3907,6 +3955,7 @@ def get_polls(
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     with connect() as db:
+        _require_club_feature(db, "polls")
         rows = db.execute(
             """
             SELECT *
@@ -3957,10 +4006,21 @@ def get_content(
 
     with connect() as db:
         _cleanup_expired_snapshots(db)
+        if section:
+            _require_section_feature(db, section)
         values: list[Any] = [_active_club_id(db)]
         if section:
             values.append(section)
         rows = db.execute(sql, values).fetchall()
+        if not section:
+            rows = [
+                row for row in rows
+                if SECTION_FEATURES.get(str(row["section"])) is None
+                or _club_feature_enabled(
+                    db,
+                    SECTION_FEATURES[str(row["section"])],
+                )
+            ]
         snapshots: list[sqlite3.Row] = []
         if section is None or section == "gallery":
             snapshots = db.execute(
@@ -4059,6 +4119,7 @@ def post_content(
     _require_content_permission(payload.section, user)
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        _require_section_feature(db, payload.section)
         max_order = db.execute(
             """
             SELECT COALESCE(MAX(sort_order), 0)
