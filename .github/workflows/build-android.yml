@@ -618,3 +618,4 @@ jobs:
             build/app/outputs/SHA256SUMS.txt \\
             --title "$APP_DISPLAY_NAME $GITHUB_REF_NAME" \\
             --generate-notes
+# final-release-validation-sync

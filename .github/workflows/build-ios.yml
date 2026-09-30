@@ -191,3 +191,4 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/ios/iphoneos/Runner.app/Info.plist
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/ios/iphoneos/Runner.app/Info.plist
           echo "Unsigned iOS foundation build passed."
+# final-release-validation-sync
