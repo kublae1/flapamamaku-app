@@ -3,7 +3,7 @@ name: Validate White Label Profiles
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/profile-registry-validation-v1 ]
+    branches: [ main, feature/profile-registry-validation-v1, feature/neutral-club-template-v1 ]
     paths:
       - "config/white-label/**"
       - ".github/workflows/validate-white-label-profiles.yml"
