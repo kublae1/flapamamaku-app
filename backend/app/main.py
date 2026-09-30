@@ -58,7 +58,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.64"
+API_VERSION = "0.8.65"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -69,7 +69,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -410,6 +410,24 @@ class ClubSwitchPayload(BaseModel):
     club_id: int = Field(gt=0)
 
 
+class ClubCreatePayload(BaseModel):
+    slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    name: str = Field(min_length=1, max_length=120)
+    short_name: str = Field(default="", max_length=80)
+    subtitle: str = Field(default="", max_length=120)
+    primary_color: str = Field(default="#8A101B", pattern=r"^#[0-9A-Fa-f]{6}$")
+    secondary_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    description: str = Field(default="", max_length=4000)
+    website: str = Field(default="", max_length=500)
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=80)
+    address: str = Field(default="", max_length=500)
+    city: str = Field(default="", max_length=160)
+    country: str = Field(default="", max_length=120)
+    app_title: str = Field(default="", max_length=120)
+    welcome_text: str = Field(default="", max_length=2000)
+
+
 class PollVotePayload(BaseModel):
     option_index: int = Field(ge=0, le=20)
 
@@ -668,6 +686,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (11, "user-club-memberships"),
         (12, "club-features"),
         (13, "session-active-club"),
+        (14, "club-provisioning"),
     ]
     applied = {
         int(row["version"])
@@ -1008,6 +1027,20 @@ def init_db() -> None:
                         datetime.now(timezone.utc).isoformat(),
                     ),
                 )
+
+        _ensure_column(db, "clubs", "subtitle", "TEXT NOT NULL DEFAULT ''")
+        legacy_subtitle = db.execute(
+            "SELECT app_subtitle FROM app_config WHERE id = 1"
+        ).fetchone()
+        if legacy_subtitle is not None:
+            db.execute(
+                """
+                UPDATE clubs
+                SET subtitle = ?
+                WHERE id = 1 AND subtitle = ''
+                """,
+                (str(legacy_subtitle["app_subtitle"] or ""),),
+            )
 
         _ensure_column(db, "app_config", "logo_data", "BLOB")
         _ensure_column(db, "app_config", "logo_mime", "TEXT NOT NULL DEFAULT ''")
@@ -2721,7 +2754,7 @@ def _app_config() -> dict[str, Any]:
         "slug": str(club["slug"] or ""),
         "app_name": str(club["name"] or "FLAPAMAMAKU"),
         "short_name": str(club["short_name"] or club["name"] or ""),
-        "app_subtitle": str(app_row["app_subtitle"] or "") if app_row is not None else "",
+        "app_subtitle": str(club["subtitle"] or ""),
         "primary_color": str(club["primary_color"] or "#8A101B"),
         "secondary_color": str(club["secondary_color"] or "#FFFFFF"),
         "logo_url": "/api/app-config/logo" if club["logo"] else "",
@@ -2763,10 +2796,15 @@ def _club_setup_status() -> dict[str, Any]:
             db.execute(
                 """
                 SELECT 1
-                FROM users
-                WHERE active = 1 AND can_manage_users = 1
+                FROM users u
+                JOIN user_clubs uc ON uc.user_id = u.id
+                WHERE u.active = 1
+                  AND u.can_manage_users = 1
+                  AND uc.club_id = ?
+                  AND uc.active = 1
                 LIMIT 1
-                """
+                """,
+                (_active_club_id(db),),
             ).fetchone()
         )
 
@@ -2907,6 +2945,7 @@ def put_app_config(
             SET
                 name = ?,
                 short_name = ?,
+                subtitle = ?,
                 primary_color = ?,
                 secondary_color = ?,
                 description = ?,
@@ -2924,6 +2963,7 @@ def put_app_config(
             (
                 values["app_name"].strip(),
                 values["short_name"].strip() or values["app_name"].strip(),
+                values["app_subtitle"].strip(),
                 values["primary_color"].upper(),
                 values["secondary_color"].upper(),
                 values["club_description"].strip(),
@@ -2961,44 +3001,45 @@ def put_app_config(
             },
         )
 
-        # Keep the legacy module columns synchronized during the transition.
-        db.execute(
-            """
-            UPDATE app_config
-            SET
-                app_subtitle = ?,
-                show_sujet = ?,
-                label_sujet = ?,
-                show_archive = ?,
-                label_archive = ?,
-                show_photos = ?,
-                label_photos = ?,
-                show_documents = ?,
-                label_documents = ?,
-                show_polls = ?,
-                label_polls = ?,
-                show_links = ?,
-                label_links = ?,
-                updated_at = ?
-            WHERE id = 1
-            """,
-            (
-                values["app_subtitle"].strip(),
-                int(values["show_sujet"]),
-                values["label_sujet"].strip(),
-                int(values["show_archive"]),
-                values["label_archive"].strip(),
-                int(values["show_photos"]),
-                values["label_photos"].strip(),
-                int(values["show_documents"]),
-                values["label_documents"].strip(),
-                int(values["show_polls"]),
-                values["label_polls"].strip(),
-                int(values["show_links"]),
-                values["label_links"].strip(),
-                now,
-            ),
-        )
+        if club_id == 1:
+            # Keep the legacy module columns synchronized during the transition.
+            db.execute(
+                """
+                UPDATE app_config
+                SET
+                    app_subtitle = ?,
+                    show_sujet = ?,
+                    label_sujet = ?,
+                    show_archive = ?,
+                    label_archive = ?,
+                    show_photos = ?,
+                    label_photos = ?,
+                    show_documents = ?,
+                    label_documents = ?,
+                    show_polls = ?,
+                    label_polls = ?,
+                    show_links = ?,
+                    label_links = ?,
+                    updated_at = ?
+                WHERE id = 1
+                """,
+                (
+                    values["app_subtitle"].strip(),
+                    int(values["show_sujet"]),
+                    values["label_sujet"].strip(),
+                    int(values["show_archive"]),
+                    values["label_archive"].strip(),
+                    int(values["show_photos"]),
+                    values["label_photos"].strip(),
+                    int(values["show_documents"]),
+                    values["label_documents"].strip(),
+                    int(values["show_polls"]),
+                    values["label_polls"].strip(),
+                    int(values["show_links"]),
+                    values["label_links"].strip(),
+                    now,
+                ),
+            )
 
         # Keep the original FLAPAMAMAKU compatibility row synchronized while
         # the app migrates to the central clubs configuration.
