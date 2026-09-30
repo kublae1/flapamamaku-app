@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.60"
+API_VERSION = "0.8.61"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -323,13 +323,19 @@ class PollPayload(BaseModel):
 
 class AppConfigPayload(BaseModel):
     app_name: str = Field(default="FLAPAMAMAKU", min_length=1, max_length=80)
+    short_name: str = Field(default="", max_length=80)
     app_subtitle: str = Field(default="Fasnachtsgruppe Luzern", max_length=120)
     primary_color: str = Field(default="#8A101B", pattern=r"^#[0-9A-Fa-f]{6}$")
+    secondary_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
     club_description: str = Field(default="", max_length=4000)
     website_url: str = Field(default="", max_length=500)
     contact_email: str = Field(default="", max_length=320)
     contact_phone: str = Field(default="", max_length=80)
     club_address: str = Field(default="", max_length=500)
+    city: str = Field(default="", max_length=160)
+    country: str = Field(default="", max_length=120)
+    app_title: str = Field(default="", max_length=120)
+    welcome_text: str = Field(default="", max_length=2000)
     show_sujet: bool = True
     label_sujet: str = Field(default="Sujet nächstes Jahr", min_length=1, max_length=80)
     show_archive: bool = True
@@ -2302,18 +2308,14 @@ def _require_content_permission(
 
 def _app_config() -> dict[str, Any]:
     with connect() as db:
-        row = db.execute(
+        club = db.execute(
+            "SELECT * FROM clubs WHERE id = ?",
+            (_active_club_id(db),),
+        ).fetchone()
+        modules = db.execute(
             """
             SELECT
-                app_name,
                 app_subtitle,
-                primary_color,
-                logo_data,
-                club_description,
-                website_url,
-                contact_email,
-                contact_phone,
-                club_address,
                 show_sujet,
                 label_sujet,
                 show_archive,
@@ -2330,56 +2332,43 @@ def _app_config() -> dict[str, Any]:
             WHERE id = 1
             """
         ).fetchone()
-    if row is None:
-        return {
-            "instance_id": INSTANCE_ID,
-            "app_name": "FLAPAMAMAKU",
-            "app_subtitle": "Fasnachtsgruppe Luzern",
-            "primary_color": "#8A101B",
-            "logo_url": "",
-            "club_description": "",
-            "website_url": "",
-            "contact_email": "",
-            "contact_phone": "",
-            "club_address": "",
-            "show_sujet": True,
-            "label_sujet": "Sujet nächstes Jahr",
-            "show_archive": True,
-            "label_archive": "Vergangene Sujet",
-            "show_photos": True,
-            "label_photos": "Fotoalben",
-            "show_documents": True,
-            "label_documents": "Dokumente",
-            "show_polls": True,
-            "label_polls": "Umfragen",
-            "show_links": True,
-            "label_links": "Links",
-        }
+
+    if club is None:
+        raise RuntimeError("Active club configuration is missing")
+
+    module_values = dict(modules) if modules is not None else {}
     return {
         "instance_id": INSTANCE_ID,
-        "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
-        "app_subtitle": str(row["app_subtitle"] or ""),
-        "primary_color": str(row["primary_color"] or "#8A101B"),
-        "logo_url": "/api/app-config/logo" if row["logo_data"] else "",
-        "club_description": str(row["club_description"] or ""),
-        "website_url": str(row["website_url"] or ""),
-        "contact_email": str(row["contact_email"] or ""),
-        "contact_phone": str(row["contact_phone"] or ""),
-        "club_address": str(row["club_address"] or ""),
-        "show_sujet": bool(row["show_sujet"]),
-        "label_sujet": str(row["label_sujet"] or "Sujet nächstes Jahr"),
-        "show_archive": bool(row["show_archive"]),
-        "label_archive": str(row["label_archive"] or "Vergangene Sujet"),
-        "show_photos": bool(row["show_photos"]),
-        "label_photos": str(row["label_photos"] or "Fotoalben"),
-        "show_documents": bool(row["show_documents"]),
-        "label_documents": str(row["label_documents"] or "Dokumente"),
-        "show_polls": bool(row["show_polls"]),
-        "label_polls": str(row["label_polls"] or "Umfragen"),
-        "show_links": bool(row["show_links"]),
-        "label_links": str(row["label_links"] or "Links"),
+        "club_id": int(club["id"]),
+        "slug": str(club["slug"] or ""),
+        "app_name": str(club["name"] or "FLAPAMAMAKU"),
+        "short_name": str(club["short_name"] or club["name"] or ""),
+        "app_subtitle": str(module_values.get("app_subtitle") or ""),
+        "primary_color": str(club["primary_color"] or "#8A101B"),
+        "secondary_color": str(club["secondary_color"] or "#FFFFFF"),
+        "logo_url": "/api/app-config/logo" if club["logo"] else "",
+        "club_description": str(club["description"] or ""),
+        "website_url": str(club["website"] or ""),
+        "contact_email": str(club["email"] or ""),
+        "contact_phone": str(club["phone"] or ""),
+        "club_address": str(club["address"] or ""),
+        "city": str(club["city"] or ""),
+        "country": str(club["country"] or ""),
+        "app_title": str(club["app_title"] or ""),
+        "welcome_text": str(club["welcome_text"] or ""),
+        "show_sujet": bool(module_values.get("show_sujet", 1)),
+        "label_sujet": str(module_values.get("label_sujet") or "Sujet nächstes Jahr"),
+        "show_archive": bool(module_values.get("show_archive", 1)),
+        "label_archive": str(module_values.get("label_archive") or "Vergangene Sujet"),
+        "show_photos": bool(module_values.get("show_photos", 1)),
+        "label_photos": str(module_values.get("label_photos") or "Fotoalben"),
+        "show_documents": bool(module_values.get("show_documents", 1)),
+        "label_documents": str(module_values.get("label_documents") or "Dokumente"),
+        "show_polls": bool(module_values.get("show_polls", 1)),
+        "label_polls": str(module_values.get("label_polls") or "Umfragen"),
+        "show_links": bool(module_values.get("show_links", 1)),
+        "label_links": str(module_values.get("label_links") or "Links"),
     }
-
 
 def _club_setup_status() -> dict[str, Any]:
     config = _app_config()
@@ -2507,64 +2496,69 @@ def put_app_config(
     values = payload.model_dump()
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        club_id = _active_club_id(db)
         db.execute(
             """
-            INSERT INTO app_config (
-                id,
-                app_name,
-                app_subtitle,
-                primary_color,
-                club_description,
-                website_url,
-                contact_email,
-                contact_phone,
-                club_address,
-                show_sujet,
-                label_sujet,
-                show_archive,
-                label_archive,
-                show_photos,
-                label_photos,
-                show_documents,
-                label_documents,
-                show_polls,
-                label_polls,
-                show_links,
-                label_links,
-                updated_at
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                app_name = excluded.app_name,
-                app_subtitle = excluded.app_subtitle,
-                primary_color = excluded.primary_color,
-                club_description = excluded.club_description,
-                website_url = excluded.website_url,
-                contact_email = excluded.contact_email,
-                contact_phone = excluded.contact_phone,
-                club_address = excluded.club_address,
-                show_sujet = excluded.show_sujet,
-                label_sujet = excluded.label_sujet,
-                show_archive = excluded.show_archive,
-                label_archive = excluded.label_archive,
-                show_photos = excluded.show_photos,
-                label_photos = excluded.label_photos,
-                show_documents = excluded.show_documents,
-                label_documents = excluded.label_documents,
-                show_polls = excluded.show_polls,
-                label_polls = excluded.label_polls,
-                show_links = excluded.show_links,
-                label_links = excluded.label_links,
-                updated_at = excluded.updated_at
+            UPDATE clubs
+            SET
+                name = ?,
+                short_name = ?,
+                primary_color = ?,
+                secondary_color = ?,
+                description = ?,
+                website = ?,
+                email = ?,
+                phone = ?,
+                address = ?,
+                city = ?,
+                country = ?,
+                app_title = ?,
+                welcome_text = ?,
+                updated_at = ?
+            WHERE id = ?
             """,
             (
                 values["app_name"].strip(),
-                values["app_subtitle"].strip(),
+                values["short_name"].strip() or values["app_name"].strip(),
                 values["primary_color"].upper(),
+                values["secondary_color"].upper(),
                 values["club_description"].strip(),
                 values["website_url"].strip(),
                 values["contact_email"].strip(),
                 values["contact_phone"].strip(),
                 values["club_address"].strip(),
+                values["city"].strip(),
+                values["country"].strip(),
+                values["app_title"].strip(),
+                values["welcome_text"].strip(),
+                now,
+                club_id,
+            ),
+        )
+
+        # Module switches remain in the legacy row until package 6.
+        db.execute(
+            """
+            UPDATE app_config
+            SET
+                app_subtitle = ?,
+                show_sujet = ?,
+                label_sujet = ?,
+                show_archive = ?,
+                label_archive = ?,
+                show_photos = ?,
+                label_photos = ?,
+                show_documents = ?,
+                label_documents = ?,
+                show_polls = ?,
+                label_polls = ?,
+                show_links = ?,
+                label_links = ?,
+                updated_at = ?
+            WHERE id = 1
+            """,
+            (
+                values["app_subtitle"].strip(),
                 int(values["show_sujet"]),
                 values["label_sujet"].strip(),
                 int(values["show_archive"]),
@@ -2580,20 +2574,47 @@ def put_app_config(
                 now,
             ),
         )
+
+        # Keep the original FLAPAMAMAKU compatibility row synchronized while
+        # the app migrates to the central clubs configuration.
+        if club_id == 1:
+            db.execute(
+                """
+                UPDATE app_config
+                SET
+                    app_name = ?,
+                    primary_color = ?,
+                    club_description = ?,
+                    website_url = ?,
+                    contact_email = ?,
+                    contact_phone = ?,
+                    club_address = ?
+                WHERE id = 1
+                """,
+                (
+                    values["app_name"].strip(),
+                    values["primary_color"].upper(),
+                    values["club_description"].strip(),
+                    values["website_url"].strip(),
+                    values["contact_email"].strip(),
+                    values["contact_phone"].strip(),
+                    values["club_address"].strip(),
+                ),
+            )
         db.commit()
     return _app_config()
-
 
 @app.get("/api/app-config/logo")
 def get_app_logo() -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT logo_data, logo_mime FROM app_config WHERE id = 1"
+            "SELECT logo, logo_mime FROM clubs WHERE id = ?",
+            (_active_club_id(db),),
         ).fetchone()
-    if row is None or not row["logo_data"]:
+    if row is None or not row["logo"]:
         raise HTTPException(status_code=404, detail="Logo nicht vorhanden")
     return Response(
-        content=row["logo_data"],
+        content=row["logo"],
         media_type=row["logo_mime"] or "image/webp",
         headers={"Cache-Control": "no-cache"},
     )
@@ -2607,18 +2628,25 @@ async def upload_app_logo(
     raw = await logo.read()
     optimized, mime = _optimize_image(raw, logo.content_type or "")
     with connect() as db:
+        club_id = _active_club_id(db)
+        now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            UPDATE app_config
-            SET logo_data = ?, logo_mime = ?, updated_at = ?
-            WHERE id = 1
+            UPDATE clubs
+            SET logo = ?, logo_mime = ?, updated_at = ?
+            WHERE id = ?
             """,
-            (
-                optimized,
-                mime,
-                datetime.now(timezone.utc).isoformat(),
-            ),
+            (optimized, mime, now, club_id),
         )
+        if club_id == 1:
+            db.execute(
+                """
+                UPDATE app_config
+                SET logo_data = ?, logo_mime = ?, updated_at = ?
+                WHERE id = 1
+                """,
+                (optimized, mime, now),
+            )
         db.commit()
     return _app_config()
 
@@ -2628,14 +2656,25 @@ def delete_app_logo(
     _: dict[str, Any] = Depends(require("can_manage_settings")),
 ) -> None:
     with connect() as db:
+        club_id = _active_club_id(db)
+        now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            UPDATE app_config
-            SET logo_data = NULL, logo_mime = '', updated_at = ?
-            WHERE id = 1
+            UPDATE clubs
+            SET logo = NULL, logo_mime = '', updated_at = ?
+            WHERE id = ?
             """,
-            (datetime.now(timezone.utc).isoformat(),),
+            (now, club_id),
         )
+        if club_id == 1:
+            db.execute(
+                """
+                UPDATE app_config
+                SET logo_data = NULL, logo_mime = '', updated_at = ?
+                WHERE id = 1
+                """,
+                (now,),
+            )
         db.commit()
 
 
