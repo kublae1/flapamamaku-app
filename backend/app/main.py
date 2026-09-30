@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.56"
+API_VERSION = "0.8.57"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +68,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -586,6 +586,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (6, "user-roles-and-permission-overrides"),
         (7, "club-instance-binding"),
         (8, "club-settings-permission"),
+        (9, "multi-tenant-clubs-foundation"),
     ]
     applied = {
         int(row["version"])
@@ -798,6 +799,48 @@ def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS clubs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                name TEXT NOT NULL,
+                short_name TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                logo BLOB,
+                logo_mime TEXT NOT NULL DEFAULT '',
+                primary_color TEXT NOT NULL DEFAULT '#8A101B',
+                secondary_color TEXT NOT NULL DEFAULT '#FFFFFF',
+                description TEXT NOT NULL DEFAULT '',
+                website TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                phone TEXT NOT NULL DEFAULT '',
+                address TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT '',
+                country TEXT NOT NULL DEFAULT '',
+                app_title TEXT NOT NULL DEFAULT '',
+                welcome_text TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        club_now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT OR IGNORE INTO clubs (
+                slug, name, short_name, active,
+                primary_color, secondary_color,
+                created_at, updated_at
+            ) VALUES (
+                'flapamamaku', 'FLAPAMAMAKU', 'FLAPAMAMAKU', 1,
+                '#8A101B', '#FFFFFF',
+                ?, ?
+            )
+            """,
+            (club_now, club_now),
+        )
 
         db.execute(
             """
