@@ -1060,6 +1060,8 @@
           <input name="interval_months" type="number" min="1" max="24" value="12">
           <label>Zahlungsziel in Tagen</label>
           <input name="due_days" type="number" min="1" max="90" value="30">
+          <label>Kulanzfrist nach Fälligkeit in Tagen</label>
+          <input name="grace_days" type="number" min="0" max="365" value="0">
           <label>Nächstes Rechnungsdatum</label>
           <input name="next_invoice_date" type="date">
           <label style="display:flex;align-items:center;gap:8px">
@@ -1515,6 +1517,7 @@ function fillBillingSettings(club) {
   form.elements.amount_chf.value = (Number(club.billing_amount_rappen || 0) / 100).toFixed(2);
   form.elements.interval_months.value = Number(club.billing_interval_months || 12);
   form.elements.due_days.value = Number(club.billing_due_days || 30);
+  form.elements.grace_days.value = Number(club.billing_grace_days || 0);
   form.elements.next_invoice_date.value = club.billing_next_invoice_date || "";
   form.elements.auto_suspend.checked = club.billing_auto_suspend !== false;
   document.getElementById("billing-settings-status").textContent =
@@ -1545,13 +1548,36 @@ async function loadBillingInvoices(clubId) {
           Betrag ${formatCHF(invoice.amount_rappen)} · Status:
           <strong>${invoice.status === "paid" ? "bezahlt" : "offen"}</strong>
         </div>
-        ${invoice.status === "open" ? `
-          <div class="actions">
-            <button type="button" data-billing-paid="${invoice.id}">Als bezahlt verbuchen</button>
-          </div>
-        ` : ""}
+        <div class="actions">
+          <button type="button" data-billing-pdf="${invoice.id}" data-billing-number="${invoice.invoice_number}">PDF erzeugen</button>
+          ${invoice.status === "open" ? `<button type="button" data-billing-paid="${invoice.id}">Als bezahlt verbuchen</button>` : ""}
+        </div>
       `;
       box.appendChild(row);
+    });
+    box.querySelectorAll("[data-billing-pdf]").forEach(button => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const headers = token ? {Authorization: `Bearer ${token}`} : {};
+          const response = await fetch(`/api/operator/billing/invoices/${button.dataset.billingPdf}/pdf`, {headers});
+          if (!response.ok) throw new Error(await response.text());
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `vereinsrechnung-${button.dataset.billingNumber || button.dataset.billingPdf}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 30000);
+        } catch (error) {
+          alert("PDF-Rechnung konnte nicht erzeugt werden.");
+          console.error(error);
+        } finally {
+          button.disabled = false;
+        }
+      });
     });
     box.querySelectorAll("[data-billing-paid]").forEach(button => {
       button.addEventListener("click", async () => {
@@ -1607,6 +1633,7 @@ async function loadBillingAdmin() {
           ${suspended && club.billing_suspension_reason ? " · " + club.billing_suspension_reason : ""}<br>
           Periodenbetrag: ${formatCHF(club.billing_amount_rappen)} ·
           Offen: ${formatCHF(club.open_amount_rappen)} in ${club.open_invoice_count || 0} Rechnung(en)<br>
+          Zahlungsziel: ${club.billing_due_days || 30} Tage · Kulanz: ${club.billing_grace_days || 0} Tage<br>
           Nächste Rechnung: ${club.billing_next_invoice_date || "nicht eingerichtet"}
         </div>
       `;
@@ -1645,6 +1672,7 @@ document.getElementById("billing-settings-form")?.addEventListener("submit", asy
         amount_rappen: amountRappen,
         interval_months: Number(form.elements.interval_months.value || 12),
         due_days: Number(form.elements.due_days.value || 30),
+        grace_days: Number(form.elements.grace_days.value || 0),
         next_invoice_date: form.elements.next_invoice_date.value || "",
         auto_suspend: form.elements.auto_suspend.checked,
       }),
