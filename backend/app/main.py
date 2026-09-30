@@ -3826,6 +3826,17 @@ def put_user(
 
     values.append(user_id)
     with connect() as db:
+        club_id = _active_club_id(db)
+        target = db.execute(
+            """
+            SELECT 1
+            FROM user_clubs
+            WHERE user_id = ? AND club_id = ? AND active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if target is None:
+            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
         try:
             cursor = db.execute(
                 f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
@@ -3847,7 +3858,16 @@ def revoke_user_sessions(
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> None:
     with connect() as db:
-        user = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        club_id = _active_club_id(db)
+        user = db.execute(
+            """
+            SELECT u.id
+            FROM users u
+            JOIN user_clubs uc ON uc.user_id = u.id
+            WHERE u.id = ? AND uc.club_id = ? AND uc.active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
         if user is None:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
         db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
@@ -3862,10 +3882,29 @@ def delete_user(
     if user_id == actor["id"]:
         raise HTTPException(status_code=400, detail="Eigenes Konto kann nicht gelöscht werden")
     with connect() as db:
-        db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-        cursor = db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        if cursor.rowcount == 0:
+        club_id = _active_club_id(db)
+        membership = db.execute(
+            """
+            SELECT role
+            FROM user_clubs
+            WHERE user_id = ? AND club_id = ? AND active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if membership is None:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+
+        db.execute(
+            "DELETE FROM user_clubs WHERE user_id = ? AND club_id = ?",
+            (user_id, club_id),
+        )
+        remaining = db.execute(
+            "SELECT 1 FROM user_clubs WHERE user_id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if remaining is None:
+            db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         db.commit()
 
 
@@ -5124,8 +5163,13 @@ def reorder_news(
         return []
 
     with connect() as db:
+        club_id = _active_club_id(db)
         current_ids = {
-            int(row["id"]) for row in db.execute("SELECT id FROM news").fetchall()
+            int(row["id"])
+            for row in db.execute(
+                "SELECT id FROM news WHERE club_id = ?",
+                (club_id,),
+            ).fetchall()
         }
         if set(payload.item_ids) != current_ids:
             raise HTTPException(
@@ -5134,8 +5178,12 @@ def reorder_news(
             )
         for position, news_id in enumerate(payload.item_ids, start=1):
             db.execute(
-                "UPDATE news SET sort_order = ? WHERE id = ?",
-                (position, news_id),
+                """
+                UPDATE news
+                SET sort_order = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (position, news_id, club_id),
             )
         db.commit()
 
@@ -5204,14 +5252,17 @@ async def upload_news_image(
             """
             UPDATE news
             SET image_data = ?, image_mime = ?, image_url = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, row_id),
+            (data, optimized_mime, row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
         db.commit()
-        row = db.execute("SELECT * FROM news WHERE id = ?", (row_id,)).fetchone()
+        row = db.execute(
+            "SELECT * FROM news WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
+        ).fetchone()
     return _serialize_news(row)
 
 
@@ -5222,8 +5273,12 @@ def get_news_image(
 ) -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT image_data, image_mime FROM news WHERE id = ?",
-            (row_id,),
+            """
+            SELECT image_data, image_mime
+            FROM news
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
         ).fetchone()
 
     if row is None or row["image_data"] is None:
@@ -5246,9 +5301,9 @@ def delete_news_image(
             """
             UPDATE news
             SET image_data = NULL, image_mime = '', image_url = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
@@ -5362,7 +5417,11 @@ def register_for_event(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        event = db.execute("SELECT id FROM events WHERE id = ?", (row_id,)).fetchone()
+        club_id = _active_club_id(db)
+        event = db.execute(
+            "SELECT id FROM events WHERE id = ? AND club_id = ?",
+            (row_id, club_id),
+        ).fetchone()
         if event is None:
             raise HTTPException(status_code=404, detail="Termin nicht gefunden")
         db.execute(
@@ -5645,8 +5704,8 @@ async def upload_my_member_photo(
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
         db.commit()
         row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (member_id,),
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (member_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_member(row)
 
