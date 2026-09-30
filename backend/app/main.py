@@ -1992,6 +1992,78 @@ def _active_club_id(db: sqlite3.Connection) -> int:
     return int(row["id"])
 
 
+def _club_features(
+    db: sqlite3.Connection,
+    club_id: int | None = None,
+) -> dict[str, dict[str, Any]]:
+    resolved_club_id = club_id if club_id is not None else _active_club_id(db)
+    rows = db.execute(
+        """
+        SELECT feature_key, enabled, label
+        FROM club_features
+        WHERE club_id = ?
+        ORDER BY feature_key
+        """,
+        (resolved_club_id,),
+    ).fetchall()
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        result[str(row["feature_key"])] = {
+            "enabled": bool(row["enabled"]),
+            "label": str(row["label"] or ""),
+        }
+    return result
+
+
+def _club_feature_enabled(
+    db: sqlite3.Connection,
+    feature_key: str,
+    club_id: int | None = None,
+) -> bool:
+    feature = _club_features(db, club_id).get(feature_key)
+    if feature is not None:
+        return bool(feature["enabled"])
+    default = CLUB_FEATURE_DEFAULTS.get(feature_key)
+    return bool(default[1]) if default is not None else False
+
+
+def _set_club_features(
+    db: sqlite3.Connection,
+    club_id: int,
+    features: dict[str, bool],
+    labels: dict[str, str] | None = None,
+) -> None:
+    labels = labels or {}
+    unknown = sorted(set(features) - set(CLUB_FEATURE_DEFAULTS))
+    unknown_labels = sorted(set(labels) - set(CLUB_FEATURE_DEFAULTS))
+    if unknown or unknown_labels:
+        invalid = ", ".join(unknown + unknown_labels)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unbekanntes Modul: {invalid}",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    for feature_key, enabled in features.items():
+        default_label = CLUB_FEATURE_DEFAULTS[feature_key][0]
+        label = str(labels.get(feature_key) or default_label).strip()[:80]
+        db.execute(
+            """
+            INSERT INTO club_features (
+                club_id, feature_key, enabled, label, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(club_id, feature_key) DO UPDATE SET
+                enabled = excluded.enabled,
+                label = CASE
+                    WHEN excluded.label <> '' THEN excluded.label
+                    ELSE club_features.label
+                END,
+                updated_at = excluded.updated_at
+            """,
+            (club_id, feature_key, int(bool(enabled)), label, now, now),
+        )
+
+
 def _active_club_membership(
     db: sqlite3.Connection,
     user_id: int,
@@ -2426,42 +2498,44 @@ def _require_content_permission(
 
 def _app_config() -> dict[str, Any]:
     with connect() as db:
+        club_id = _active_club_id(db)
         club = db.execute(
             "SELECT * FROM clubs WHERE id = ?",
-            (_active_club_id(db),),
+            (club_id,),
         ).fetchone()
-        modules = db.execute(
+        app_row = db.execute(
             """
-            SELECT
-                app_subtitle,
-                show_sujet,
-                label_sujet,
-                show_archive,
-                label_archive,
-                show_photos,
-                label_photos,
-                show_documents,
-                label_documents,
-                show_polls,
-                label_polls,
-                show_links,
-                label_links
+            SELECT app_subtitle
             FROM app_config
             WHERE id = 1
             """
         ).fetchone()
+        features = _club_features(db, club_id)
 
     if club is None:
         raise RuntimeError("Active club configuration is missing")
 
-    module_values = dict(modules) if modules is not None else {}
+    def enabled(key: str) -> bool:
+        value = features.get(key)
+        if value is not None:
+            return bool(value["enabled"])
+        default = CLUB_FEATURE_DEFAULTS.get(key)
+        return bool(default[1]) if default is not None else False
+
+    def label(key: str) -> str:
+        value = features.get(key)
+        if value is not None and str(value["label"] or "").strip():
+            return str(value["label"]).strip()
+        default = CLUB_FEATURE_DEFAULTS.get(key)
+        return default[0] if default is not None else key
+
     return {
         "instance_id": INSTANCE_ID,
         "club_id": int(club["id"]),
         "slug": str(club["slug"] or ""),
         "app_name": str(club["name"] or "FLAPAMAMAKU"),
         "short_name": str(club["short_name"] or club["name"] or ""),
-        "app_subtitle": str(module_values.get("app_subtitle") or ""),
+        "app_subtitle": str(app_row["app_subtitle"] or "") if app_row is not None else "",
         "primary_color": str(club["primary_color"] or "#8A101B"),
         "secondary_color": str(club["secondary_color"] or "#FFFFFF"),
         "logo_url": "/api/app-config/logo" if club["logo"] else "",
@@ -2474,18 +2548,26 @@ def _app_config() -> dict[str, Any]:
         "country": str(club["country"] or ""),
         "app_title": str(club["app_title"] or ""),
         "welcome_text": str(club["welcome_text"] or ""),
-        "show_sujet": bool(module_values.get("show_sujet", 1)),
-        "label_sujet": str(module_values.get("label_sujet") or "Sujet nächstes Jahr"),
-        "show_archive": bool(module_values.get("show_archive", 1)),
-        "label_archive": str(module_values.get("label_archive") or "Vergangene Sujet"),
-        "show_photos": bool(module_values.get("show_photos", 1)),
-        "label_photos": str(module_values.get("label_photos") or "Fotoalben"),
-        "show_documents": bool(module_values.get("show_documents", 1)),
-        "label_documents": str(module_values.get("label_documents") or "Dokumente"),
-        "show_polls": bool(module_values.get("show_polls", 1)),
-        "label_polls": str(module_values.get("label_polls") or "Umfragen"),
-        "show_links": bool(module_values.get("show_links", 1)),
-        "label_links": str(module_values.get("label_links") or "Links"),
+        "features": features,
+        "show_news": enabled("news"),
+        "show_events": enabled("events"),
+        "show_members": enabled("members"),
+        "show_gallery": enabled("gallery"),
+        "show_sujet": enabled("sujet_next"),
+        "label_sujet": label("sujet_next"),
+        "show_archive": enabled("sujet_archive"),
+        "label_archive": label("sujet_archive"),
+        "show_photos": enabled("photos"),
+        "label_photos": label("photos"),
+        "show_documents": enabled("documents"),
+        "label_documents": label("documents"),
+        "show_polls": enabled("polls"),
+        "label_polls": label("polls"),
+        "show_links": enabled("links"),
+        "label_links": label("links"),
+        "show_push_notifications": enabled("push_notifications"),
+        "show_calendar": enabled("calendar"),
+        "show_participant_lists": enabled("participant_lists"),
     }
 
 def _club_setup_status() -> dict[str, Any]:
@@ -2606,6 +2688,24 @@ def get_app_config() -> dict[str, Any]:
     return _app_config()
 
 
+@app.get("/api/app-config/features")
+def get_app_features() -> dict[str, dict[str, Any]]:
+    with connect() as db:
+        return _club_features(db)
+
+
+@app.put("/api/app-config/features")
+def put_app_features(
+    payload: ClubFeaturesPayload,
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, dict[str, Any]]:
+    with connect() as db:
+        club_id = _active_club_id(db)
+        _set_club_features(db, club_id, payload.features, payload.labels)
+        db.commit()
+        return _club_features(db, club_id)
+
+
 @app.put("/api/app-config")
 def put_app_config(
     payload: AppConfigPayload,
@@ -2654,7 +2754,28 @@ def put_app_config(
             ),
         )
 
-        # Module switches remain in the legacy row until package 6.
+        _set_club_features(
+            db,
+            club_id,
+            {
+                "sujet_next": bool(values["show_sujet"]),
+                "sujet_archive": bool(values["show_archive"]),
+                "photos": bool(values["show_photos"]),
+                "documents": bool(values["show_documents"]),
+                "polls": bool(values["show_polls"]),
+                "links": bool(values["show_links"]),
+            },
+            {
+                "sujet_next": values["label_sujet"].strip(),
+                "sujet_archive": values["label_archive"].strip(),
+                "photos": values["label_photos"].strip(),
+                "documents": values["label_documents"].strip(),
+                "polls": values["label_polls"].strip(),
+                "links": values["label_links"].strip(),
+            },
+        )
+
+        # Keep the legacy module columns synchronized during the transition.
         db.execute(
             """
             UPDATE app_config
