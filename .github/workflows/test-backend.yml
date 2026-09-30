@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3 ]
+    branches: [ main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -82,7 +82,7 @@ jobs:
               ).fetchone()
               assert migration is not None
               assert migration["name"] == "multi-tenant-clubs-foundation"
-              assert CURRENT_SCHEMA_VERSION == 10
+              assert CURRENT_SCHEMA_VERSION == 11
 
               member = db.execute(
                   """
@@ -208,7 +208,7 @@ jobs:
           init_db()
 
           with connect() as db:
-              assert CURRENT_SCHEMA_VERSION == 10
+              assert CURRENT_SCHEMA_VERSION == 11
               assert db.execute("SELECT id, club_id FROM news WHERE id = 41").fetchone()[:] == (41, 1)
               assert db.execute("SELECT id, club_id FROM events WHERE id = 51").fetchone()[:] == (51, 1)
               assert db.execute("SELECT id, club_id FROM members WHERE id = 61").fetchone()[:] == (61, 1)
@@ -350,6 +350,118 @@ jobs:
               ).fetchone()[0] == 1
 
           print("package 3 API tenant isolation ok")
+          PY
+
+      - name: Test package 4 user club memberships
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-package4-users.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-package4-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-package4-users.db
+          rm -rf /tmp/flapamamaku-package4-backups
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from fastapi import HTTPException
+          from starlette.requests import Request
+          from app.main import (
+              CURRENT_SCHEMA_VERSION,
+              LoginPayload,
+              _hash_password,
+              connect,
+              current_user,
+              init_db,
+              login,
+          )
+
+          init_db()
+          assert CURRENT_SCHEMA_VERSION == 11
+
+          with connect() as db:
+              now = datetime.now(timezone.utc).isoformat()
+              password_hash, salt = _hash_password("Geheim123!")
+              cursor = db.execute(
+                  """
+                  INSERT INTO users (
+                      username, password_hash, password_salt, active,
+                      role_key, permission_overrides, created_at
+                  ) VALUES (?, ?, ?, 1, 'member', '{}', ?)
+                  """,
+                  ("package4-user", password_hash, salt, now),
+              )
+              user_id = cursor.lastrowid
+              db.execute(
+                  """
+                  INSERT INTO user_clubs (
+                      user_id, club_id, role, active, created_at, updated_at
+                  ) VALUES (?, 1, 'member', 1, ?, ?)
+                  """,
+                  (user_id, now, now),
+              )
+              db.execute(
+                  """
+                  INSERT INTO clubs (
+                      slug, name, short_name, active,
+                      primary_color, secondary_color, created_at, updated_at
+                  ) VALUES (
+                      'testverein', 'Testverein', 'Testverein', 1,
+                      '#000000', '#FFFFFF', ?, ?
+                  )
+                  """,
+                  (now, now),
+              )
+              foreign_club_id = db.execute(
+                  "SELECT id FROM clubs WHERE slug = 'testverein'"
+              ).fetchone()[0]
+              db.commit()
+
+          scope = {
+              "type": "http",
+              "method": "POST",
+              "path": "/api/auth/login",
+              "headers": [],
+              "client": ("127.0.0.1", 12345),
+              "server": ("testserver", 80),
+              "scheme": "http",
+              "query_string": b"",
+          }
+          request = Request(scope)
+          result = login(
+              request,
+              LoginPayload(username="package4-user", password="Geheim123!"),
+          )
+          assert result["user"]["current_club_id"] == 1
+          assert result["user"]["club_role"] == "member"
+
+          with connect() as db:
+              db.execute(
+                  """
+                  UPDATE user_clubs
+                  SET active = 0
+                  WHERE user_id = ? AND club_id = 1
+                  """,
+                  (user_id,),
+              )
+              db.execute(
+                  """
+                  INSERT INTO user_clubs (
+                      user_id, club_id, role, active, created_at, updated_at
+                  ) VALUES (?, ?, 'member', 1, ?, ?)
+                  """,
+                  (user_id, foreign_club_id, now, now),
+              )
+              db.commit()
+
+          try:
+              login(
+                  request,
+                  LoginPayload(username="package4-user", password="Geheim123!"),
+              )
+              raise AssertionError("login without active FLAPAMAMAKU membership was accepted")
+          except HTTPException as exc:
+              assert exc.status_code == 401
+
+          print("package 4 user club memberships ok")
           PY
 
       - name: Test backup and restore
@@ -669,7 +781,7 @@ jobs:
           )
 
           init_db()
-          assert CURRENT_SCHEMA_VERSION == 10
+          assert CURRENT_SCHEMA_VERSION == 11
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_settings"] is True
           assert ROLE_DEFINITIONS["board"]["permissions"]["can_manage_users"] is False
           assert ROLE_DEFINITIONS["admin"]["permissions"]["can_manage_settings"] is True
