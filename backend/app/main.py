@@ -164,7 +164,35 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    response = await call_next(request)
+    context_token = None
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Bearer "):
+        raw_token = authorization[7:].strip()
+        if raw_token:
+            try:
+                with connect() as db:
+                    session = db.execute(
+                        """
+                        SELECT active_club_id
+                        FROM sessions
+                        WHERE token_hash = ? AND expires_at > ?
+                        """,
+                        (
+                            _token_hash(raw_token),
+                            datetime.now(timezone.utc).isoformat(),
+                        ),
+                    ).fetchone()
+                    if session is not None and session["active_club_id"]:
+                        context_token = _REQUEST_CLUB_ID.set(
+                            int(session["active_club_id"])
+                        )
+            except sqlite3.Error:
+                context_token = None
+    try:
+        response = await call_next(request)
+    finally:
+        if context_token is not None:
+            _REQUEST_CLUB_ID.reset(context_token)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -1927,28 +1955,30 @@ def _serialize_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
 
 def _user_profile(user_id: int) -> dict[str, Any]:
     with connect() as db:
+        club_id = _active_club_id(db)
         row = db.execute(
             """
             SELECT
                 u.*,
-                m.name AS member_name,
-                uc.role AS club_role,
-                uc.club_id AS current_club_id
+                m.name AS member_name
             FROM users u
-            JOIN user_clubs uc
-              ON uc.user_id = u.id
-             AND uc.club_id = ?
-             AND uc.active = 1
             LEFT JOIN members m
               ON m.id = u.member_id
-             AND m.club_id = uc.club_id
+             AND m.club_id = ?
             WHERE u.id = ?
             """,
-            (_active_club_id(db), user_id),
+            (club_id, user_id),
         ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
-    return _serialize_user(row)
+        if row is None:
+            raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
+        club_role = _user_club_access(db, user_id, club_id)
+        if club_role is None:
+            raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+        item = dict(row)
+        item["club_role"] = club_role
+        item["current_club_id"] = club_id
+        item["is_super_admin"] = club_role == "super_admin"
+    return _serialize_user(item)
 
 
 def _extract_token(authorization: str | None) -> str:
@@ -1960,6 +1990,38 @@ def _extract_token(authorization: str | None) -> str:
     return token
 
 
+def _is_super_admin(db: sqlite3.Connection, user_id: int) -> bool:
+    return bool(
+        db.execute(
+            """
+            SELECT 1
+            FROM user_clubs
+            WHERE user_id = ? AND active = 1 AND role = 'super_admin'
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+    )
+
+
+def _user_club_access(
+    db: sqlite3.Connection,
+    user_id: int,
+    club_id: int,
+) -> str | None:
+    if _is_super_admin(db, user_id):
+        return "super_admin"
+    row = db.execute(
+        """
+        SELECT role
+        FROM user_clubs
+        WHERE user_id = ? AND club_id = ? AND active = 1
+        """,
+        (user_id, club_id),
+    ).fetchone()
+    return str(row["role"]) if row is not None else None
+
+
 def current_user(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
@@ -1968,21 +2030,32 @@ def current_user(
     with connect() as db:
         row = db.execute(
             """
-            SELECT u.*, uc.role AS club_role, uc.club_id AS current_club_id
+            SELECT u.*, s.active_club_id
             FROM sessions s
             JOIN users u ON u.id = s.user_id
-            JOIN user_clubs uc ON uc.user_id = u.id
             WHERE s.token_hash = ?
               AND s.expires_at > ?
               AND u.active = 1
-              AND uc.club_id = ?
-              AND uc.active = 1
             """,
-            (_token_hash(token), now, _active_club_id(db)),
+            (_token_hash(token), now),
         ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
-    return _serialize_user(row)
+        if row is None:
+            raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
+
+        club_id = int(row["active_club_id"] or _instance_club_id(db))
+        club = db.execute(
+            "SELECT id FROM clubs WHERE id = ? AND active = 1",
+            (club_id,),
+        ).fetchone()
+        club_role = _user_club_access(db, int(row["id"]), club_id)
+        if club is None or club_role is None:
+            raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+
+        item = dict(row)
+        item["club_role"] = club_role
+        item["current_club_id"] = club_id
+        item["is_super_admin"] = club_role == "super_admin"
+    return _serialize_user(item)
 
 
 def require(permission: str):
