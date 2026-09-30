@@ -228,28 +228,30 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           ),
                         ),
-                        const SizedBox(height: 14),
-                        TextButton.icon(
-                          onPressed: _changeServer,
-                          icon: const Icon(Icons.dns_outlined),
-                          label: Text(
-                            store.serverConfigured
-                                ? 'Vereinsserver wechseln'
-                                : 'Vereinsserver einrichten',
-                          ),
-                        ),
-                        if (store.serverConfigured) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            store.serverUrl,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 11,
+                        if (store.canChangeServer) ...[
+                          const SizedBox(height: 14),
+                          TextButton.icon(
+                            onPressed: _changeServer,
+                            icon: const Icon(Icons.dns_outlined),
+                            label: Text(
+                              store.serverConfigured
+                                  ? 'Vereinsserver wechseln'
+                                  : 'Vereinsserver einrichten',
                             ),
                           ),
+                          if (store.serverConfigured) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              store.serverUrl,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white38,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
                         ],
                         const SizedBox(height: 16),
                         const Row(
