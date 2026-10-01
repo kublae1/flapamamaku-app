@@ -5633,6 +5633,11 @@ def switch_active_club(
     authorization: str | None = Header(default=None),
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur der Plattform-Super-Admin darf zwischen Vereinen wechseln",
+        )
     token = _extract_token(authorization)
     with connect() as db:
         club = db.execute(
