@@ -403,7 +403,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
     if (link.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('FLAPAMAMAKU Chat-Link ist noch nicht hinterlegt.'),
+          content: Text('${store.appName} Chat-Link ist noch nicht hinterlegt.'),
         ),
       );
       return;
@@ -412,7 +412,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
     final uri = Uri.tryParse(link);
     if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'http')) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('FLAPAMAMAKU Chat-Link ist ungültig.')),
+        SnackBar(content: Text('${store.appName} Chat-Link ist ungültig.')),
       );
       return;
     }
@@ -626,7 +626,13 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
         actions: [
-          if (AppStoreScope.of(context).currentUser?['member_id'] == member.id)
+          if (() {
+            final rawMemberId = AppStoreScope.of(context).currentUser?['member_id'];
+            final currentMemberId = rawMemberId is int
+                ? rawMemberId
+                : int.tryParse(rawMemberId?.toString() ?? '');
+            return currentMemberId != null && currentMemberId == member.id;
+          }())
             IconButton(
               tooltip: 'Meine Daten bearbeiten',
               onPressed: () => _editOwnProfile(context),
@@ -712,7 +718,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                     ),
                     _MemberQuickAction(
                       icon: Icons.forum_outlined,
-                      label: 'FLAPAMAMAKU Chat',
+                      label: '${AppStoreScope.of(context).appName} Chat',
                       enabled: true,
                       onTap: () => _openFlapChat(context),
                     ),
