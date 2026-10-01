@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.83"
+API_VERSION = "0.8.84"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -493,6 +493,12 @@ class PasswordChangePayload(BaseModel):
 
 class PasswordResetPayload(BaseModel):
     temporary_password: str = Field(min_length=8, max_length=200)
+
+
+class SuperAdminAccountPayload(BaseModel):
+    username: str = Field(min_length=1, max_length=120)
+    current_password: str = Field(min_length=6, max_length=200)
+    new_password: str = Field(default="", max_length=200)
 
 
 class BootstrapPayload(LoginPayload):
@@ -4680,6 +4686,11 @@ def bootstrap_members() -> list[dict[str, Any]]:
 
 @app.post("/api/auth/bootstrap")
 def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
+    if len(payload.password) < 8:
+        raise HTTPException(
+            status_code=422,
+            detail="Passwort muss mindestens 8 Zeichen haben",
+        )
     with connect() as db:
         count = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if count:
@@ -4988,6 +4999,102 @@ def change_own_password(
             "Passwort durch Benutzer geändert",
         )
         db.commit()
+    return current_user(authorization=authorization)
+
+
+@app.put("/api/auth/superadmin-account")
+def update_superadmin_account(
+    payload: SuperAdminAccountPayload,
+    authorization: str | None = Header(default=None),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur der Plattform-Super-Admin darf dieses Konto bearbeiten",
+        )
+
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="Benutzername darf nicht leer sein")
+    if payload.new_password and len(payload.new_password) < 8:
+        raise HTTPException(
+            status_code=422,
+            detail="Neues Passwort muss mindestens 8 Zeichen haben",
+        )
+    if payload.new_password and payload.new_password == payload.current_password:
+        raise HTTPException(
+            status_code=422,
+            detail="Das neue Passwort muss sich vom bisherigen Passwort unterscheiden",
+        )
+
+    user_id = int(user["id"])
+    with connect() as db:
+        row = db.execute(
+            "SELECT password_hash, password_salt FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if row is None or not _check_password(
+            payload.current_password,
+            row["password_hash"],
+            row["password_salt"],
+        ):
+            raise HTTPException(status_code=401, detail="Aktuelles Passwort ist falsch")
+
+        existing = db.execute(
+            """
+            SELECT id FROM users
+            WHERE username = ? COLLATE NOCASE AND id != ?
+            LIMIT 1
+            """,
+            (username, user_id),
+        ).fetchone()
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="Benutzername bereits vorhanden")
+
+        assignments = [
+            "username = ?",
+            "member_id = NULL",
+            "role_key = 'admin'",
+            "permission_overrides = '{}'",
+        ]
+        values: list[Any] = [username]
+        for key in PERMISSION_FIELDS:
+            assignments.append(f"{key} = 1")
+
+        password_changed = bool(payload.new_password)
+        if password_changed:
+            password_hash, salt = _hash_password(payload.new_password)
+            assignments.extend([
+                "password_hash = ?",
+                "password_salt = ?",
+                "must_change_password = 0",
+            ])
+            values.extend([password_hash, salt])
+
+        values.append(user_id)
+        db.execute(
+            f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
+            values,
+        )
+
+        # Keep only this browser session when the password changes.
+        if password_changed:
+            token_hash = _token_hash(_extract_token(authorization))
+            db.execute(
+                "DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?",
+                (user_id, token_hash),
+            )
+
+        _record_security_event(
+            db,
+            "super_admin_account_updated",
+            user_id,
+            user_id,
+            "Plattformkonto Benutzername/Passwort aktualisiert",
+        )
+        db.commit()
+
     return current_user(authorization=authorization)
 
 
@@ -5816,8 +5923,8 @@ def post_user(
     payload: UserPayload,
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> dict[str, Any]:
-    if len(payload.password) < 6:
-        raise HTTPException(status_code=422, detail="Passwort muss mindestens 6 Zeichen haben")
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=422, detail="Passwort muss mindestens 8 Zeichen haben")
     password_hash, salt = _hash_password(payload.password)
     role_key = _normalize_role_key(payload.role_key)
     overrides = _normalize_permission_overrides(payload.permission_overrides)
@@ -5930,8 +6037,8 @@ def put_user(
 
     password_changed = bool(payload.password)
     if payload.password:
-        if len(payload.password) < 6:
-            raise HTTPException(status_code=422, detail="Passwort muss mindestens 6 Zeichen haben")
+        if len(payload.password) < 8:
+            raise HTTPException(status_code=422, detail="Passwort muss mindestens 8 Zeichen haben")
         password_hash, salt = _hash_password(payload.password)
         assignments.extend([
             "password_hash = ?",
