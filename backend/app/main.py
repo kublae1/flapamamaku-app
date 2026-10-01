@@ -2069,12 +2069,12 @@ def _deliver_pending_push() -> None:
 
 
 
-def _require_super_admin(user: dict[str, Any]) -> None:
+def _require_super_admin(
+    user: dict[str, Any],
+    detail: str = "Nur Super-Admins dürfen diese Funktion verwenden",
+) -> None:
     if not bool(user.get("is_super_admin")):
-        raise HTTPException(
-            status_code=403,
-            detail="Nur Super-Admins dürfen die Vereinsabrechnung verwalten",
-        )
+        raise HTTPException(status_code=403, detail=detail)
 
 
 def _parse_billing_date(value: str) -> datetime:
@@ -3889,15 +3889,17 @@ def system_setup_status(
 
 @app.get("/api/system/backups")
 def list_backups(
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
+    _require_super_admin(user, "Nur Super-Admins dürfen System-Backups einsehen")
     return [_backup_info(path) for path in _backup_files()]
 
 
 @app.post("/api/system/backups")
 def create_backup(
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
+    _require_super_admin(user, "Nur Super-Admins dürfen System-Backups erstellen")
     try:
         path = _create_database_backup("manual")
     except Exception as exc:
@@ -3909,8 +3911,9 @@ def create_backup(
 @app.get("/api/system/backups/{filename}")
 def download_backup(
     filename: str,
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    user: dict[str, Any] = Depends(current_user),
 ) -> FileResponse:
+    _require_super_admin(user, "Nur Super-Admins dürfen die Gesamtdatenbank herunterladen")
     candidate = BACKUP_DIR / Path(filename).name
     valid_prefix = candidate.name.startswith(f"{INSTANCE_ID}-")
     if INSTANCE_ID == "flapamamaku":
@@ -3932,8 +3935,9 @@ def download_backup(
 @app.post("/api/system/restore")
 async def restore_backup(
     backup_file: UploadFile = File(...),
-    _: dict[str, Any] = Depends(require("can_manage_users")),
+    user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
+    _require_super_admin(user, "Nur Super-Admins dürfen die Gesamtdatenbank wiederherstellen")
     filename = Path(backup_file.filename or "").name
     if not filename.lower().endswith(".db"):
         raise HTTPException(status_code=400, detail="Bitte eine .db-Backupdatei auswählen")
