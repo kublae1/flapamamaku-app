@@ -467,7 +467,7 @@ class AppStore extends ChangeNotifier {
 
   bool get isSuperAdmin => currentUser?['is_super_admin'] == true;
 
-  bool get canSwitchClub => accessibleClubs.length > 1;
+  bool get canSwitchClub => isSuperAdmin && accessibleClubs.length > 1;
 
   String get currentClubName {
     final clubId = currentClubId;
