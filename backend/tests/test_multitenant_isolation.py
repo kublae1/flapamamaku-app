@@ -541,6 +541,27 @@ def main() -> None:
     ).json()
     assert club_admin_config["club_id"] == test_club_id
     assert club_admin_config["logo_url"] == test_logo_config["logo_url"]
+
+    club_roles = ok(client.get("/api/roles", headers=club_headers)).json()
+    assert [row["key"] for row in club_roles] == [
+        "member", "editor", "board", "club_manager"
+    ]
+    assert all(row["key"] != "admin" for row in club_roles)
+
+    club_push = ok(client.get("/api/push/admin", headers=club_headers)).json()
+    assert club_push["registered_devices_total"] == 1
+    assert "Testverein Push" in titles(club_push["notifications"])
+    assert "FLAPA Push" not in titles(club_push["notifications"])
+
+    assert client.get(
+        "/api/operator/billing/clubs",
+        headers=club_headers,
+    ).status_code == 403
+    assert client.put(
+        f"/api/users/{club_admin_id}/super-admin",
+        headers=club_headers,
+        json={"enabled": True},
+    ).status_code == 403
     denied_switch = client.post(
         "/api/auth/club",
         headers=club_headers,
