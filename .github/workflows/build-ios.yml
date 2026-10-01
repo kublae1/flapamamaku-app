@@ -18,7 +18,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
       IOS_BUNDLE_ID: ${{ vars.FLAPAMAMAKU_IOS_BUNDLE_ID || 'ch.flapamamaku.app' }}
