@@ -148,7 +148,7 @@ def main() -> None:
     logo_response = client.get(config["logo_url"])
     assert logo_response.status_code == 200
     assert logo_response.headers["content-type"].startswith("image/png")
-    assert logo_response.content.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+    assert logo_response.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert config["features"]["polls"]["enabled"] is False
     assert config["features"]["push_notifications"]["enabled"] is True
     assert config["features"]["participant_lists"]["enabled"] is True
