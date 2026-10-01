@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from app.main import BootstrapPayload, get_roles, init_db, bootstrap
+from fastapi import HTTPException
+
+from app.main import (
+    BootstrapPayload,
+    UserPayload,
+    bootstrap,
+    get_roles,
+    init_db,
+    post_user,
+)
 
 
 def main() -> None:
@@ -19,6 +28,33 @@ def main() -> None:
     assert manager['label'] == 'Vereinsverwaltung'
     assert all(manager['permissions'].values())
     assert 'admin' not in keys
+
+    created = post_user(
+        UserPayload(
+            username='club-manager',
+            password='Testpass123!',
+            role_key='club_manager',
+        ),
+        _=root,
+    )
+    assert created['role_key'] == 'club_manager'
+    assert created['club_role'] == 'club_admin'
+    for permission, enabled in manager['permissions'].items():
+        assert created[permission] is enabled, permission
+
+    try:
+        post_user(
+            UserPayload(
+                username='forbidden-platform-admin',
+                password='Testpass123!',
+                role_key='admin',
+            ),
+            _=root,
+        )
+        raise AssertionError('internal Administrator role was assignable through API')
+    except HTTPException as exc:
+        assert exc.status_code == 422
+
     print('club role catalogue ok')
 
 
