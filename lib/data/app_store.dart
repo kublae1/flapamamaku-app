@@ -466,6 +466,26 @@ class AppStore extends ChangeNotifier {
   }
 
   bool get isSuperAdmin => currentUser?['is_super_admin'] == true;
+  bool get mustChangePassword => currentUser?['must_change_password'] == true;
+
+  Future<bool> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    try {
+      currentUser = await api.changePassword(currentPassword, newPassword);
+      authError = null;
+      notifyListeners();
+      return true;
+    } catch (error) {
+      authError = friendlyErrorMessage(
+        error,
+        fallback: 'Passwort konnte nicht geändert werden.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
 
   bool get canSwitchClub => isSuperAdmin && accessibleClubs.length > 1;
 
