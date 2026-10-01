@@ -59,15 +59,16 @@ jobs:
           if not str(data["api_base_url"]).startswith("https://"):
               raise SystemExit("Profile api_base_url must use HTTPS")
           icon = str(data["app_icon_url"]).strip()
-          if icon and not icon.startswith("https://"):
-              raise SystemExit("Profile app_icon_url must use HTTPS when set")
+          if icon:
+              raise SystemExit(
+                  "Per-club app icons are disabled; all clubs use the shared neutral app icon"
+              )
 
           values = {
               "CLUB_INSTANCE_ID": instance_id,
               "APP_DISPLAY_NAME": str(data["app_name"]).strip(),
               "APP_DISPLAY_SUBTITLE": str(data["app_subtitle"]).strip(),
               "API_BASE_URL": str(data["api_base_url"]).rstrip("/"),
-              "WHITE_LABEL_APP_ICON_URL": icon,
               "ALLOW_SERVER_CHANGE": "true" if bool(data["allow_server_change"]) else "false",
           }
           if not values["APP_DISPLAY_NAME"]:
@@ -429,41 +430,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Configure white label app icon
-        shell: bash
+      - name: Use shared neutral app icon
         run: |
-          if [ -z "$WHITE_LABEL_APP_ICON_URL" ]; then
-            echo "Using bundled FLAPAMAMAKU app icon."
-            exit 0
-          fi
-
-          python3 - <<'PY'
-          import os
-          from urllib.parse import urlparse
-
-          url = os.environ["WHITE_LABEL_APP_ICON_URL"].strip()
-          parsed = urlparse(url)
-          if parsed.scheme != "https" or not parsed.netloc:
-              raise SystemExit("WHITE_LABEL_APP_ICON_URL must be a valid HTTPS URL")
-          print(f"Downloading white-label icon from {parsed.netloc}")
-          PY
-
-          curl --fail --silent --show-error --location             --connect-timeout 15             --max-time 30             "$WHITE_LABEL_APP_ICON_URL"             --output "/tmp/white-label-app-icon.png"
-
-          python3 - <<'PY'
-          from pathlib import Path
-
-          source = Path("/tmp/white-label-app-icon.png")
-          data = source.read_bytes()
-          if len(data) < 8 or data[:8] != b"\x89PNG\r\n\x1a\n":
-              raise SystemExit("White-label app icon must be a PNG file")
-          if len(data) > 5 * 1024 * 1024:
-              raise SystemExit("White-label app icon is larger than 5 MiB")
-
-          target = Path("assets/FLAPAMAMAKU App-Icon.png")
-          target.write_bytes(data)
-          print(f"White-label app icon installed: {len(data)} bytes")
-          PY
+          test -f "assets/FLAPAMAMAKU App-Icon.png"
+          echo "Using shared neutral Luzerner Fasnacht app icon for every club build."
 
       - name: Generate Android launcher icons
         run: dart run flutter_launcher_icons
