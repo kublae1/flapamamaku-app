@@ -1185,8 +1185,24 @@
               <button type="button" id="app-logo-delete" class="delete">Logo entfernen</button>
             </div>
           </div>
+
+          <hr style="margin:22px 0;border:0;border-top:1px solid rgba(255,255,255,.12)">
+          <h3>Startseite / Hauptbild</h3>
           <p class="meta">
-            Name, Untertitel, Hauptfarbe und Vereinslogo werden pro Verein gespeichert.
+            Dieses Bild erscheint als Hauptbild auf der Startseite der App und wird nur
+            für den aktuell ausgewählten Verein gespeichert.
+          </p>
+          <input name="hero_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+          <p class="meta"><strong>Empfohlen:</strong> 1200 × 1600 px (3:4, Hochformat) · ideal unter 1 MB · max. 12 MB.</p>
+          <div id="app-hero-preview" class="hidden" style="margin-top:12px">
+            <img id="app-hero-image" alt="Hauptbild" style="width:min(100%,280px);aspect-ratio:3/4;object-fit:contain;border-radius:18px;background:#0f1113">
+            <div class="actions">
+              <button type="button" id="app-hero-delete" class="delete">Hauptbild entfernen</button>
+            </div>
+          </div>
+
+          <p class="meta">
+            Name, Untertitel, Hauptfarbe, Vereinslogo und Hauptbild werden pro Verein gespeichert.
             Das Android-/iOS-App-Icon ist für alle Vereine das gemeinsame neutrale
             Luzerner-Fasnacht-Symbol.
           </p>
@@ -1263,6 +1279,8 @@ let roleDefinitions = [];
 let accessibleClubs = [];
 let activeClubConfig = null;
 let billingClubs = [];
+let brandingHeroItem = null;
+let brandingHeroObjectUrl = "";
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
@@ -3172,6 +3190,81 @@ async function restoreSystemBackup(file) {
   return response.json();
 }
 
+function clearBrandingHeroObjectUrl() {
+  if (brandingHeroObjectUrl) {
+    URL.revokeObjectURL(brandingHeroObjectUrl);
+    brandingHeroObjectUrl = "";
+  }
+}
+
+async function renderBrandingHero(item) {
+  brandingHeroItem = item || null;
+  const preview = document.getElementById("app-hero-preview");
+  const image = document.getElementById("app-hero-image");
+  clearBrandingHeroObjectUrl();
+  const url = item?.image_urls?.[0] || item?.image_url || "";
+  if (!url) {
+    image.removeAttribute("src");
+    preview.classList.add("hidden");
+    return;
+  }
+  try {
+    const headers = token ? {Authorization: `Bearer ${token}`} : {};
+    const response = await fetch(url, {headers});
+    if (!response.ok) throw new Error("hero preview failed");
+    const blob = await response.blob();
+    brandingHeroObjectUrl = URL.createObjectURL(blob);
+    image.src = brandingHeroObjectUrl;
+    preview.classList.remove("hidden");
+  } catch (_) {
+    image.removeAttribute("src");
+    preview.classList.add("hidden");
+  }
+}
+
+async function loadBrandingHero() {
+  if (!currentUser?.can_photos) {
+    brandingHeroItem = null;
+    document.getElementById("app-hero-preview")?.classList.add("hidden");
+    return;
+  }
+  const items = await api("/api/content");
+  const heroes = (items || [])
+    .filter(item => item.section === "hero")
+    .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  await renderBrandingHero(heroes[0] || null);
+}
+
+async function saveBrandingHero(file, appName) {
+  if (!file) return;
+  if (!currentUser?.can_photos) {
+    throw new Error("Keine Berechtigung für Hauptbilder");
+  }
+  let item = brandingHeroItem;
+  if (!item) {
+    item = await api("/api/content", {
+      method: "POST",
+      body: JSON.stringify({
+        section: "hero",
+        title: appName || "Hauptbild",
+        text: "",
+        link_url: "",
+        poll_options: [],
+        poll_allow_suggestions: false,
+      }),
+    });
+  } else if ((item.image_urls || []).length) {
+    await api(`/api/content/${item.id}/images`, {method: "DELETE"});
+  }
+  const upload = new FormData();
+  upload.append("images", file);
+  item = await api(`/api/content/${item.id}/images`, {
+    method: "POST",
+    body: upload,
+  });
+  brandingHeroItem = item;
+}
+
 async function loadAppConfig() {
   if (!(currentUser?.can_manage_settings || currentUser?.can_manage_users)) return;
   try {
@@ -3255,6 +3348,8 @@ async function loadAppConfig() {
       preview.classList.add("hidden");
     }
 
+    form.elements.hero_file.disabled = !currentUser?.can_photos;
+    await loadBrandingHero();
     await loadTenantContext();
   } catch (error) {
     console.error(error);
@@ -3560,6 +3655,12 @@ document.getElementById("app-config-form").addEventListener("submit", async even
       form.elements.logo_file.value = "";
     }
 
+    const heroFile = form.elements.hero_file.files[0];
+    if (heroFile) {
+      await saveBrandingHero(heroFile, form.elements.app_name.value.trim());
+      form.elements.hero_file.value = "";
+    }
+
     currentUser = await api("/api/auth/me");
     await loadAppConfig();
     alert("Vereinskonfiguration wurde gespeichert.");
@@ -3579,6 +3680,35 @@ document.getElementById("app-logo-delete").addEventListener("click", async () =>
     await loadAppConfig();
   } catch (error) {
     alert("Logo konnte nicht entfernt werden.");
+    console.error(error);
+  }
+});
+
+document.getElementById("app-config-form").elements.hero_file.addEventListener("change", event => {
+  const file = event.currentTarget.files?.[0];
+  if (!file) {
+    loadBrandingHero();
+    return;
+  }
+  clearBrandingHeroObjectUrl();
+  brandingHeroObjectUrl = URL.createObjectURL(file);
+  document.getElementById("app-hero-image").src = brandingHeroObjectUrl;
+  document.getElementById("app-hero-preview").classList.remove("hidden");
+});
+
+document.getElementById("app-hero-delete").addEventListener("click", async () => {
+  if (!brandingHeroItem?.id) return;
+  if (!confirm("Hauptbild dieses Vereins wirklich entfernen?")) return;
+  try {
+    await api(`/api/content/${brandingHeroItem.id}/images`, {method: "DELETE"});
+    document.getElementById("app-config-form").elements.hero_file.value = "";
+    brandingHeroItem = null;
+    clearBrandingHeroObjectUrl();
+    document.getElementById("app-hero-image").removeAttribute("src");
+    document.getElementById("app-hero-preview").classList.add("hidden");
+    await loadContent();
+  } catch (error) {
+    alert("Hauptbild konnte nicht entfernt werden.");
     console.error(error);
   }
 });
