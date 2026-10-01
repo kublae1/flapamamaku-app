@@ -54,7 +54,7 @@ def main() -> None:
             username='club-admin',
             password='Testpass123!',
             active=True,
-            role_key='admin',
+            role_key='club_manager',
             permission_overrides={},
         ),
         _=super_user,
