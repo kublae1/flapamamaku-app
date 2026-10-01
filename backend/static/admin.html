@@ -459,6 +459,72 @@
       cursor:default;
     }
 
+    .member-photo-cropper {
+      position:fixed;
+      inset:0;
+      z-index:1000;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:rgba(0,0,0,.82);
+    }
+    .member-photo-cropper.hidden { display:none !important; }
+    .member-photo-cropper-card {
+      width:min(94vw,640px);
+      max-height:94vh;
+      overflow:auto;
+      background:#191b1e;
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:20px;
+      box-shadow:0 24px 80px rgba(0,0,0,.55);
+    }
+    .member-photo-cropper-stage {
+      position:relative;
+      width:min(100%,520px);
+      aspect-ratio:1/1;
+      margin:14px auto;
+      overflow:hidden;
+      border-radius:14px;
+      background:#0b0d0f;
+      touch-action:none;
+      cursor:grab;
+      border:1px solid rgba(255,255,255,.12);
+    }
+    .member-photo-cropper-stage:active { cursor:grabbing; }
+    .member-photo-cropper-stage img {
+      position:absolute;
+      left:50%;
+      top:50%;
+      user-select:none;
+      -webkit-user-drag:none;
+      transform-origin:center center;
+      max-width:none;
+      max-height:none;
+      pointer-events:none;
+    }
+    .member-photo-cropper-grid {
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      background:
+        linear-gradient(to right, transparent 33.2%, rgba(255,255,255,.22) 33.2%, rgba(255,255,255,.22) 33.6%, transparent 33.6%, transparent 66.4%, rgba(255,255,255,.22) 66.4%, rgba(255,255,255,.22) 66.8%, transparent 66.8%),
+        linear-gradient(to bottom, transparent 33.2%, rgba(255,255,255,.22) 33.2%, rgba(255,255,255,.22) 33.6%, transparent 33.6%, transparent 66.4%, rgba(255,255,255,.22) 66.4%, rgba(255,255,255,.22) 66.8%, transparent 66.8%);
+      box-shadow:inset 0 0 0 2px rgba(199,163,90,.75);
+    }
+    .member-photo-cropper-controls {
+      display:grid;
+      grid-template-columns:auto minmax(0,1fr) auto;
+      gap:12px;
+      align-items:center;
+    }
+    .member-photo-cropper-controls input[type="range"] { padding:0; }
+    .member-photo-crop-preview {
+      margin-top:8px;
+      color:var(--muted);
+      font-size:13px;
+    }
   </style>
 </head>
 <body>
@@ -678,6 +744,8 @@
           <label>Mitgliederfoto</label>
           <input name="photo_file" type="file" accept="image/jpeg,image/png,image/webp">
           <p class="meta"><strong>Empfohlen:</strong> 1200 × 1200 px (1:1) · JPG/WebP · ideal unter 1 MB · max. 12 MB</p>
+          <p class="meta">Nach der Auswahl öffnet sich automatisch der Bildausschnitt. Bild mit Maus/Finger verschieben und mit dem Regler zoomen.</p>
+          <div id="member-photo-crop-status" class="member-photo-crop-preview"></div>
 
           <div id="member-account-block" class="hidden">
             <hr style="margin:20px 0;border:0;border-top:1px solid #eee6de">
@@ -1369,6 +1437,30 @@
       </div>
     </section>
 
+  </div>
+  <div id="member-photo-cropper" class="member-photo-cropper hidden" role="dialog" aria-modal="true" aria-labelledby="member-photo-crop-title">
+    <div class="member-photo-cropper-card">
+      <div class="preview-heading">
+        <div>
+          <div class="meta">Mitgliederfoto</div>
+          <h2 id="member-photo-crop-title" style="margin:2px 0">Bildausschnitt festlegen</h2>
+        </div>
+      </div>
+      <p class="meta">Der gespeicherte Ausschnitt ist quadratisch (1:1). Ziehen zum Verschieben, Regler zum Zoomen.</p>
+      <div id="member-photo-crop-stage" class="member-photo-cropper-stage">
+        <img id="member-photo-crop-image" alt="Mitgliederfoto zuschneiden">
+        <div class="member-photo-cropper-grid"></div>
+      </div>
+      <div class="member-photo-cropper-controls">
+        <span class="meta">–</span>
+        <input id="member-photo-crop-zoom" type="range" min="1" max="3" step="0.01" value="1">
+        <span class="meta">+</span>
+      </div>
+      <div class="actions" style="margin-top:18px;justify-content:flex-end">
+        <button type="button" id="member-photo-crop-cancel">Abbrechen</button>
+        <button type="button" id="member-photo-crop-apply" class="primary">Ausschnitt übernehmen</button>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -2646,6 +2738,177 @@ async function removeUser(id) {
   await loadUsers();
 }
 
+let memberPhotoCroppedFile = null;
+let memberPhotoCropObjectUrl = "";
+let memberPhotoCropImageState = null;
+let memberPhotoCropPointer = null;
+
+function resetMemberPhotoCropState() {
+  memberPhotoCroppedFile = null;
+  memberPhotoCropImageState = null;
+  memberPhotoCropPointer = null;
+  if (memberPhotoCropObjectUrl) {
+    URL.revokeObjectURL(memberPhotoCropObjectUrl);
+    memberPhotoCropObjectUrl = "";
+  }
+  const status = document.getElementById("member-photo-crop-status");
+  if (status) status.textContent = "";
+  const modal = document.getElementById("member-photo-cropper");
+  modal?.classList.add("hidden");
+}
+
+function clampMemberPhotoCrop() {
+  const state = memberPhotoCropImageState;
+  const stage = document.getElementById("member-photo-crop-stage");
+  if (!state || !stage) return;
+  const box = stage.getBoundingClientRect();
+  const minScale = Math.max(box.width / state.naturalWidth, box.height / state.naturalHeight);
+  const scale = minScale * state.zoom;
+  const halfW = state.naturalWidth * scale / 2;
+  const halfH = state.naturalHeight * scale / 2;
+  const maxX = Math.max(0, halfW - box.width / 2);
+  const maxY = Math.max(0, halfH - box.height / 2);
+  state.offsetX = Math.max(-maxX, Math.min(maxX, state.offsetX));
+  state.offsetY = Math.max(-maxY, Math.min(maxY, state.offsetY));
+}
+
+function renderMemberPhotoCrop() {
+  const state = memberPhotoCropImageState;
+  const stage = document.getElementById("member-photo-crop-stage");
+  const image = document.getElementById("member-photo-crop-image");
+  if (!state || !stage || !image) return;
+  clampMemberPhotoCrop();
+  const box = stage.getBoundingClientRect();
+  const minScale = Math.max(box.width / state.naturalWidth, box.height / state.naturalHeight);
+  const scale = minScale * state.zoom;
+  image.style.width = (state.naturalWidth * scale) + "px";
+  image.style.height = (state.naturalHeight * scale) + "px";
+  image.style.transform =
+    "translate(calc(-50% + " + state.offsetX + "px), calc(-50% + " + state.offsetY + "px))";
+}
+
+async function openMemberPhotoCrop(file) {
+  resetMemberPhotoCropState();
+  if (!file) return;
+  memberPhotoCropObjectUrl = URL.createObjectURL(file);
+  const image = document.getElementById("member-photo-crop-image");
+  image.src = memberPhotoCropObjectUrl;
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = reject;
+  });
+  memberPhotoCropImageState = {
+    sourceFile: file,
+    naturalWidth: image.naturalWidth,
+    naturalHeight: image.naturalHeight,
+    zoom: 1,
+    offsetX: 0,
+    offsetY: 0,
+  };
+  document.getElementById("member-photo-crop-zoom").value = "1";
+  document.getElementById("member-photo-cropper").classList.remove("hidden");
+  requestAnimationFrame(renderMemberPhotoCrop);
+}
+
+document.querySelector('#members-form input[name="photo_file"]')?.addEventListener("change", async event => {
+  const file = event.currentTarget.files?.[0];
+  if (!file) {
+    resetMemberPhotoCropState();
+    return;
+  }
+  try {
+    await openMemberPhotoCrop(file);
+  } catch (error) {
+    resetMemberPhotoCropState();
+    event.currentTarget.value = "";
+    alert("Bild konnte nicht zum Zuschneiden geöffnet werden.");
+    console.error(error);
+  }
+});
+
+document.getElementById("member-photo-crop-zoom")?.addEventListener("input", event => {
+  if (!memberPhotoCropImageState) return;
+  memberPhotoCropImageState.zoom = Number(event.currentTarget.value || 1);
+  renderMemberPhotoCrop();
+});
+
+const cropStage = document.getElementById("member-photo-crop-stage");
+cropStage?.addEventListener("pointerdown", event => {
+  if (!memberPhotoCropImageState) return;
+  cropStage.setPointerCapture(event.pointerId);
+  memberPhotoCropPointer = {
+    id: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    offsetX: memberPhotoCropImageState.offsetX,
+    offsetY: memberPhotoCropImageState.offsetY,
+  };
+});
+cropStage?.addEventListener("pointermove", event => {
+  if (!memberPhotoCropImageState || !memberPhotoCropPointer || memberPhotoCropPointer.id !== event.pointerId) return;
+  memberPhotoCropImageState.offsetX =
+    memberPhotoCropPointer.offsetX + (event.clientX - memberPhotoCropPointer.startX);
+  memberPhotoCropImageState.offsetY =
+    memberPhotoCropPointer.offsetY + (event.clientY - memberPhotoCropPointer.startY);
+  renderMemberPhotoCrop();
+});
+cropStage?.addEventListener("pointerup", event => {
+  if (memberPhotoCropPointer?.id === event.pointerId) memberPhotoCropPointer = null;
+});
+cropStage?.addEventListener("pointercancel", () => { memberPhotoCropPointer = null; });
+
+document.getElementById("member-photo-crop-cancel")?.addEventListener("click", () => {
+  const input = document.querySelector('#members-form input[name="photo_file"]');
+  if (input) input.value = "";
+  resetMemberPhotoCropState();
+});
+
+document.getElementById("member-photo-crop-apply")?.addEventListener("click", async () => {
+  const state = memberPhotoCropImageState;
+  const stage = document.getElementById("member-photo-crop-stage");
+  if (!state || !stage) return;
+  clampMemberPhotoCrop();
+
+  const stageBox = stage.getBoundingClientRect();
+  const minScale = Math.max(stageBox.width / state.naturalWidth, stageBox.height / state.naturalHeight);
+  const displayScale = minScale * state.zoom;
+
+  const sourceSquare = Math.min(stageBox.width, stageBox.height) / displayScale;
+  const centerX = state.naturalWidth / 2 - state.offsetX / displayScale;
+  const centerY = state.naturalHeight / 2 - state.offsetY / displayScale;
+  const sx = Math.max(0, Math.min(state.naturalWidth - sourceSquare, centerX - sourceSquare / 2));
+  const sy = Math.max(0, Math.min(state.naturalHeight - sourceSquare, centerY - sourceSquare / 2));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = 1200;
+  const ctx = canvas.getContext("2d", {alpha:false});
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  const sourceImage = document.getElementById("member-photo-crop-image");
+  ctx.drawImage(sourceImage, sx, sy, sourceSquare, sourceSquare, 0, 0, 1200, 1200);
+
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.9));
+  if (!blob) {
+    alert("Der Bildausschnitt konnte nicht erstellt werden.");
+    return;
+  }
+  const baseName = (state.sourceFile.name || "mitglied").replace(/\.[^.]+$/, "");
+  memberPhotoCroppedFile = new File([blob], baseName + "-1200x1200.jpg", {
+    type:"image/jpeg",
+    lastModified:Date.now(),
+  });
+  document.getElementById("member-photo-crop-status").textContent =
+    "Ausschnitt bereit · 1200 × 1200 px";
+  document.getElementById("member-photo-cropper").classList.add("hidden");
+});
+
+window.addEventListener("resize", () => {
+  if (!document.getElementById("member-photo-cropper")?.classList.contains("hidden")) {
+    renderMemberPhotoCrop();
+  }
+});
+
 Object.keys(resources).forEach(resource => {
   const form = document.getElementById(`${resource}-form`);
   form.addEventListener("submit", async event => {
@@ -2696,7 +2959,7 @@ Object.keys(resources).forEach(resource => {
     }
 
     if (resource === "members") {
-      const file = form.elements.photo_file.files[0];
+      const file = memberPhotoCroppedFile || form.elements.photo_file.files[0];
       if (file) {
         const upload = new FormData();
         upload.append("photo", file);
@@ -2722,6 +2985,7 @@ Object.keys(resources).forEach(resource => {
       form.elements.id.value = "";
     }
     if (resource === "members") {
+      resetMemberPhotoCropState();
       form.elements.role.value = "Präsident";
       form.elements.status.value = "Aktiv";
       document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]').forEach(input => {
