@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import io
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image
-
-from app.main import _ensure_noster_default_hero, connect, init_db
+from app.main import (
+    NOSTER_HOMEPAGE_HERO_URL,
+    _ensure_noster_default_hero,
+    _serialize_content,
+    connect,
+    init_db,
+)
 
 
 def main() -> None:
@@ -74,7 +77,7 @@ def main() -> None:
 
         hero = db.execute(
             """
-            SELECT id, title, image_data
+            SELECT *
             FROM content_items
             WHERE club_id = ? AND section = 'hero'
             ORDER BY id DESC
@@ -86,20 +89,19 @@ def main() -> None:
         assert hero["title"] == "NOSTRADAMUS"
         assert hero["image_data"] is None
 
-        image_row = db.execute(
+        assert hero["link_url"] == NOSTER_HOMEPAGE_HERO_URL
+        assert db.execute(
             """
-            SELECT image_data, image_mime
+            SELECT COUNT(*)
             FROM content_images
             WHERE content_id = ? AND club_id = ?
             """,
             (hero["id"], noster_id),
-        ).fetchone()
-        assert image_row is not None
-        assert image_row["image_mime"] == "image/jpeg"
+        ).fetchone()[0] == 0
 
-        with Image.open(io.BytesIO(image_row["image_data"])) as image:
-            assert image.size == (1200, 1600)
-            assert image.format == "JPEG"
+        serialized = _serialize_content(hero)
+        assert serialized["image_url"] == NOSTER_HOMEPAGE_HERO_URL
+        assert serialized["image_urls"] == [NOSTER_HOMEPAGE_HERO_URL]
 
         assert (
             db.execute(
@@ -115,21 +117,22 @@ def main() -> None:
             == flapa_before
         )
 
-        image_count = int(
-            db.execute(
-                "SELECT COUNT(*) FROM content_images WHERE content_id = ? AND club_id = ?",
-                (hero["id"], noster_id),
-            ).fetchone()[0]
-        )
         _ensure_noster_default_hero(db)
         db.commit()
-        image_count_after = int(
-            db.execute(
-                "SELECT COUNT(*) FROM content_images WHERE content_id = ? AND club_id = ?",
-                (hero["id"], noster_id),
-            ).fetchone()[0]
-        )
-        assert image_count == image_count_after == 1
+        repeated = db.execute(
+            """
+            SELECT *
+            FROM content_items
+            WHERE id = ? AND club_id = ?
+            """,
+            (hero["id"], noster_id),
+        ).fetchone()
+        assert repeated is not None
+        assert repeated["link_url"] == NOSTER_HOMEPAGE_HERO_URL
+        assert db.execute(
+            "SELECT COUNT(*) FROM content_images WHERE content_id = ? AND club_id = ?",
+            (hero["id"], noster_id),
+        ).fetchone()[0] == 0
 
     start_screen = Path("../lib/screens/start_screen.dart").read_text(encoding="utf-8")
     assert "final isFlapamamaku = store.currentClubId == 1;" in start_screen
