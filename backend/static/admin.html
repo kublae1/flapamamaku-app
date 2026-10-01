@@ -2402,22 +2402,22 @@ async function loadUsers() {
     div.innerHTML = `
       <h3>${user.username}</h3>
       <div class="meta">${user.member_name || "Kein Mitglied verknüpft"}</div>
-      <div class="meta">${user.active ? "Aktiv" : "Gesperrt"} · Rolle: ${user.club_role === "super_admin" ? "Super-Admin" : (user.role_label || user.role_key || "Mitglied")}</div>
-      <div class="meta">${rights || "Keine Verwaltungsrechte"} · Abweichungen: ${Object.keys(user.permission_overrides || {}).length}</div>
+      <div class="meta">${user.active ? "Aktiv" : "Gesperrt"} · Rolle: ${user.club_role === "super_admin" ? "Plattform-Super-Admin" : (user.role_label || user.role_key || "Mitglied")}</div>
+      <div class="meta">${user.platform_only ? "Separates Plattformkonto · keinem Vereinsmitglied zugeordnet" : ((rights || "Keine Verwaltungsrechte") + " · Abweichungen: " + Object.keys(user.permission_overrides || {}).length)}</div>
       <div class="actions">
         <button type="button" class="move-up" title="Nach oben">↑</button>
         <button type="button" class="move-down" title="Nach unten">↓</button>
-        <button type="button" class="edit">Bearbeiten</button>
+        ${user.platform_only ? "" : '<button type="button" class="edit">Bearbeiten</button>'}
         <button type="button" class="revoke-sessions">Sitzungen beenden</button>
         ${currentUser?.is_super_admin && Number(user.id) !== Number(currentUser.id)
           ? `<button type="button" class="super-admin-toggle">${user.club_role === "super_admin" ? "Super-Admin entziehen" : "Zum Super-Admin machen"}</button>`
           : ""}
         <button type="button" class="delete">Löschen</button>
       </div>`;
-    div.querySelector(".edit").onclick = () => editUser(user);
+    div.querySelector(".edit")?.addEventListener("click", () => editUser(user));
     div.querySelector(".revoke-sessions").onclick = () => revokeUserSessions(user);
     div.querySelector(".super-admin-toggle")?.addEventListener("click", () => toggleSuperAdmin(user));
-    div.querySelector(".delete").onclick = () => removeUser(user.id);
+    div.querySelector(".delete")?.addEventListener("click", () => removeUser(user.id));
     list.appendChild(div);
   });
 }
