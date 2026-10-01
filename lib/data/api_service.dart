@@ -775,7 +775,9 @@ class ApiService {
             ? detail!
             : 'Die Eingabe konnte nicht verarbeitet werden.';
       case 401:
-        return 'Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.';
+        return detail?.isNotEmpty == true
+            ? detail!
+            : 'Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.';
       case 403:
         return 'Für diese Aktion fehlt die Berechtigung.';
       case 404:
