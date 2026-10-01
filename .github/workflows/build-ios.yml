@@ -8,11 +8,12 @@ on:
         required: false
         default: "flapamamaku"
   push:
-    branches: [feature/ios-foundation-v1, feature/ios-push-v1, feature/ios-final-validation-v1, feature/final-release-validation-v1 ]
+    branches: [feature/ios-foundation-v1, feature/ios-push-v1, feature/ios-final-validation-v1, feature/final-release-validation-v1, feature/gallery-snapshot-retention-v1 ]
     paths:
       - "lib/**"
       - "pubspec.yaml"
       - "config/white-label/**"
+      - "assets/FLAPAMAMAKU App-Icon.png"
       - ".github/workflows/build-ios.yml"
 
 jobs:
@@ -105,6 +106,20 @@ jobs:
           if [ ! -d ios ]; then
             flutter create --platforms=ios --project-name flapamamaku_app .
           fi
+
+      - name: Generate shared neutral iOS app icon
+        shell: bash
+        run: |
+          cat > /tmp/flutter_launcher_icons_ios.yaml <<'EOF'
+          flutter_launcher_icons:
+            android: false
+            ios: true
+            image_path: "assets/FLAPAMAMAKU App-Icon.png"
+            remove_alpha_ios: true
+          EOF
+          dart run flutter_launcher_icons -f /tmp/flutter_launcher_icons_ios.yaml
+          test -f ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json
+          echo "Shared neutral club app icon generated for iOS."
 
       - name: Configure iOS application
         shell: bash
