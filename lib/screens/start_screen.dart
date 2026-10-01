@@ -38,7 +38,7 @@ class StartScreen extends StatelessWidget {
         ? store.appName
         : hero.title.trim();
     const flapamamakuFallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
-    final isFlapamamaku = store.appName.trim().toUpperCase() == 'FLAPAMAMAKU';
+    final isFlapamamaku = store.currentClubId == 1;
     final fallbackNetworkImage =
         !isFlapamamaku && store.appLogoUrl.isNotEmpty ? store.appLogoUrl : '';
     final fallbackAsset = isFlapamamaku ? flapamamakuFallbackHero : '';

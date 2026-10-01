@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.76"
+API_VERSION = "0.8.77"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -70,7 +70,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 17
+CURRENT_SCHEMA_VERSION = 18
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -813,6 +813,191 @@ def _optimize_logo_image(data: bytes, mime: str) -> tuple[bytes, str]:
     return optimized, optimized_mime
 
 
+
+def _build_noster_default_hero() -> tuple[bytes, str]:
+    """Create a self-contained Noster hero inspired by the public homepage."""
+    width, height = 1200, 1600
+    image = Image.new("RGB", (width, height), "#090909")
+    draw = ImageDraw.Draw(image)
+
+    # The public Noster site uses a stark black/white wordmark and a deliberately
+    # dark, mystical visual language. Keep this independent from FLAPAMAMAKU.
+    for index in range(18):
+        inset = 70 + index * 25
+        shade = 24 + index * 2
+        draw.ellipse(
+            (
+                inset,
+                300 + inset // 3,
+                width - inset,
+                1320 - inset // 3,
+            ),
+            outline=(shade, shade, shade),
+            width=2,
+        )
+
+    center_x = width // 2
+    draw.polygon(
+        [
+            (center_x, 360),
+            (center_x - 270, 760),
+            (center_x - 165, 1120),
+            (center_x, 1260),
+            (center_x + 165, 1120),
+            (center_x + 270, 760),
+        ],
+        fill=(16, 16, 16),
+        outline=(82, 82, 82),
+    )
+    draw.ellipse(
+        (center_x - 185, 590, center_x - 35, 760),
+        outline=(165, 165, 165),
+        width=7,
+    )
+    draw.ellipse(
+        (center_x + 35, 590, center_x + 185, 760),
+        outline=(165, 165, 165),
+        width=7,
+    )
+    draw.line(
+        (
+            center_x,
+            610,
+            center_x - 30,
+            900,
+            center_x,
+            1015,
+            center_x + 30,
+            900,
+            center_x,
+            610,
+        ),
+        fill=(118, 118, 118),
+        width=5,
+    )
+    draw.arc(
+        (center_x - 190, 820, center_x + 190, 1080),
+        start=15,
+        end=165,
+        fill=(125, 125, 125),
+        width=5,
+    )
+
+    draw.rectangle((70, 95, width - 70, 255), fill=(240, 240, 236))
+    draw.rectangle(
+        (70, height - 235, width - 70, height - 105),
+        fill=(240, 240, 236),
+    )
+
+    title_font = ImageFont.load_default(size=80)
+    city_font = ImageFont.load_default(size=54)
+    small_font = ImageFont.load_default(size=30)
+
+    def centered_text(y: int, value: str, font: ImageFont.ImageFont, fill: str) -> None:
+        bounds = draw.textbbox((0, 0), value, font=font)
+        text_width = bounds[2] - bounds[0]
+        draw.text(((width - text_width) // 2, y), value, font=font, fill=fill)
+
+    centered_text(125, "NOSTRADAMUS", title_font, "#090909")
+    centered_text(282, "FASNACHTSGRUPPE · SEIT 1982", small_font, "#A0A0A0")
+    centered_text(height - 205, "L U Z E R N", city_font, "#090909")
+
+    output = io.BytesIO()
+    image.save(
+        output,
+        format="JPEG",
+        quality=86,
+        optimize=True,
+        progressive=True,
+    )
+    return output.getvalue(), "image/jpeg"
+
+
+def _ensure_noster_default_hero(db: sqlite3.Connection) -> None:
+    """Seed only Noster clubs that still have no club-owned hero image."""
+    clubs = db.execute(
+        """
+        SELECT id, slug, name, website
+        FROM clubs
+        WHERE active = 1
+          AND (
+              LOWER(slug) IN ('noster', 'nostradamus')
+              OR LOWER(name) LIKE '%nostradamus%'
+              OR LOWER(name) LIKE '%noster%'
+              OR LOWER(website) LIKE '%noster.ch%'
+          )
+        ORDER BY id
+        """
+    ).fetchall()
+    if not clubs:
+        return
+
+    hero_bytes: bytes | None = None
+    hero_mime = "image/jpeg"
+    now = datetime.now(timezone.utc).isoformat()
+
+    for club in clubs:
+        club_id = int(club["id"])
+        hero = db.execute(
+            """
+            SELECT *
+            FROM content_items
+            WHERE club_id = ? AND section = 'hero'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (club_id,),
+        ).fetchone()
+
+        if hero is not None:
+            has_gallery_image = db.execute(
+                """
+                SELECT 1
+                FROM content_images
+                WHERE content_id = ? AND club_id = ?
+                LIMIT 1
+                """,
+                (hero["id"], club_id),
+            ).fetchone()
+            if has_gallery_image is not None or hero["image_data"] is not None:
+                continue
+            hero_id = int(hero["id"])
+        else:
+            max_order = int(
+                db.execute(
+                    """
+                    SELECT COALESCE(MAX(sort_order), 0)
+                    FROM content_items
+                    WHERE club_id = ? AND section = 'hero'
+                    """,
+                    (club_id,),
+                ).fetchone()[0]
+            )
+            cursor = db.execute(
+                """
+                INSERT INTO content_items (
+                    section, title, text, link_url, poll_options,
+                    poll_allow_suggestions, sort_order, created_at, club_id
+                ) VALUES ('hero', 'NOSTRADAMUS', '', '', '[]', 0, ?, ?, ?)
+                """,
+                (max_order + 1, now, club_id),
+            )
+            hero_id = int(cursor.lastrowid)
+
+        if hero_bytes is None:
+            hero_bytes, hero_mime = _build_noster_default_hero()
+
+        db.execute(
+            """
+            INSERT INTO content_images (
+                content_id, image_data, image_mime,
+                sort_order, created_at, club_id
+            ) VALUES (?, ?, ?, 1, ?, ?)
+            """,
+            (hero_id, hero_bytes, hero_mime, now, club_id),
+        )
+
+
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
 
@@ -867,6 +1052,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (15, "push-tenant-isolation"),
         (16, "club-billing-and-suspension"),
         (17, "club-billing-pdf-and-grace"),
+        (18, "noster-home-hero-and-tenant-hardening"),
     ]
     applied = {
         int(row["version"])
@@ -2245,6 +2431,7 @@ def init_db() -> None:
                 ),
             )
 
+        _ensure_noster_default_hero(db)
         _apply_schema_migrations(db)
         db.commit()
 
@@ -3574,10 +3761,10 @@ def _serialize_content(
             """
             SELECT id, sort_order, created_at
             FROM content_images
-            WHERE content_id = ?
+            WHERE content_id = ? AND club_id = ?
             ORDER BY sort_order ASC, id ASC
             """,
-            (item["id"],),
+            (item["id"], int(item["club_id"])),
         ).fetchall()
         if item.get("section") == "polls":
             try:
