@@ -1715,7 +1715,7 @@ jobs:
         run: |
           rm -f /tmp/flapamamaku-club-logo-tenant.db
           rm -rf /tmp/flapamamaku-club-logo-tenant-backups
-          PYTHONPATH=. pytest -q tests/test_club_logo_tenant.py
+          PYTHONPATH=. python tests/test_club_logo_tenant.py
 
       - name: Test club logo cache-busting URL
         run: |
