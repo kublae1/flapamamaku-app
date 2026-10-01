@@ -490,6 +490,24 @@
     </form>
   </section>
 
+  <section id="password-change-view" class="card auth-card hidden">
+    <h2>Passwort ändern</h2>
+    <p class="meta">
+      Das temporäre Passwort muss vor der weiteren Nutzung der Verwaltung ersetzt werden.
+    </p>
+    <form id="forced-password-form">
+      <label>Aktuelles / temporäres Passwort</label>
+      <input name="current_password" type="password" autocomplete="current-password" minlength="6" required>
+      <label>Neues Passwort</label>
+      <input name="new_password" type="password" autocomplete="new-password" minlength="8" required>
+      <label>Neues Passwort wiederholen</label>
+      <input name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+      <p class="meta">Das neue Passwort muss mindestens 8 Zeichen lang sein und sich vom bisherigen Passwort unterscheiden.</p>
+      <p><button class="primary" type="submit">Passwort ändern und weiter</button></p>
+      <p id="forced-password-error" class="error"></p>
+    </form>
+  </section>
+
   <div id="admin-view" class="hidden">
     <div class="card" id="tenant-context-card" style="grid-column:1/-1;margin-bottom:0">
       <div class="preview-heading" style="align-items:center;gap:14px;flex-wrap:wrap">
@@ -1986,11 +2004,20 @@ document.getElementById("billing-reactivate")?.addEventListener("click", async (
 
 function showAuth() {
   document.getElementById("auth-view").classList.remove("hidden");
+  document.getElementById("password-change-view").classList.add("hidden");
   document.getElementById("admin-view").classList.add("hidden");
+}
+
+function showPasswordChange() {
+  document.getElementById("auth-view").classList.add("hidden");
+  document.getElementById("admin-view").classList.add("hidden");
+  document.getElementById("password-change-view").classList.remove("hidden");
+  document.getElementById("forced-password-form").elements.current_password.focus();
 }
 
 function showAdmin() {
   document.getElementById("auth-view").classList.add("hidden");
+  document.getElementById("password-change-view").classList.add("hidden");
   document.getElementById("admin-view").classList.remove("hidden");
 }
 
@@ -3991,6 +4018,7 @@ document.getElementById("logout-button").addEventListener("click", async () => {
 
   const authForm = document.getElementById("auth-form");
   authForm.reset();
+  document.getElementById("forced-password-form")?.reset();
   authForm.elements.username.value = "";
   authForm.elements.password.value = "";
   document.getElementById("auth-error").textContent = "";
@@ -4008,6 +4036,44 @@ document.getElementById("logout-button").addEventListener("click", async () => {
   if (tenantFeatures) tenantFeatures.textContent = "";
 
   showAuth();
+});
+
+document.getElementById("forced-password-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const error = document.getElementById("forced-password-error");
+  error.textContent = "";
+  const currentPassword = form.elements.current_password.value;
+  const newPassword = form.elements.new_password.value;
+  const confirmPassword = form.elements.confirm_password.value;
+
+  if (newPassword.length < 8) {
+    error.textContent = "Das neue Passwort muss mindestens 8 Zeichen haben.";
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    error.textContent = "Die neuen Passwörter stimmen nicht überein.";
+    return;
+  }
+  if (newPassword === currentPassword) {
+    error.textContent = "Das neue Passwort muss sich vom bisherigen Passwort unterscheiden.";
+    return;
+  }
+
+  try {
+    currentUser = await api("/api/auth/change-password", {
+      method:"POST",
+      body:JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+    form.reset();
+    await startAdmin();
+  } catch (e) {
+    error.textContent = String(e?.message || "Passwort konnte nicht geändert werden.");
+    console.error(e);
+  }
 });
 
 document.getElementById("auth-form").addEventListener("submit", async event => {
@@ -4048,6 +4114,12 @@ document.getElementById("auth-form").addEventListener("submit", async event => {
 
 async function startAdmin() {
   if (!currentUser) currentUser = await api("/api/auth/me");
+  if (currentUser.must_change_password) {
+    showPasswordChange();
+    document.getElementById("status").textContent =
+      `Angemeldet: ${currentUser.member_name || currentUser.username} · Passwortänderung erforderlich · API v${apiVersion || "?"}`;
+    return;
+  }
   if (
     !currentUser.can_admin_page &&
     !currentUser.can_manage_settings &&
