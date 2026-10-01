@@ -446,6 +446,10 @@ class ClubCreatePayload(BaseModel):
     welcome_text: str = Field(default="", max_length=2000)
 
 
+class ClubDeletePayload(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=120)
+
+
 class ClubBillingSettingsPayload(BaseModel):
     billing_email: str = Field(default="", max_length=320)
     amount_rappen: int = Field(default=0, ge=0, le=100000000)
@@ -4928,6 +4932,219 @@ def create_club(
             (club_id,),
         ).fetchone()
     return dict(row)
+
+
+
+@app.post("/api/clubs/{club_id}/delete")
+def delete_club_completely(
+    club_id: int,
+    payload: ClubDeletePayload,
+    authorization: str | None = Header(default=None),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    actor_user_id = int(user["id"])
+    instance_club_id = 1
+
+    if club_id == instance_club_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Der Hauptverein FLAPAMAMAKU kann nicht gelöscht werden",
+        )
+
+    token = _extract_token(authorization)
+    backup_path: Path | None = None
+    with connect() as db:
+        club = db.execute(
+            "SELECT id, name, slug FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        if club is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        club_name = str(club["name"] or "").strip()
+        if payload.confirm_name.strip() != club_name:
+            raise HTTPException(
+                status_code=422,
+                detail="Vereinsname stimmt nicht mit der Löschbestätigung überein",
+            )
+
+    try:
+        backup_path = _create_database_backup(f"before-club-delete-{club_id}")
+    except Exception as exc:
+        logger.exception("Safety backup before club deletion failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Sicherungsbackup konnte nicht erstellt werden; Verein wurde nicht gelöscht",
+        ) from exc
+
+    with connect() as db:
+        club = db.execute(
+            "SELECT id, name, slug FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        if club is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+
+        memberships = db.execute(
+            """
+            SELECT uc.user_id, uc.role, u.role_key
+            FROM user_clubs uc
+            JOIN users u ON u.id = uc.user_id
+            WHERE uc.club_id = ?
+            """,
+            (club_id,),
+        ).fetchall()
+
+        delete_user_ids: set[int] = set()
+        retained_user_ids: set[int] = set()
+        for membership in memberships:
+            user_id = int(membership["user_id"])
+            if user_id == actor_user_id:
+                retained_user_ids.add(user_id)
+                continue
+            other_count = int(
+                db.execute(
+                    "SELECT COUNT(*) FROM user_clubs WHERE user_id = ? AND club_id <> ?",
+                    (user_id, club_id),
+                ).fetchone()[0]
+            )
+            is_club_admin = (
+                str(membership["role"]) == "club_admin"
+                or str(membership["role_key"] or "") == "club_manager"
+            )
+            if other_count == 0 or is_club_admin:
+                delete_user_ids.add(user_id)
+            else:
+                retained_user_ids.add(user_id)
+
+        # Remove dependent records for accounts that belong to the deleted club.
+        if delete_user_ids:
+            placeholders = ",".join("?" for _ in delete_user_ids)
+            ids = tuple(sorted(delete_user_ids))
+            db.execute(
+                f"DELETE FROM push_deliveries WHERE token_id IN "
+                f"(SELECT id FROM push_tokens WHERE user_id IN ({placeholders}))",
+                ids,
+            )
+            for table in ("event_registrations", "poll_votes", "poll_suggestions"):
+                if "user_id" in _columns(db, table):
+                    db.execute(
+                        f"DELETE FROM {table} WHERE user_id IN ({placeholders})",
+                        ids,
+                    )
+            db.execute(
+                f"DELETE FROM sessions WHERE user_id IN ({placeholders})",
+                ids,
+            )
+            db.execute(
+                f"DELETE FROM push_tokens WHERE user_id IN ({placeholders})",
+                ids,
+            )
+            db.execute(
+                f"DELETE FROM user_clubs WHERE user_id IN ({placeholders})",
+                ids,
+            )
+            db.execute(
+                f"DELETE FROM users WHERE id IN ({placeholders})",
+                ids,
+            )
+
+        # Remaining users may be legitimate multi-club members. Detach only the
+        # deleted club and clear any member pointer owned by that club.
+        if retained_user_ids:
+            placeholders = ",".join("?" for _ in retained_user_ids)
+            ids = tuple(sorted(retained_user_ids))
+            db.execute(
+                f"""
+                UPDATE users
+                SET member_id = NULL
+                WHERE id IN ({placeholders})
+                  AND member_id IN (SELECT id FROM members WHERE club_id = ?)
+                """,
+                (*ids, club_id),
+            )
+        db.execute("DELETE FROM user_clubs WHERE club_id = ?", (club_id,))
+
+        # Sessions must never continue with a deleted active tenant. Keep the
+        # current super-admin session and return it to the protected main club.
+        db.execute(
+            "DELETE FROM sessions WHERE active_club_id = ? AND user_id <> ?",
+            (club_id, actor_user_id),
+        )
+        db.execute(
+            """
+            UPDATE sessions
+            SET active_club_id = ?
+            WHERE token_hash = ? AND user_id = ?
+            """,
+            (instance_club_id, _token_hash(token), actor_user_id),
+        )
+
+        # Relations first, then their parent tenant rows.
+        delete_order = (
+            "push_deliveries",
+            "member_filter_links",
+            "poll_votes",
+            "poll_suggestions",
+            "event_registrations",
+            "content_images",
+            "gallery_snapshots",
+            "push_notifications",
+            "push_tokens",
+            "content_items",
+            "member_filters",
+            "news",
+            "events",
+            "members",
+            "app_config",
+            "club_invoices",
+            "club_features",
+        )
+        for table in delete_order:
+            if "club_id" in _columns(db, table):
+                db.execute(f"DELETE FROM {table} WHERE club_id = ?", (club_id,))
+
+        # Future tenant tables are also cleaned automatically when they expose a
+        # club_id column. Protected/system tables are excluded explicitly.
+        protected_tables = {
+            "clubs", "users", "user_clubs", "sessions", "security_events",
+            "schema_migrations",
+        }
+        known_tables = set(delete_order) | protected_tables
+        table_rows = db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        for row in table_rows:
+            table = str(row["name"])
+            if table in known_tables:
+                continue
+            if "club_id" in _columns(db, table):
+                db.execute(f"DELETE FROM {table} WHERE club_id = ?", (club_id,))
+
+        deleted = db.execute(
+            "DELETE FROM clubs WHERE id = ?",
+            (club_id,),
+        )
+        if deleted.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Verein konnte nicht gelöscht werden")
+
+        _record_security_event(
+            db,
+            "club_deleted",
+            actor_user_id,
+            None,
+            f"Verein {club_name} (ID {club_id}) vollständig gelöscht",
+        )
+        db.commit()
+
+    return {
+        "deleted": True,
+        "club_id": club_id,
+        "club_name": club_name,
+        "deleted_user_count": len(delete_user_ids),
+        "backup_file": backup_path.name if backup_path is not None else "",
+        "active_club_id": instance_club_id,
+    }
 
 
 @app.get("/api/operator/billing/clubs")
