@@ -338,12 +338,12 @@ def main() -> None:
         )
     )
 
-    # 7-11: Dokumente, Galerie, Fotoalbum, Sujet, Archiv.
+    # Dauerhafte Vereinsfotos liegen in Fotoalben; Galerie ist bei externen
+    # Vereinen ausschließlich für temporäre Snapshots reserviert.
     test_sections = {}
     for section, title in (
         ("hero", "Testverein Start"),
         ("documents", "Testverein Dokument"),
-        ("gallery", "Testverein Galerie"),
         ("photos", "Testverein Fotoalbum"),
         ("sujet", "Testverein Sujet nächstes Jahr"),
         ("archive", "Testverein Vergangenes Sujet"),
@@ -365,19 +365,19 @@ def main() -> None:
             },
         )
     )
-    ok(
-        client.post(
-            f"/api/content/{test_sections['gallery']['id']}/image",
-            headers=super_headers,
-            files={
-                "image": (
-                    "test-gallery.png",
-                    image_bytes((34, 85, 136)),
-                    "image/png",
-                )
-            },
-        )
+    blocked_gallery = client.post(
+        "/api/content",
+        headers=super_headers,
+        json={
+            "section": "gallery",
+            "title": "Testverein Galerie",
+            "text": "",
+            "link_url": "",
+            "poll_options": [],
+            "poll_allow_suggestions": False,
+        },
     )
+    assert blocked_gallery.status_code == 403
     album = ok(
         client.post(
             f"/api/content/{test_sections['photos']['id']}/images",
@@ -407,7 +407,7 @@ def main() -> None:
     # Galerie-Snapshot separat testen.
     snapshot = ok(
         client.post(
-            "/api/gallery/snapshots?expires_days=14",
+            "/api/gallery/snapshots?expires_days=7",
             headers=super_headers,
             files={
                 "image": (
@@ -564,7 +564,6 @@ def main() -> None:
     for section, expected in (
         ("hero", "Testverein Start"),
         ("documents", "Testverein Dokument"),
-        ("gallery", "Testverein Galerie"),
         ("photos", "Testverein Fotoalbum"),
         ("sujet", "Testverein Sujet nächstes Jahr"),
         ("archive", "Testverein Vergangenes Sujet"),
@@ -582,12 +581,11 @@ def main() -> None:
             headers=club_headers,
         )
     )
-    ok(
-        client.get(
-            f"/api/content/{test_sections['gallery']['id']}/image",
-            headers=club_headers,
-        )
-    )
+    gallery_rows = ok(
+        client.get("/api/content?section=gallery", headers=club_headers)
+    ).json()
+    assert gallery_rows
+    assert all(row.get("is_snapshot") is True for row in gallery_rows)
     first_album_image = int(album["images"][0]["id"])
     ok(
         client.get(
@@ -636,10 +634,6 @@ def main() -> None:
     # Fremde Testverein-Dateien/Bilder sind von FLAPAMAMAKU aus nicht abrufbar.
     assert client.get(
         f"/api/content/{test_sections['documents']['id']}/document",
-        headers=super_headers,
-    ).status_code == 404
-    assert client.get(
-        f"/api/content/{test_sections['gallery']['id']}/image",
         headers=super_headers,
     ).status_code == 404
     assert client.get(
