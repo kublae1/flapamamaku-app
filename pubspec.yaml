@@ -34,7 +34,7 @@ dev_dependencies:
 
 flutter_launcher_icons:
   android: true
-  ios: false
+  ios: true
   image_path: "assets/FLAPAMAMAKU App-Icon.png"
 
 flutter:
