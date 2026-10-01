@@ -1705,6 +1705,21 @@ jobs:
           rm -rf /tmp/flapamamaku-club-role-catalogue-backups
           PYTHONPATH=. python tests/test_club_role_catalogue.py
 
+      - name: Test club logo cache-busting URL
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          html = Path("static/admin.html").read_text(encoding="utf-8")
+          assert 'function cacheBustUrl(url)' in html
+          assert 'url.includes("?") ? "&" : "?"' in html
+          assert 'image.src = cacheBustUrl(config.logo_url);' in html
+          assert 'logo.src = cacheBustUrl(activeClubConfig.logo_url);' in html
+          assert 'config.logo_url + "?v="' not in html
+          assert 'activeClubConfig.logo_url + "?v="' not in html
+          print("club logo cache-busting URL ok")
+          PY
+
       - name: Test club-scoped backup export and import
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-club-backup.db
