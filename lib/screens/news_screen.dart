@@ -11,25 +11,29 @@ class NewsScreen extends StatelessWidget {
 
   Widget? _newsImage(NewsItem item, Map<String, String> headers) {
     if (item.imageUrl.isNotEmpty) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxHeight: 420),
+        color: Colors.black,
         child: OfflineNetworkImage(
           item.imageUrl,
           headers: headers,
           width: double.infinity,
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => const SizedBox.shrink(),
         ),
       );
     }
 
     if (item.imageAsset.isNotEmpty) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxHeight: 420),
+        color: Colors.black,
         child: Image.asset(
           item.imageAsset,
           width: double.infinity,
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
         ),
       );
     }
