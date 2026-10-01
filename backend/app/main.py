@@ -589,12 +589,28 @@ def connect() -> sqlite3.Connection:
 
 
 MAX_UPLOAD_IMAGE_BYTES = 30 * 1024 * 1024
-MAX_STORED_IMAGE_BYTES = 12 * 1024 * 1024
-MAX_IMAGE_DIMENSION = 1600
+# Ziel: Bilder im normalen App-/Webbetrieb deutlich unter 1 MB halten.
+# Sehr detailreiche Bilder dürfen bis zum harten Limit anwachsen.
+TARGET_STORED_IMAGE_BYTES = 900 * 1024
+MAX_STORED_IMAGE_BYTES = 2 * 1024 * 1024
+MAX_IMAGE_DIMENSION = 1280
+MAX_GIF_DIMENSION = 1024
+
+
+def _encode_webp(image: Image.Image, quality: int) -> bytes:
+    output = io.BytesIO()
+    image.save(
+        output,
+        format="WEBP",
+        quality=quality,
+        method=6,
+        lossless=False,
+    )
+    return output.getvalue()
 
 
 def _optimize_image(data: bytes, mime: str) -> tuple[bytes, str]:
-    """Resize/compress uploads without cropping; preserve aspect ratio."""
+    """Minimize image uploads without cropping; preserve aspect ratio."""
     if not data:
         raise HTTPException(status_code=400, detail="Empty image")
     if len(data) > MAX_UPLOAD_IMAGE_BYTES:
@@ -610,13 +626,25 @@ def _optimize_image(data: bytes, mime: str) -> tuple[bytes, str]:
                 for frame in ImageSequence.Iterator(source):
                     resized = frame.convert("RGBA")
                     resized.thumbnail(
-                        (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
+                        (MAX_GIF_DIMENSION, MAX_GIF_DIMENSION),
                         Image.Resampling.LANCZOS,
                     )
                     frames.append(
-                        resized.convert("P", palette=Image.Palette.ADAPTIVE)
+                        resized.convert(
+                            "P",
+                            palette=Image.Palette.ADAPTIVE,
+                            colors=128,
+                        )
                     )
-                    durations.append(int(frame.info.get("duration", source.info.get("duration", 100)) or 100))
+                    durations.append(
+                        int(
+                            frame.info.get(
+                                "duration",
+                                source.info.get("duration", 100),
+                            )
+                            or 100
+                        )
+                    )
 
                 if not frames:
                     raise HTTPException(status_code=400, detail="Invalid image")
@@ -640,27 +668,54 @@ def _optimize_image(data: bytes, mime: str) -> tuple[bytes, str]:
                     Image.Resampling.LANCZOS,
                 )
                 if image.mode not in {"RGB", "RGBA"}:
-                    image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+                    image = image.convert(
+                        "RGBA" if "A" in image.getbands() else "RGB"
+                    )
 
-                output = io.BytesIO()
-                image.save(
-                    output,
-                    format="WEBP",
-                    quality=82,
-                    method=6,
-                    lossless=False,
-                )
-                optimized = output.getvalue()
+                # Start already visibly web-optimized, then reduce quality only
+                # when necessary. This keeps uploads small without cropping.
+                optimized = b""
+                for quality in (72, 66, 60, 54, 48, 42):
+                    candidate = _encode_webp(image, quality)
+                    if not optimized or len(candidate) < len(optimized):
+                        optimized = candidate
+                    if len(candidate) <= TARGET_STORED_IMAGE_BYTES:
+                        optimized = candidate
+                        break
+
+                # Extremely detailed images are additionally reduced in
+                # dimensions until the normal target is reached. Never upscale.
+                while (
+                    len(optimized) > TARGET_STORED_IMAGE_BYTES
+                    and max(image.size) > 720
+                ):
+                    next_size = (
+                        max(1, int(image.width * 0.85)),
+                        max(1, int(image.height * 0.85)),
+                    )
+                    image = image.resize(next_size, Image.Resampling.LANCZOS)
+                    candidate = _encode_webp(image, 48)
+                    if len(candidate) < len(optimized):
+                        optimized = candidate
+                    else:
+                        break
+
                 optimized_mime = "image/webp"
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=415, detail="Invalid or unsupported image") from exc
+        raise HTTPException(
+            status_code=415,
+            detail="Invalid or unsupported image",
+        ) from exc
 
     if not optimized:
         raise HTTPException(status_code=400, detail="Image optimization failed")
     if len(optimized) > MAX_STORED_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Optimized image is still too large")
+        raise HTTPException(
+            status_code=413,
+            detail="Optimized image is still too large",
+        )
     return optimized, optimized_mime
 
 
