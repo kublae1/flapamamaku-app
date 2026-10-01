@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.69"
+API_VERSION = "0.8.70"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -92,6 +92,10 @@ BILLING_ISSUER_ADDRESS = os.getenv(
 ).strip()
 BILLING_PAYMENT_INFO = os.getenv(
     "FLAPAMAMAKU_BILLING_PAYMENT_INFO",
+    "",
+).strip()
+SUPERADMIN_RECOVERY_TOKEN = os.getenv(
+    "FLAPAMAMAKU_SUPERADMIN_RECOVERY_TOKEN",
     "",
 ).strip()
 
@@ -479,6 +483,16 @@ class LoginPayload(BaseModel):
 
 class BootstrapPayload(LoginPayload):
     member_id: int | None = None
+
+
+class SuperAdminRolePayload(BaseModel):
+    enabled: bool
+
+
+class SuperAdminRecoveryPayload(BaseModel):
+    recovery_token: str = Field(min_length=12, max_length=4096)
+    username: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=8, max_length=200)
 
 
 class UserPayload(BaseModel):
@@ -1424,6 +1438,18 @@ def init_db() -> None:
                 PRIMARY KEY (user_id, club_id),
                 FOREIGN KEY(user_id) REFERENCES users(id),
                 FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS security_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                actor_user_id INTEGER,
+                target_user_id INTEGER,
+                details TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -2496,6 +2522,62 @@ def _is_super_admin(db: sqlite3.Connection, user_id: int) -> bool:
             """,
             (user_id,),
         ).fetchone()
+    )
+
+
+def _would_remove_last_super_admin(
+    db: sqlite3.Connection,
+    user_id: int,
+    club_id: int,
+) -> bool:
+    other_membership = db.execute(
+        """
+        SELECT 1
+        FROM user_clubs
+        WHERE user_id = ?
+          AND role = 'super_admin'
+          AND active = 1
+          AND club_id != ?
+        LIMIT 1
+        """,
+        (user_id, club_id),
+    ).fetchone()
+    if other_membership is not None:
+        return False
+    other_admin = db.execute(
+        """
+        SELECT 1
+        FROM user_clubs
+        WHERE user_id != ?
+          AND role = 'super_admin'
+          AND active = 1
+        LIMIT 1
+        """,
+        (user_id,),
+    ).fetchone()
+    return other_admin is None
+
+
+def _record_security_event(
+    db: sqlite3.Connection,
+    event_type: str,
+    actor_user_id: int | None,
+    target_user_id: int | None,
+    details: str = "",
+) -> None:
+    db.execute(
+        """
+        INSERT INTO security_events (
+            event_type, actor_user_id, target_user_id, details, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            event_type,
+            actor_user_id,
+            target_user_id,
+            details,
+            datetime.now(timezone.utc).isoformat(),
+        ),
     )
 
 
@@ -3940,6 +4022,98 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
     return _user_profile(user_id)
 
 
+@app.post("/api/auth/superadmin-recovery")
+def recover_super_admin(payload: SuperAdminRecoveryPayload) -> dict[str, Any]:
+    if not SUPERADMIN_RECOVERY_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="Super-Admin-Recovery ist auf diesem Server nicht konfiguriert",
+        )
+    if not secrets.compare_digest(
+        payload.recovery_token,
+        SUPERADMIN_RECOVERY_TOKEN,
+    ):
+        raise HTTPException(status_code=403, detail="Recovery-Code ungültig")
+
+    username = payload.username.strip()
+    password_hash, salt = _hash_password(payload.password)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        row = db.execute(
+            "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
+            (username,),
+        ).fetchone()
+        if row is None:
+            values = [1 for _ in PERMISSION_FIELDS]
+            cursor = db.execute(
+                f"""
+                INSERT INTO users (
+                    member_id, username, password_hash, password_salt, active,
+                    {", ".join(PERMISSION_FIELDS)},
+                    role_key, permission_overrides, created_at
+                ) VALUES (
+                    NULL, ?, ?, ?, 1,
+                    {", ".join("?" for _ in PERMISSION_FIELDS)},
+                    'admin', '{{}}', ?
+                )
+                """,
+                [
+                    username,
+                    password_hash,
+                    salt,
+                    *values,
+                    now,
+                ],
+            )
+            user_id = int(cursor.lastrowid)
+        else:
+            user_id = int(row["id"])
+            assignments = [
+                "password_hash = ?",
+                "password_salt = ?",
+                "active = 1",
+                "role_key = 'admin'",
+                "permission_overrides = '{}'",
+            ]
+            values: list[Any] = [password_hash, salt]
+            for key in PERMISSION_FIELDS:
+                assignments.append(f"{key} = 1")
+            values.append(user_id)
+            db.execute(
+                f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
+                values,
+            )
+
+        db.execute(
+            """
+            INSERT INTO user_clubs (
+                user_id, club_id, role, active, created_at, updated_at
+            ) VALUES (?, 1, 'super_admin', 1, ?, ?)
+            ON CONFLICT(user_id, club_id) DO UPDATE SET
+                role = 'super_admin',
+                active = 1,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, now, now),
+        )
+        db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        _record_security_event(
+            db,
+            "super_admin_recovery",
+            None,
+            user_id,
+            f"Recovery für Benutzer {username}",
+        )
+        db.commit()
+
+    logger.warning("Super-admin recovery completed for user_id=%s", user_id)
+    return {
+        "recovered": True,
+        "username": username,
+        "user_id": user_id,
+    }
+
+
 @app.post("/api/auth/login")
 def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
     rate_key = _login_rate_key(request, payload.username)
@@ -4494,6 +4668,72 @@ def get_roles(
     ]
 
 
+@app.put("/api/users/{user_id}/super-admin")
+def set_super_admin_role(
+    user_id: int,
+    payload: SuperAdminRolePayload,
+    actor: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not bool(actor.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur Super-Admins dürfen Super-Admin-Rechte vergeben",
+        )
+
+    with connect() as db:
+        club_id = _active_club_id(db)
+        membership = db.execute(
+            """
+            SELECT role, active
+            FROM user_clubs
+            WHERE user_id = ? AND club_id = ?
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if membership is None or not bool(membership["active"]):
+            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+
+        if payload.enabled:
+            db.execute(
+                """
+                UPDATE user_clubs
+                SET role = 'super_admin', updated_at = ?
+                WHERE user_id = ? AND club_id = ?
+                """,
+                (datetime.now(timezone.utc).isoformat(), user_id, club_id),
+            )
+            event_type = "super_admin_granted"
+        else:
+            if membership["role"] != "super_admin":
+                return _user_profile(user_id)
+            if _would_remove_last_super_admin(db, user_id, club_id):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Der letzte aktive Super-Admin kann nicht herabgestuft werden",
+                )
+            db.execute(
+                """
+                UPDATE user_clubs
+                SET role = 'club_admin', updated_at = ?
+                WHERE user_id = ? AND club_id = ?
+                """,
+                (datetime.now(timezone.utc).isoformat(), user_id, club_id),
+            )
+            event_type = "super_admin_revoked"
+
+        db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        _record_security_event(
+            db,
+            event_type,
+            int(actor["id"]),
+            user_id,
+            f"club_id={club_id}",
+        )
+        db.commit()
+
+    return _user_profile(user_id)
+
+
 @app.get("/api/users")
 def get_users(
     _: dict[str, Any] = Depends(require("can_manage_users")),
@@ -4647,6 +4887,24 @@ def put_user(
         ).fetchone()
         if target is None:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        target_role = db.execute(
+            """
+            SELECT role
+            FROM user_clubs
+            WHERE user_id = ? AND club_id = ? AND active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if (
+            target_role is not None
+            and target_role["role"] == "super_admin"
+            and not payload.active
+            and _would_remove_last_super_admin(db, user_id, club_id)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Der letzte aktive Super-Admin kann nicht deaktiviert werden",
+            )
         try:
             cursor = db.execute(
                 f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
@@ -4703,6 +4961,14 @@ def delete_user(
         ).fetchone()
         if membership is None:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        if (
+            membership["role"] == "super_admin"
+            and _would_remove_last_super_admin(db, user_id, club_id)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Der letzte aktive Super-Admin kann nicht gelöscht werden",
+            )
 
         db.execute(
             "DELETE FROM user_clubs WHERE user_id = ? AND club_id = ?",
