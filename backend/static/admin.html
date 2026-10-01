@@ -241,6 +241,42 @@
       font-size: 16px;
       font-weight: 650;
     }
+    .effective-rights-box {
+      margin:16px 0 18px;
+      padding:14px;
+      border:1px solid rgba(199,163,90,.28);
+      border-radius:12px;
+      background:#14171a;
+    }
+    .effective-rights-box h3 {
+      margin:0 0 4px;
+    }
+    .effective-rights-grid {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px 12px;
+      margin-top:12px;
+    }
+    .effective-right {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px 10px;
+      border-radius:9px;
+      background:#0f1113;
+      border:1px solid rgba(255,255,255,.08);
+      font-size:14px;
+    }
+    .effective-right .right-state {
+      white-space:nowrap;
+      font-weight:900;
+    }
+    .effective-right.allowed .right-state { color:#7ddc9a; }
+    .effective-right.denied .right-state { color:#ff8c96; }
+    @media (max-width:700px) {
+      .effective-rights-grid { grid-template-columns:1fr; }
+    }
     .hidden { display: none !important; }
     .error { color: #ff8c96; font-weight: 800; }
     hr { border-color: var(--line) !important; }
@@ -633,6 +669,11 @@
             <label>Rolle</label>
             <select name="account_role_key" class="role-select"></select>
             <p class="meta">Standardrechte kommen aus der Rolle. Abweichungen gelten nur für dieses Konto.</p>
+            <div class="effective-rights-box">
+              <h3>Aktuell wirksame Rechte</h3>
+              <p class="meta">Hier siehst du genau, was dieses Mitglied mit der gewählten Rolle und den Abweichungen tatsächlich darf.</p>
+              <div id="member-account-effective-rights" class="effective-rights-grid"></div>
+            </div>
             <h3>Abweichungen von der Rolle</h3>
             <div class="permission-grid role-permission-grid">
             <label>News verwalten
@@ -789,6 +830,11 @@
           <select name="role_key" class="role-select"></select>
           <p class="meta">Die Rolle liefert die Standardrechte. Einzelne Rechte können darunter gezielt erlaubt oder gesperrt werden.</p>
           <p class="meta">Super-Admin-Rechte werden aus Sicherheitsgründen separat vergeben. Ein bestehender Super-Admin kann sie in der Benutzerliste übertragen oder einem zweiten Verantwortlichen zusätzlich geben.</p>
+          <div class="effective-rights-box">
+            <h3>Aktuell wirksame Rechte</h3>
+            <p class="meta">Diese Übersicht zeigt die effektiven Rechte aus Rolle plus individuellen Abweichungen.</p>
+            <div id="user-effective-rights" class="effective-rights-grid"></div>
+          </div>
           <h3>Abweichungen von der Rolle</h3>
           <div class="permission-grid role-permission-grid">
             <label>News verwalten
@@ -1290,6 +1336,78 @@ const permissionFields = [
   "can_gallery_upload","can_polls","can_links","can_contact","can_about",
   "can_admin_page","can_manage_settings","can_manage_users"
 ];
+
+const permissionLabels = {
+  can_news: "News verwalten",
+  can_events: "Termine verwalten",
+  can_members: "Mitglieder verwalten",
+  can_documents: "Dokumente verwalten",
+  can_photos: "Galerie / Fotoalben verwalten",
+  can_gallery_upload: "Galerie-Snapshots aufnehmen",
+  can_polls: "Umfragen verwalten",
+  can_links: "Links verwalten",
+  can_contact: "Kontakt verwalten",
+  can_about: "Über uns verwalten",
+  can_admin_page: "PC-Adminseite benutzen",
+  can_manage_settings: "Vereinseinstellungen verwalten",
+  can_manage_users: "Benutzer / Berechtigungen verwalten",
+};
+
+function effectivePermissionsForForm(form, prefix = "") {
+  const roleKey = form.elements[`${prefix}role_key`]?.value || "member";
+  const role = roleDefinitions.find(item => item.key === roleKey);
+  const result = {...(role?.permissions || {})};
+  permissionFields.forEach(key => {
+    const field = form.elements[`${prefix}${key}`];
+    if (!field) return;
+    if (field.value === "allow") result[key] = true;
+    if (field.value === "deny") result[key] = false;
+  });
+  return result;
+}
+
+function renderEffectiveRights(form, targetId, prefix = "", forceSuperAdmin = false) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  const rights = effectivePermissionsForForm(form, prefix);
+  if (forceSuperAdmin) {
+    permissionFields.forEach(key => rights[key] = true);
+  }
+  target.innerHTML = permissionFields.map(key => {
+    const allowed = rights[key] === true;
+    return `
+      <div class="effective-right ${allowed ? "allowed" : "denied"}">
+        <span>${permissionLabels[key] || key}</span>
+        <span class="right-state">${allowed ? "✓ Erlaubt" : "✕ Gesperrt"}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function refreshAllEffectiveRights() {
+  const usersForm = document.getElementById("users-form");
+  if (usersForm) {
+    const userId = Number(usersForm.elements.id?.value || 0);
+    const selectedUser = userAccounts.find(user => Number(user.id) === userId);
+    renderEffectiveRights(
+      usersForm,
+      "user-effective-rights",
+      "",
+      selectedUser?.club_role === "super_admin",
+    );
+  }
+  const membersForm = document.getElementById("members-form");
+  if (membersForm) {
+    const userId = Number(membersForm.elements.account_user_id?.value || 0);
+    const selectedUser = userAccounts.find(user => Number(user.id) === userId);
+    renderEffectiveRights(
+      membersForm,
+      "member-account-effective-rights",
+      "account_",
+      selectedUser?.club_role === "super_admin",
+    );
+  }
+}
 
 const contentPermissions = {
   hero: "can_photos",
@@ -1982,6 +2100,7 @@ async function loadRoles() {
       ? current
       : "member";
   });
+  refreshAllEffectiveRights();
 }
 
 function setPermissionOverrideFields(form, overrides = {}, prefix = "") {
@@ -1994,6 +2113,7 @@ function setPermissionOverrideFields(form, overrides = {}, prefix = "") {
       field.value = "";
     }
   });
+  refreshAllEffectiveRights();
 }
 
 function formatDateCH(value) {
@@ -2124,6 +2244,7 @@ function edit(resource, item) {
     form.elements.account_active.checked = account ? !!account.active : true;
     form.elements.account_role_key.value = account?.role_key || "member";
     setPermissionOverrideFields(form, account?.permission_overrides || {}, "account_");
+    refreshAllEffectiveRights();
   }
 
   form.scrollIntoView({behavior: "smooth"});
@@ -2310,8 +2431,14 @@ function editUser(user) {
   form.elements.active.checked = !!user.active;
   form.elements.role_key.value = user.role_key || "member";
   setPermissionOverrideFields(form, user.permission_overrides || {});
+  refreshAllEffectiveRights();
   form.scrollIntoView({behavior: "smooth"});
 }
+
+document.querySelectorAll('#users-form select[name="role_key"], #users-form .role-permission-grid select, #members-form select[name="account_role_key"], #members-form .role-permission-grid select').forEach(field => {
+  field.dataset.effectiveRightsWired = "1";
+  field.addEventListener("change", refreshAllEffectiveRights);
+});
 
 document.querySelector('#users-form select[name="member_id"]').addEventListener("change", event => {
   const form = document.getElementById("users-form");
@@ -2331,6 +2458,7 @@ document.querySelector('#users-form select[name="member_id"]').addEventListener(
   form.elements.active.checked = true;
   form.elements.role_key.value = "member";
   setPermissionOverrideFields(form, {});
+  refreshAllEffectiveRights();
 });
 
 
