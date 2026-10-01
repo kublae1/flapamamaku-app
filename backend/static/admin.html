@@ -569,7 +569,16 @@
           <h2>Mitglied</h2>
           <input type="hidden" name="id">
           <label>Name</label><input name="name" required>
-          <label>Funktion</label><input name="role" value="Präsident">
+          <label>Funktion</label>
+          <div class="actions" id="member-role-presets" style="margin:6px 0 8px;gap:6px;flex-wrap:wrap">
+            <button type="button" data-member-role="Mitglied">Mitglied</button>
+            <button type="button" data-member-role="Präsident">Präsident</button>
+            <button type="button" data-member-role="Vizepräsident">Vizepräsident</button>
+            <button type="button" data-member-role="Kassier">Kassier</button>
+            <button type="button" data-member-role="Aktuar">Aktuar</button>
+            <button type="button" data-member-role="Vorstand">Vorstand</button>
+          </div>
+          <input name="role" value="Mitglied" placeholder="Paket wählen oder eigene Funktion eingeben">
           <label>Mitglied seit</label><input name="since" placeholder="z. B. 2012">
           <label>Geburtsdatum</label><input name="birth_date" type="date">
           <label>Status</label>
@@ -1396,6 +1405,12 @@ async function loadTenantContext() {
       !featureVisibility.push || !currentUser.can_manage_users,
     );
 }
+
+document.querySelectorAll("#member-role-presets [data-member-role]").forEach(button => {
+  button.addEventListener("click", () => {
+    document.getElementById("members-form").elements.role.value = button.dataset.memberRole || "";
+  });
+});
 
 document.getElementById("club-create-open").addEventListener("click", () => {
   if (!currentUser?.is_super_admin) return;
