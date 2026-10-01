@@ -242,39 +242,53 @@
       font-weight: 650;
     }
     .effective-rights-box {
-      margin:16px 0 18px;
-      padding:14px;
+      margin:20px 0 22px;
+      padding:18px;
       border:1px solid rgba(199,163,90,.28);
       border-radius:12px;
       background:#14171a;
     }
     .effective-rights-box h3 {
-      margin:0 0 4px;
+      margin:0 0 6px;
+    }
+    .effective-rights-box > .meta {
+      margin-bottom:2px;
     }
     .effective-rights-grid {
       display:grid;
       grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:8px 12px;
-      margin-top:12px;
+      gap:12px 14px;
+      margin-top:16px;
+      align-items:stretch;
     }
     .effective-right {
-      display:flex;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
       align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      padding:8px 10px;
-      border-radius:9px;
+      column-gap:16px;
+      min-height:64px;
+      padding:12px 14px;
+      border-radius:10px;
       background:#0f1113;
       border:1px solid rgba(255,255,255,.08);
       font-size:14px;
+      line-height:1.25;
+      overflow:hidden;
+    }
+    .effective-right > span:first-child {
+      min-width:0;
+      overflow-wrap:anywhere;
     }
     .effective-right .right-state {
       white-space:nowrap;
       font-weight:900;
+      font-size:13px;
+      text-align:right;
+      justify-self:end;
     }
     .effective-right.allowed .right-state { color:#7ddc9a; }
     .effective-right.denied .right-state { color:#ff8c96; }
-    @media (max-width:700px) {
+    @media (max-width:1180px) {
       .effective-rights-grid { grid-template-columns:1fr; }
     }
     .hidden { display: none !important; }
