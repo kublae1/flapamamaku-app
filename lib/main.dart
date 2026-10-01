@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'data/app_store.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
+import 'screens/password_change_screen.dart';
 import 'screens/biometric_lock_screen.dart';
 import 'screens/club_selection_screen.dart';
 import 'theme/flap_brand.dart';
@@ -53,6 +54,9 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
                 }
                 if (store.clubSelectionRequired) {
                   return const ClubSelectionScreen();
+                }
+                if (store.mustChangePassword) {
+                  return const PasswordChangeScreen(forced: true);
                 }
                 return const HomeShell();
               },
