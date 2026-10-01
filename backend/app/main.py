@@ -1970,6 +1970,31 @@ def init_db() -> None:
             "must_change_password",
             "INTEGER NOT NULL DEFAULT 0",
         )
+        _ensure_column(
+            db,
+            "users",
+            "password_policy_version",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+
+        # One-time rollout of the 8-character password policy for all ordinary
+        # club accounts. Platform super-admin accounts stay separate and are
+        # managed through their dedicated account settings.
+        db.execute(
+            """
+            UPDATE users
+            SET must_change_password = 1,
+                password_policy_version = 1
+            WHERE password_policy_version < 1
+              AND id NOT IN (
+                  SELECT uc.user_id
+                  FROM user_clubs uc
+                  WHERE uc.club_id = 1
+                    AND uc.active = 1
+                    AND uc.role = 'super_admin'
+              )
+            """
+        )
         _ensure_column(db, "events", "image_data", "BLOB")
         _ensure_column(db, "events", "image_mime", "TEXT NOT NULL DEFAULT ''")
         db.execute(
@@ -4980,7 +5005,8 @@ def change_own_password(
             UPDATE users
             SET password_hash = ?,
                 password_salt = ?,
-                must_change_password = 0
+                must_change_password = 0,
+                password_policy_version = 1
             WHERE id = ?
             """,
             (password_hash, salt, int(user["id"])),
@@ -5069,6 +5095,7 @@ def update_superadmin_account(
                 "password_hash = ?",
                 "password_salt = ?",
                 "must_change_password = 0",
+                "password_policy_version = 1",
             ])
             values.extend([password_hash, salt])
 
@@ -5123,7 +5150,8 @@ def reset_user_password(
             UPDATE users
             SET password_hash = ?,
                 password_salt = ?,
-                must_change_password = 1
+                must_change_password = 1,
+                password_policy_version = 1
             WHERE id = ?
             """,
             (password_hash, salt, user_id),
@@ -5945,8 +5973,8 @@ def post_user(
                 INSERT INTO users (
                     member_id, username, password_hash, password_salt, active,
                     {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides,
-                    must_change_password, created_at
-                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?, ?, 1, ?)
+                    must_change_password, password_policy_version, created_at
+                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?, ?, 1, 1, ?)
                 """,
                 [
                     payload.member_id,
@@ -6044,6 +6072,7 @@ def put_user(
             "password_hash = ?",
             "password_salt = ?",
             "must_change_password = 1",
+            "password_policy_version = 1",
         ])
         values.extend([password_hash, salt])
 
