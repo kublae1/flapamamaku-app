@@ -275,7 +275,7 @@ class AppStore extends ChangeNotifier {
     _syncTimer ??= Timer.periodic(
       const Duration(seconds: 30),
       (_) {
-        if (isAuthenticated) refreshFromServer();
+        if (isAuthenticated && !mustChangePassword) refreshFromServer();
       },
     );
   }
@@ -937,7 +937,12 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> refreshFromServer() async {
-    if (!api.isConfigured || !isAuthenticated || isSyncing) return;
+    if (!api.isConfigured ||
+        !isAuthenticated ||
+        mustChangePassword ||
+        isSyncing) {
+      return;
+    }
 
     isSyncing = true;
     notifyListeners();
