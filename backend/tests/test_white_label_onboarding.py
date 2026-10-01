@@ -121,7 +121,7 @@ def main() -> None:
                 "username": "white-label-admin",
                 "password": PASSWORD,
                 "active": True,
-                "role_key": "admin",
+                "role_key": "club_manager",
                 "permission_overrides": {},
             },
         )
