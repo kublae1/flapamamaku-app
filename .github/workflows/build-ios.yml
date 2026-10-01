@@ -103,6 +103,9 @@ jobs:
 
       - name: Generate iOS platform files
         run: |
+          # Flutter 3.47 on GitHub's macOS ARM64 runner may copy Swift-package
+          # plugins during project generation before creating this parent path.
+          mkdir -p build/ios/SourcePackages
           if [ ! -d ios ]; then
             flutter create --platforms=ios --project-name flapamamaku_app .
           fi
