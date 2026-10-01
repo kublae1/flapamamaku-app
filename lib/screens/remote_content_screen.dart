@@ -409,7 +409,7 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
 
       if (!context.mounted) return;
 
-      int selectedDays = 14;
+      int selectedDays = 1;
       final expiresDays = await showDialog<int>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
@@ -435,9 +435,9 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
                     border: OutlineInputBorder(),
                   ),
                   items: const [
+                    DropdownMenuItem(value: 1, child: Text('24 Stunden')),
+                    DropdownMenuItem(value: 3, child: Text('3 Tagen')),
                     DropdownMenuItem(value: 7, child: Text('7 Tagen')),
-                    DropdownMenuItem(value: 14, child: Text('14 Tagen')),
-                    DropdownMenuItem(value: 30, child: Text('30 Tagen')),
                   ],
                   onChanged: (value) {
                     if (value != null) {
@@ -476,7 +476,9 @@ class _RemoteContentScreenState extends State<RemoteContentScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Snapshot gespeichert – automatische Löschung nach $expiresDays Tagen.',
+            expiresDays == 1
+                ? 'Snapshot gespeichert – automatische Löschung nach 24 Stunden.'
+                : 'Snapshot gespeichert – automatische Löschung nach $expiresDays Tagen.',
           ),
         ),
       );
