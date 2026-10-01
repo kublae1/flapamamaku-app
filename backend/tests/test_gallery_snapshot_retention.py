@@ -9,9 +9,11 @@ from starlette.datastructures import Headers
 
 from app.main import (
     BootstrapPayload,
+    ClubCreatePayload,
     _REQUEST_CLUB_ID,
     _require_permanent_gallery_allowed,
     bootstrap,
+    create_club,
     connect,
     init_db,
     post_gallery_snapshot,
@@ -67,7 +69,11 @@ async def main_async() -> None:
     else:
         raise AssertionError("14-day snapshots must be rejected")
 
-    token = _REQUEST_CLUB_ID.set(2)
+    created_club = create_club(
+        ClubCreatePayload(slug="snapshot-test", name="Snapshot Test"),
+        user=user,
+    )
+    token = _REQUEST_CLUB_ID.set(int(created_club["id"]))
     try:
         with connect() as db:
             try:
