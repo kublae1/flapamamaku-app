@@ -3,7 +3,7 @@ name: Test Backend
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7, feature/multi-tenant-package8, feature/multi-tenant-package9, feature/multi-tenant-package10, feature/white-label-onboarding-v1, feature/white-label-onboarding-v2, feature/club-billing-suspension-v1, feature/club-billing-admin-ui-v1, feature/club-billing-pdf-grace-v1, feature/final-release-validation-v1, feature/image-upload-optimization-v1, feature/superadmin-resilience-v1 ]
+    branches: [main, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-integration-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1, feature/multi-tenant-package1, feature/multi-tenant-package2, feature/multi-tenant-package3, feature/multi-tenant-package4, feature/multi-tenant-package5, feature/multi-tenant-package6, feature/multi-tenant-package7, feature/multi-tenant-package8, feature/multi-tenant-package9, feature/multi-tenant-package10, feature/white-label-onboarding-v1, feature/white-label-onboarding-v2, feature/club-billing-suspension-v1, feature/club-billing-admin-ui-v1, feature/club-billing-pdf-grace-v1, feature/final-release-validation-v1, feature/image-upload-optimization-v1, feature/superadmin-resilience-v1, feature/gallery-snapshot-retention-v1 ]
     paths:
       - "backend/**"
       - ".github/workflows/test-backend.yml"
@@ -1690,6 +1690,15 @@ jobs:
           rm -f /tmp/flapamamaku-superadmin-resilience.db
           rm -rf /tmp/flapamamaku-superadmin-resilience-backups
           PYTHONPATH=. python tests/test_superadmin_resilience.py
+
+      - name: Test gallery snapshot retention
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-gallery-retention.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-gallery-retention-backups
+        run: |
+          rm -f /tmp/flapamamaku-gallery-retention.db
+          rm -rf /tmp/flapamamaku-gallery-retention-backups
+          PYTHONPATH=. python tests/test_gallery_snapshot_retention.py
 
       - name: Build Docker image
         run: docker build -t flapamamaku-backend:test .
