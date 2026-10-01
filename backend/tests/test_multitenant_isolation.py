@@ -449,7 +449,7 @@ def main() -> None:
                 "username": "testverein-admin",
                 "password": "TestvereinPass123!",
                 "active": True,
-                "role_key": "admin",
+                "role_key": "club_manager",
                 "permission_overrides": {},
             },
         )
@@ -534,7 +534,7 @@ def main() -> None:
                 "username": "secondary-superadmin",
                 "password": "SecondaryPass123!",
                 "active": True,
-                "role_key": "admin",
+                "role_key": "club_manager",
                 "permission_overrides": {},
             },
         )
