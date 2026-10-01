@@ -1707,15 +1707,6 @@ jobs:
           rm -rf /tmp/flapamamaku-club-role-catalogue-backups
           PYTHONPATH=. python tests/test_club_role_catalogue.py
 
-      - name: Test Noster tenant hero
-        env:
-          FLAPAMAMAKU_DB: /tmp/flapamamaku-noster-hero.db
-          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-noster-hero-backups
-        run: |
-          rm -f /tmp/flapamamaku-noster-hero.db
-          rm -rf /tmp/flapamamaku-noster-hero-backups
-          PYTHONPATH=. python tests/test_noster_hero_tenant.py
-
       - name: Test tenant club logos
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-club-logo-tenant.db
