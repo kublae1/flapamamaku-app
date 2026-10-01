@@ -475,6 +475,18 @@ class AppStore extends ChangeNotifier {
     try {
       currentUser = await api.changePassword(currentPassword, newPassword);
       authError = null;
+
+      if (!mustChangePassword) {
+        await _loadAccessibleClubs();
+        clubSelectionRequired = isSuperAdmin && accessibleClubs.length > 1;
+        final prefs = await SharedPreferences.getInstance();
+        await _loadRemoteBranding(prefs);
+        await refreshFromServer();
+        if (pushEnabled && showPushNotifications) {
+          await pushService.enable();
+        }
+      }
+
       notifyListeners();
       return true;
     } catch (error) {
@@ -585,6 +597,12 @@ class AppStore extends ChangeNotifier {
       biometricUnlockPending = false;
       authError = null;
       clubSelectionRequired = false;
+
+      if (mustChangePassword) {
+        accessibleClubs.clear();
+        return;
+      }
+
       await _loadAccessibleClubs();
       if (accessibleClubs.length <= 1) {
         clubSelectionRequired = false;
@@ -595,17 +613,33 @@ class AppStore extends ChangeNotifier {
       if (pushEnabled && showPushNotifications) {
         await pushService.enable();
       }
-    } catch (_) {
-      final restored = await _loadOfflineCache();
-      if (restored) {
-        biometricUnlockPending = false;
-        authError = null;
-      } else {
+    } catch (error) {
+      // A rejected/expired token is not an offline state. Remove it completely
+      // so the app returns to the login screen instead of restoring an
+      // authenticated cache and entering a 401 loop.
+      if (error is ApiException && error.statusCode == 401) {
         api.setToken(null);
         currentUser = null;
+        accessibleClubs.clear();
+        clubSelectionRequired = false;
         isAuthenticated = false;
         biometricUnlockPending = false;
+        authError = null;
         await _secureStorage.delete(key: 'flapamamaku_token');
+      } else {
+        final restored = await _loadOfflineCache();
+        if (restored) {
+          biometricUnlockPending = false;
+          authError = null;
+        } else {
+          api.setToken(null);
+          currentUser = null;
+          accessibleClubs.clear();
+          clubSelectionRequired = false;
+          isAuthenticated = false;
+          biometricUnlockPending = false;
+          await _secureStorage.delete(key: 'flapamamaku_token');
+        }
       }
     } finally {
       authReady = true;
@@ -796,6 +830,17 @@ class AppStore extends ChangeNotifier {
         );
       isAuthenticated = true;
       clubSelectionRequired = result['requires_club_selection'] == true;
+
+      // A temporary password must be replaced before the app makes any
+      // authenticated content requests. The login response already contains
+      // the current user and club list, so we can safely show the forced
+      // password screen immediately.
+      if (mustChangePassword) {
+        clubSelectionRequired = false;
+        authError = null;
+        return true;
+      }
+
       if (accessibleClubs.isEmpty) {
         await _loadAccessibleClubs();
       }
