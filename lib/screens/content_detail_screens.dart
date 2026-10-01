@@ -402,7 +402,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
 
     if (link.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text('${store.appName} Chat-Link ist noch nicht hinterlegt.'),
         ),
       );
