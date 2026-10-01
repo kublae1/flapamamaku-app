@@ -1700,6 +1700,15 @@ jobs:
           rm -rf /tmp/flapamamaku-gallery-retention-backups
           PYTHONPATH=. python tests/test_gallery_snapshot_retention.py
 
+      - name: Test system backup permissions and logout cleanup
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-system-backup-permissions.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-system-backup-permissions-backups
+        run: |
+          rm -f /tmp/flapamamaku-system-backup-permissions.db
+          rm -rf /tmp/flapamamaku-system-backup-permissions-backups
+          PYTHONPATH=. python tests/test_system_backup_permissions.py
+
       - name: Build Docker image
         run: docker build -t flapamamaku-backend:test .
 # final-release-validation-sync
