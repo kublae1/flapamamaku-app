@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.82"
+API_VERSION = "0.8.83"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2072,21 +2072,21 @@ def init_db() -> None:
             (membership_now, membership_now),
         )
 
-        # Repair memberships created by the previous legacy migration:
-        # a user linked to a member of another club must not also inherit
-        # an automatic FLAPAMAMAKU membership. Platform super-admins are
-        # deliberately excluded from this cleanup.
+        # Repair memberships created by the previous legacy migration.
+        # Normal club accounts are single-tenant accounts in the app. If a
+        # non-super-admin has any active membership in an external club, an
+        # additional club-1 membership is stale legacy data and must be removed.
+        # This works even when the account is not linked to a member record.
         db.execute(
             """
             DELETE FROM user_clubs
             WHERE club_id = 1
               AND role != 'super_admin'
               AND user_id IN (
-                  SELECT u.id
-                  FROM users u
-                  JOIN members m ON m.id = u.member_id
-                  WHERE u.member_id IS NOT NULL
-                    AND m.club_id != 1
+                  SELECT uc_external.user_id
+                  FROM user_clubs uc_external
+                  WHERE uc_external.club_id != 1
+                    AND uc_external.active = 1
               )
             """
         )
@@ -4844,6 +4844,10 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
                 ),
             )
         clubs = _accessible_club_rows(db, user_id)
+        if not _is_super_admin(db, user_id) and len(clubs) > 1:
+            external_clubs = [club for club in clubs if int(club["id"]) != _instance_club_id(db)]
+            if len(external_clubs) == 1:
+                clubs = external_clubs
         if not clubs:
             suspended = db.execute(
                 """
