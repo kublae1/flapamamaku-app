@@ -222,9 +222,14 @@ class ApiService {
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final values = jsonDecode(response.body) as List<dynamic>;
-    return values
-        .map((value) => EventItem.fromJson(value as Map<String, dynamic>))
-        .toList();
+    return values.map((value) {
+      final json = Map<String, dynamic>.from(value as Map<String, dynamic>);
+      final imageUrl = json['image_url']?.toString() ?? '';
+      if (imageUrl.startsWith('/')) {
+        json['image_url'] = '$baseUrl$imageUrl';
+      }
+      return EventItem.fromJson(json);
+    }).toList();
   }
 
   Future<List<MemberFilterItem>> fetchMemberFilters() async {
@@ -550,9 +555,74 @@ class ApiService {
             )
             .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
-    return EventItem.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final imageUrl = json['image_url']?.toString() ?? '';
+    if (imageUrl.startsWith('/')) {
+      json['image_url'] = '$baseUrl$imageUrl';
+    }
+    return EventItem.fromJson(json);
+  }
+
+  Future<EventItem> uploadEventImage({
+    required int eventId,
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      _uri('/api/events/$eventId/image'),
     );
+    request.headers.addAll(authHeaders);
+    final lowerName = filename.toLowerCase();
+    final mediaType = lowerName.endsWith('.png')
+        ? MediaType('image', 'png')
+        : lowerName.endsWith('.webp')
+            ? MediaType('image', 'webp')
+            : lowerName.endsWith('.gif')
+                ? MediaType('image', 'gif')
+                : MediaType('image', 'jpeg');
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'image',
+        bytes,
+        filename: filename.isEmpty ? 'terminbild.jpg' : filename,
+        contentType: mediaType,
+      ),
+    );
+    final streamed = await request.send().timeout(const Duration(seconds: 30));
+    final response = await http.Response.fromStream(streamed);
+    _ensureSuccess(response);
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final imageUrl = json['image_url']?.toString() ?? '';
+    if (imageUrl.startsWith('/')) {
+      json['image_url'] = '$baseUrl$imageUrl';
+    }
+    return EventItem.fromJson(json);
+  }
+
+  Future<void> deleteEventImage(int eventId) async {
+    final response = await http
+        .delete(_uri('/api/events/$eventId/image'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
+  Future<Map<String, dynamic>> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    final response = await http
+        .post(
+          _uri('/api/auth/change-password'),
+          headers: _jsonHeaders,
+          body: jsonEncode({
+            'current_password': currentPassword,
+            'new_password': newPassword,
+          }),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   Future<void> deleteEvent(int id) async {
