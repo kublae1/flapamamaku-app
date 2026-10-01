@@ -1025,7 +1025,7 @@ jobs:
                   username="testverein-admin",
                   password="TestvereinPass123!",
                   active=True,
-                  role_key="admin",
+                  role_key="club_manager",
                   permission_overrides={},
               ),
               _=test_user,
