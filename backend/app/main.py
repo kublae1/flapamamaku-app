@@ -3645,8 +3645,12 @@ def put_app_config(
 
 @app.get("/api/app-config/logo")
 def get_app_logo(club_id: int | None = None) -> Response:
-    requested_club_id = int(club_id) if club_id is not None else _active_club_id()
     with connect() as db:
+        requested_club_id = (
+            int(club_id)
+            if club_id is not None
+            else _active_club_id(db)
+        )
         row = db.execute(
             "SELECT logo, logo_mime FROM clubs WHERE id = ? AND active = 1",
             (requested_club_id,),
