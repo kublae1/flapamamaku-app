@@ -1448,7 +1448,8 @@ document.getElementById("club-delete-button").addEventListener("click", async ()
     window.alert(
       "Verein gelöscht.\nSicherungsbackup: " + (result.backup_file || "erstellt")
     );
-    await switchClub(1);
+    currentUser = await api("/api/auth/me");
+    window.location.reload();
   } catch (error) {
     window.alert("Verein konnte nicht gelöscht werden:\n" + error.message);
   }
