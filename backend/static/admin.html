@@ -1196,8 +1196,9 @@
             <button type="button" id="system-backup-create">+ Backup jetzt erstellen</button>
           </div>
           <p class="meta">
-            Automatische Sicherung mindestens einmal täglich. Die ältesten Sicherungen
-            werden nach Erreichen der eingestellten Anzahl automatisch entfernt.
+            Nur für Super-Admins. Automatische Sicherung mindestens einmal täglich.
+            Die ältesten Sicherungen werden nach Erreichen der eingestellten Anzahl automatisch entfernt.
+            Vereinsadmins erhalten keinen Zugriff auf die Gesamtdatenbank.
           </p>
           <div id="system-backup-list"><p class="meta">Backups werden geladen …</p></div>
           <hr style="margin:18px 0;border:0;border-top:1px solid rgba(255,255,255,.12)">
@@ -1308,6 +1309,9 @@ async function loadTenantContext() {
     currentUser.is_super_admin
       ? "Rolle: Super-Admin"
       : `Rolle: ${currentUser.club_role === "club_admin" ? "Vereinsadmin" : "Mitglied"}`;
+
+  document.getElementById("system-admin-backup-card")
+    ?.classList.toggle("hidden", !currentUser.is_super_admin);
 
   const logo = document.getElementById("tenant-context-logo");
   if (activeClubConfig.logo_url) {
@@ -3509,6 +3513,11 @@ document.getElementById("logout-button").addEventListener("click", async () => {
   try { await api("/api/auth/logout", {method:"POST"}); } catch (_) {}
   token = "";
   currentUser = null;
+  activeClubConfig = null;
+  accessibleClubs = [];
+  userAccounts = [];
+  billingClubs = [];
+  justBootstrapped = false;
   sessionStorage.removeItem("flapamamaku_token");
 
   const authForm = document.getElementById("auth-form");
@@ -3516,6 +3525,18 @@ document.getElementById("logout-button").addEventListener("click", async () => {
   authForm.elements.username.value = "";
   authForm.elements.password.value = "";
   document.getElementById("auth-error").textContent = "";
+  document.getElementById("status").textContent =
+    `API online · v${apiVersion || "?"}`;
+
+  const tenantLogo = document.getElementById("tenant-context-logo");
+  tenantLogo?.removeAttribute("src");
+  if (tenantLogo) tenantLogo.style.display = "none";
+  const tenantName = document.getElementById("tenant-context-name");
+  if (tenantName) tenantName.textContent = "Verein";
+  const tenantRole = document.getElementById("tenant-context-role");
+  if (tenantRole) tenantRole.textContent = "";
+  const tenantFeatures = document.getElementById("tenant-context-features");
+  if (tenantFeatures) tenantFeatures.textContent = "";
 
   showAuth();
 });
