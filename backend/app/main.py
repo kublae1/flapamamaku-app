@@ -483,6 +483,7 @@ class ContentOrderPayload(BaseModel):
 class LoginPayload(BaseModel):
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=6, max_length=200)
+    client: str = Field(default="admin", pattern=r"^(admin|app)$")
 
 
 class PasswordChangePayload(BaseModel):
@@ -4806,6 +4807,15 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
             raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
 
         user_id = int(row["id"])
+        if payload.client == "app" and _is_super_admin(db, user_id):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Das Plattform-Super-Admin-Konto ist nur für die "
+                    "Docker/Web-Verwaltung bestimmt. Für die App bitte ein "
+                    "separates Vereins-Benutzerkonto verwenden."
+                ),
+            )
         clubs = _accessible_club_rows(db, user_id)
         if not clubs:
             suspended = db.execute(
