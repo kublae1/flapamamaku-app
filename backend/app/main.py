@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.73"
+API_VERSION = "0.8.74"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -265,11 +265,11 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
     "club_manager": {
         "label": "Vereinsverwaltung",
-        "permissions": {
-            key: key in {"can_admin_page", "can_manage_settings"}
-            for key in PERMISSION_FIELDS
-        },
+        "permissions": {key: True for key in PERMISSION_FIELDS},
     },
+    # Internal legacy/platform role. It is deliberately not exposed in the
+    # normal club role catalogue; platform scope is controlled exclusively
+    # through user_clubs.role = 'super_admin' on the root club.
     "admin": {
         "label": "Administrator",
         "permissions": {key: True for key in PERMISSION_FIELDS},
@@ -1962,6 +1962,24 @@ def init_db() -> None:
             FROM users u
             """,
             (membership_now, membership_now),
+        )
+
+        # Existing non-platform administrators are normal club managers.
+        # This changes only the visible role label; effective club permissions
+        # remain equivalent while platform scope stays in user_clubs.
+        db.execute(
+            """
+            UPDATE users
+            SET role_key = 'club_manager'
+            WHERE role_key = 'admin'
+              AND id NOT IN (
+                  SELECT user_id
+                  FROM user_clubs
+                  WHERE club_id = 1
+                    AND role = 'super_admin'
+                    AND active = 1
+              )
+            """
         )
 
         super_admin_exists = db.execute(
@@ -5160,6 +5178,8 @@ def switch_active_club(
 def get_roles(
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> list[dict[str, Any]]:
+    # "admin" remains an internal compatibility role for the platform root,
+    # but must never be assignable as a normal club role.
     return [
         {
             "key": key,
@@ -5167,6 +5187,7 @@ def get_roles(
             "permissions": definition["permissions"],
         }
         for key, definition in ROLE_DEFINITIONS.items()
+        if key != "admin"
     ]
 
 
