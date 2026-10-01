@@ -149,7 +149,7 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               subtitle: const Text(
-                'Eigenes Passwort jederzeit ändern',
+                'Eigenes Passwort jederzeit ändern · mindestens 8 Zeichen',
                 style: TextStyle(color: Colors.white60),
               ),
               trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
