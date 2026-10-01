@@ -52,11 +52,11 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
                 if (!store.serverConfigured || !store.isAuthenticated) {
                   return const LoginScreen();
                 }
-                if (store.clubSelectionRequired) {
-                  return const ClubSelectionScreen();
-                }
                 if (store.mustChangePassword) {
                   return const PasswordChangeScreen(forced: true);
+                }
+                if (store.clubSelectionRequired) {
+                  return const ClubSelectionScreen();
                 }
                 return const HomeShell();
               },
