@@ -699,18 +699,6 @@ jobs:
                   ) VALUES (
                       'clubadmin', 'x', 'x', 1,
                       1,1,1,1,1,1,1,1,1,1,1,1,1,
-              admin_id = db.execute(
-                  """
-                  INSERT INTO users (
-                      username, password_hash, password_salt, active,
-                      can_news, can_events, can_members, can_documents,
-                      can_photos, can_gallery_upload, can_polls, can_links,
-                      can_contact, can_about, can_admin_page,
-                      can_manage_settings, can_manage_users,
-                      role_key, permission_overrides, created_at
-                  ) VALUES (
-                      'clubadmin', 'x', 'x', 1,
-                      1,1,1,1,1,1,1,1,1,1,1,1,1,
                       'club_manager', '{}', ?
                   )
                   """,
