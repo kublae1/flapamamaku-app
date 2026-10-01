@@ -57,6 +57,7 @@ class AppStore extends ChangeNotifier {
   bool pushEnabled = false;
   bool pushAvailable = false;
   Map<String, dynamic>? currentUser;
+  String? _pendingForcedPassword;
   final List<Map<String, dynamic>> accessibleClubs = <Map<String, dynamic>>[];
   bool clubSelectionRequired = false;
   String? authError;
@@ -467,6 +468,23 @@ class AppStore extends ChangeNotifier {
 
   bool get isSuperAdmin => currentUser?['is_super_admin'] == true;
   bool get mustChangePassword => currentUser?['must_change_password'] == true;
+  bool get hasPendingForcedPassword =>
+      _pendingForcedPassword?.isNotEmpty == true;
+
+  Future<bool> changeForcedPassword(String newPassword) async {
+    final currentPassword = _pendingForcedPassword;
+    if (currentPassword == null || currentPassword.isEmpty) {
+      authError =
+          'Bitte erneut mit Benutzername und Passwort anmelden, bevor das Passwort geändert wird.';
+      await logout();
+      return false;
+    }
+    final ok = await changePassword(currentPassword, newPassword);
+    if (ok) {
+      _pendingForcedPassword = null;
+    }
+    return ok;
+  }
 
   Future<bool> changePassword(
     String currentPassword,
@@ -599,7 +617,16 @@ class AppStore extends ChangeNotifier {
       clubSelectionRequired = false;
 
       if (mustChangePassword) {
+        // A restored long-lived session has no freshly verified password in
+        // memory. Require one normal login before the mandatory password
+        // change so we never keep or persist the old password.
+        api.setToken(null);
+        currentUser = null;
         accessibleClubs.clear();
+        clubSelectionRequired = false;
+        isAuthenticated = false;
+        biometricUnlockPending = false;
+        await _secureStorage.delete(key: 'flapamamaku_token');
         return;
       }
 
@@ -829,6 +856,7 @@ class AppStore extends ChangeNotifier {
               .map((value) => Map<String, dynamic>.from(value)),
         );
       isAuthenticated = true;
+      _pendingForcedPassword = mustChangePassword ? password : null;
       clubSelectionRequired = result['requires_club_selection'] == true;
 
       // A temporary password must be replaced before the app makes any
@@ -867,6 +895,7 @@ class AppStore extends ChangeNotifier {
             );
       isAuthenticated = false;
       currentUser = null;
+      _pendingForcedPassword = null;
       accessibleClubs.clear();
       clubSelectionRequired = false;
       return false;
@@ -886,6 +915,7 @@ class AppStore extends ChangeNotifier {
     }
     await _secureStorage.delete(key: 'flapamamaku_token');
     currentUser = null;
+    _pendingForcedPassword = null;
     isAuthenticated = false;
     biometricUnlockPending = false;
     authError = null;
