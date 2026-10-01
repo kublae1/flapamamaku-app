@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.79"
+API_VERSION = "0.8.80"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -483,6 +483,15 @@ class ContentOrderPayload(BaseModel):
 class LoginPayload(BaseModel):
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=6, max_length=200)
+
+
+class PasswordChangePayload(BaseModel):
+    current_password: str = Field(min_length=6, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+class PasswordResetPayload(BaseModel):
+    temporary_password: str = Field(min_length=8, max_length=200)
 
 
 class BootstrapPayload(LoginPayload):
@@ -1948,6 +1957,14 @@ def init_db() -> None:
         _ensure_column(db, "members", "member_group", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "engagement", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "users", "can_manage_settings", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(
+            db,
+            "users",
+            "must_change_password",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        _ensure_column(db, "events", "image_data", "BLOB")
+        _ensure_column(db, "events", "image_mime", "TEXT NOT NULL DEFAULT ''")
         db.execute(
             """
             UPDATE users
@@ -2924,6 +2941,7 @@ def _serialize_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item["role_label"] = ROLE_DEFINITIONS[role_key]["label"]
     item["permission_overrides"] = overrides
     item["active"] = bool(item.get("active", 0))
+    item["must_change_password"] = bool(item.get("must_change_password", 0))
     return item
 
 
@@ -3367,6 +3385,14 @@ def _serialize_news(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
+def _serialize_event(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    has_image = bool(item.pop("image_data", None))
+    item.pop("image_mime", None)
+    item["image_url"] = f"/api/events/{item['id']}/image" if has_image else ""
+    return item
+
+
 def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     has_photo = bool(item.pop("photo_data", None))
@@ -3449,6 +3475,8 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
 
     if resource == "news":
         return [_serialize_news(row) for row in rows]
+    if resource == "events":
+        return [_serialize_event(row) for row in rows]
     if resource == "members":
         return [_serialize_member(row) for row in rows]
     return [dict(row) for row in rows]
@@ -3488,6 +3516,8 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
         ).fetchone()
     if resource == "news":
         return _serialize_news(row)
+    if resource == "events":
+        return _serialize_event(row)
     if resource == "members":
         return _serialize_member(row)
     return dict(row)
@@ -3527,6 +3557,8 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
         ).fetchone()
     if resource == "news":
         return _serialize_news(row)
+    if resource == "events":
+        return _serialize_event(row)
     if resource == "members":
         return _serialize_member(row)
     return dict(row)
@@ -4836,6 +4868,98 @@ def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     return user
 
 
+@app.post("/api/auth/change-password")
+def change_own_password(
+    payload: PasswordChangePayload,
+    authorization: str | None = Header(default=None),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=422,
+            detail="Das neue Passwort muss sich vom bisherigen Passwort unterscheiden",
+        )
+    with connect() as db:
+        row = db.execute(
+            "SELECT password_hash, password_salt FROM users WHERE id = ?",
+            (int(user["id"]),),
+        ).fetchone()
+        if row is None or not _check_password(
+            payload.current_password,
+            row["password_hash"],
+            row["password_salt"],
+        ):
+            raise HTTPException(status_code=401, detail="Aktuelles Passwort ist falsch")
+        password_hash, salt = _hash_password(payload.new_password)
+        db.execute(
+            """
+            UPDATE users
+            SET password_hash = ?,
+                password_salt = ?,
+                must_change_password = 0
+            WHERE id = ?
+            """,
+            (password_hash, salt, int(user["id"])),
+        )
+        # Keep only the currently used session alive.
+        token_hash = _token_hash(_extract_token(authorization))
+        db.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?",
+            (int(user["id"]), token_hash),
+        )
+        _record_security_event(
+            db,
+            "password_changed",
+            int(user["id"]),
+            int(user["id"]),
+            "Passwort durch Benutzer geändert",
+        )
+        db.commit()
+    return current_user(authorization=authorization)
+
+
+@app.post("/api/users/{user_id}/reset-password")
+def reset_user_password(
+    user_id: int,
+    payload: PasswordResetPayload,
+    actor: dict[str, Any] = Depends(require("can_manage_users")),
+) -> dict[str, Any]:
+    password_hash, salt = _hash_password(payload.temporary_password)
+    with connect() as db:
+        club_id = _active_club_id(db)
+        target = db.execute(
+            """
+            SELECT u.id
+            FROM users u
+            JOIN user_clubs uc ON uc.user_id = u.id
+            WHERE u.id = ? AND uc.club_id = ? AND uc.active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if target is None:
+            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        db.execute(
+            """
+            UPDATE users
+            SET password_hash = ?,
+                password_salt = ?,
+                must_change_password = 1
+            WHERE id = ?
+            """,
+            (password_hash, salt, user_id),
+        )
+        db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        _record_security_event(
+            db,
+            "password_reset",
+            int(actor["id"]),
+            user_id,
+            "Temporäres Passwort gesetzt; Änderung beim nächsten Login erforderlich",
+        )
+        db.commit()
+    return _user_profile(user_id)
+
+
 @app.get("/api/clubs/accessible")
 def accessible_clubs(
     user: dict[str, Any] = Depends(current_user),
@@ -5616,8 +5740,9 @@ def post_user(
                 f"""
                 INSERT INTO users (
                     member_id, username, password_hash, password_salt, active,
-                    {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides, created_at
-                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?, ?, ?)
+                    {", ".join(PERMISSION_FIELDS)}, role_key, permission_overrides,
+                    must_change_password, created_at
+                ) VALUES (?, ?, ?, ?, ?, {", ".join("?" for _ in PERMISSION_FIELDS)}, ?, ?, 1, ?)
                 """,
                 [
                     payload.member_id,
@@ -5700,7 +5825,11 @@ def put_user(
         if len(payload.password) < 6:
             raise HTTPException(status_code=422, detail="Passwort muss mindestens 6 Zeichen haben")
         password_hash, salt = _hash_password(payload.password)
-        assignments.extend(["password_hash = ?", "password_salt = ?"])
+        assignments.extend([
+            "password_hash = ?",
+            "password_salt = ?",
+            "must_change_password = 1",
+        ])
         values.extend([password_hash, salt])
 
     values.append(user_id)
@@ -7347,6 +7476,80 @@ def put_events(
         )
         db.commit()
     return item
+
+
+@app.post("/api/events/{row_id}/image")
+async def upload_event_image(
+    row_id: int,
+    image: UploadFile = File(...),
+    _: dict[str, Any] = Depends(require("can_events")),
+) -> dict[str, Any]:
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if image.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+    data, optimized_mime = _optimize_image(
+        await image.read(),
+        image.content_type or "",
+    )
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE events
+            SET image_data = ?, image_mime = ?
+            WHERE id = ? AND club_id = ?
+            """,
+            (data, optimized_mime, row_id, _active_club_id(db)),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM events WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
+        ).fetchone()
+    return _serialize_event(row)
+
+
+@app.get("/api/events/{row_id}/image")
+def get_event_image(
+    row_id: int,
+    _: dict[str, Any] = Depends(current_user),
+) -> Response:
+    with connect() as db:
+        row = db.execute(
+            """
+            SELECT image_data, image_mime
+            FROM events
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
+        ).fetchone()
+    if row is None or row["image_data"] is None:
+        raise HTTPException(status_code=404, detail="Bild nicht gefunden")
+    return Response(
+        content=row["image_data"],
+        media_type=row["image_mime"] or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.delete("/api/events/{row_id}/image", status_code=204)
+def delete_event_image(
+    row_id: int,
+    _: dict[str, Any] = Depends(require("can_events")),
+) -> None:
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE events
+            SET image_data = NULL, image_mime = ''
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        db.commit()
 
 
 @app.get("/api/events/{row_id}/registrations")
