@@ -199,6 +199,20 @@ def main() -> None:
     # 2. Startseite / zentrale Konfiguration von FLAPAMAMAKU funktioniert.
     flapa_config = ok(client.get("/api/app-config", headers=super_headers)).json()
     assert flapa_config["app_name"] == "FLAPAMAMAKU"
+
+    flapa_logo_source = image_bytes((138, 16, 27))
+    flapa_logo_config = ok(
+        client.post(
+            "/api/app-config/logo",
+            headers=super_headers,
+            files={"logo": ("flapamamaku.png", flapa_logo_source, "image/png")},
+        )
+    ).json()
+    assert "club_id=1" in flapa_logo_config["logo_url"]
+    flapa_logo_url = flapa_logo_config["logo_url"]
+    flapa_logo_public = ok(client.get(flapa_logo_url))
+    assert flapa_logo_public.headers["content-type"].startswith("image/png")
+    assert flapa_logo_public.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert "FLAPA Start" in titles(
         ok(
             client.get(
@@ -269,7 +283,7 @@ def main() -> None:
     assert cfg["primary_color"] == "#225588"
     assert cfg["secondary_color"] == "#F2F2F2"
 
-    ok(
+    test_logo_config = ok(
         client.post(
             "/api/app-config/logo",
             headers=super_headers,
@@ -277,7 +291,13 @@ def main() -> None:
                 "logo": ("testverein.png", image_bytes((34, 85, 136)), "image/png")
             },
         )
-    )
+    ).json()
+    assert f"club_id={test_club_id}" in test_logo_config["logo_url"]
+    assert test_logo_config["logo_url"] != flapa_logo_url
+    test_logo_public = ok(client.get(test_logo_config["logo_url"]))
+    assert test_logo_public.headers["content-type"].startswith("image/png")
+    assert test_logo_public.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert test_logo_public.content != flapa_logo_public.content
 
     # 3, 4, 6: eigene News, Termine, Mitglieder.
     test_news = ok(
@@ -516,6 +536,11 @@ def main() -> None:
     ).json()
     assert len(admin_clubs) == 1
     assert admin_clubs[0]["id"] == test_club_id
+    club_admin_config = ok(
+        client.get("/api/app-config", headers=club_headers)
+    ).json()
+    assert club_admin_config["club_id"] == test_club_id
+    assert club_admin_config["logo_url"] == test_logo_config["logo_url"]
     denied_switch = client.post(
         "/api/auth/club",
         headers=club_headers,
@@ -664,6 +689,11 @@ def main() -> None:
             json={"club_id": 1},
         )
     )
+    flapa_config_again = ok(
+        client.get("/api/app-config", headers=super_headers)
+    ).json()
+    assert flapa_config_again["club_id"] == 1
+    assert flapa_config_again["logo_url"] == flapa_logo_url
     assert titles(ok(client.get("/api/news", headers=super_headers)).json()) == {
         "FLAPA News"
     }
