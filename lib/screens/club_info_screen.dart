@@ -41,19 +41,24 @@ class ClubInfoScreen extends StatelessWidget {
         children: [
           if (store.appLogoUrl.isNotEmpty)
             Center(
-              child: Container(
-                width: 120,
-                height: 120,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: OfflineNetworkImage(
-                  store.appLogoUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) =>
-                      const Icon(Icons.groups_rounded, size: 58),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: OfflineNetworkImage(
+                    store.appLogoUrl,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.center,
+                    errorBuilder: (_, __, ___) => const ColoredBox(
+                      color: Color(0xFF191B1E),
+                      child: Icon(
+                        Icons.groups_rounded,
+                        size: 58,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
