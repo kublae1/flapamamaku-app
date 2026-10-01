@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.70"
+API_VERSION = "0.8.71"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2834,6 +2834,20 @@ def _require_section_feature(
         _require_club_feature(db, feature_key)
 
 
+def _require_permanent_gallery_allowed(
+    db: sqlite3.Connection,
+    section: str,
+) -> None:
+    if section == "gallery" and _active_club_id(db) != 1:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Die Galerie ist für diesen Verein nur für temporäre Snapshots "
+                "vorgesehen. Dauerhafte Bilder bitte als Fotoalbum speichern."
+            ),
+        )
+
+
 def _active_club_membership(
     db: sqlite3.Connection,
     user_id: int,
@@ -4987,13 +5001,13 @@ def delete_user(
 @app.post("/api/gallery/snapshots")
 async def post_gallery_snapshot(
     image: UploadFile = File(...),
-    expires_days: int = 14,
+    expires_days: int = 1,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     if not (user.get("can_gallery_upload", False) or user.get("can_photos", False)):
         raise HTTPException(status_code=403, detail="Keine Berechtigung für Galerie-Snapshots")
-    if expires_days not in {7, 14, 30}:
-        raise HTTPException(status_code=422, detail="Ablaufzeit muss 7, 14 oder 30 Tage sein")
+    if expires_days not in {1, 3, 7}:
+        raise HTTPException(status_code=422, detail="Ablaufzeit muss 1, 3 oder 7 Tage sein")
     raw_data = await image.read()
     mime = image.content_type or ""
     if mime not in {"image/jpeg", "image/png", "image/webp"}:
@@ -5646,6 +5660,7 @@ def post_content(
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
         _require_section_feature(db, payload.section)
+        _require_permanent_gallery_allowed(db, payload.section)
         max_order = db.execute(
             """
             SELECT COALESCE(MAX(sort_order), 0)
@@ -5702,6 +5717,7 @@ def put_content(
     with connect() as db:
         current = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(current["section"], user)
+        _require_permanent_gallery_allowed(db, payload.section)
         db.execute(
             """
             UPDATE content_items
@@ -6058,6 +6074,7 @@ async def upload_content_images(
     with connect() as db:
         existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        _require_permanent_gallery_allowed(db, existing["section"])
         now = datetime.now(timezone.utc).isoformat()
         max_order = db.execute(
             """
@@ -6232,6 +6249,7 @@ async def upload_content_image(
     with connect() as db:
         existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        _require_permanent_gallery_allowed(db, existing["section"])
         club_id = _active_club_id(db)
         db.execute(
             """
