@@ -523,6 +523,58 @@ def main() -> None:
     )
     assert denied_switch.status_code == 403
 
+    # Sicherheitsinvariante: Selbst eine versehentliche super_admin-Rolle auf
+    # einem Nebenverein darf niemals Plattform-/FLAPAMAMAKU-Zugriff geben.
+    rogue_user = ok(
+        client.post(
+            "/api/users",
+            headers=super_headers,
+            json={
+                "member_id": None,
+                "username": "secondary-superadmin",
+                "password": "SecondaryPass123!",
+                "active": True,
+                "role_key": "admin",
+                "permission_overrides": {},
+            },
+        )
+    ).json()
+    rogue_user_id = int(rogue_user["id"])
+    with connect() as db:
+        db.execute(
+            """
+            UPDATE user_clubs
+            SET role = 'super_admin'
+            WHERE user_id = ? AND club_id = ?
+            """,
+            (rogue_user_id, test_club_id),
+        )
+        db.commit()
+
+    rogue_login = ok(
+        client.post(
+            "/api/auth/login",
+            json={
+                "username": "secondary-superadmin",
+                "password": "SecondaryPass123!",
+            },
+        )
+    ).json()
+    assert rogue_login["user"]["is_super_admin"] is False
+    assert rogue_login["user"]["current_club_id"] == test_club_id
+    assert [club["id"] for club in rogue_login["clubs"]] == [test_club_id]
+    rogue_headers = {"Authorization": f"Bearer {rogue_login['token']}"}
+    assert client.post(
+        "/api/auth/club",
+        headers=rogue_headers,
+        json={"club_id": 1},
+    ).status_code == 403
+    assert client.put(
+        f"/api/news/{flapa_news['id']}",
+        headers=rogue_headers,
+        json={"title": "Fremd", "text": "Nein", "date": "30.09.2026"},
+    ).status_code == 404
+
     # 15. Club-Admin kann fremde FLAPAMAMAKU-Daten weder lesen noch verändern.
     assert client.put(
         f"/api/news/{flapa_news['id']}",
