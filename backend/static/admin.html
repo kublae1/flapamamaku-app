@@ -2427,6 +2427,7 @@ function editUser(user) {
   const form = document.getElementById("users-form");
   form.elements.id.value = user.id;
   form.elements.member_id.value = user.member_id || "";
+  form.elements.member_id.dataset.originalValue = user.member_id || "";
   form.elements.username.value = user.username || "";
   form.elements.password.value = "";
   form.elements.active.checked = !!user.active;
@@ -2444,9 +2445,27 @@ document.querySelectorAll('#users-form select[name="role_key"], #users-form .rol
 document.querySelector('#users-form select[name="member_id"]').addEventListener("change", event => {
   const form = document.getElementById("users-form");
   const memberId = Number(event.currentTarget.value || 0);
+  const editingUserId = Number(form.elements.id.value || 0);
   const linkedUser = userAccounts.find(
-    user => Number(user.member_id || 0) === memberId && memberId > 0
+    user =>
+      Number(user.member_id || 0) === memberId &&
+      memberId > 0 &&
+      Number(user.id) !== editingUserId
   );
+
+  if (editingUserId > 0) {
+    if (linkedUser) {
+      alert(
+        `Dieses Mitglied ist bereits mit dem Benutzer „${linkedUser.username}“ verknüpft.`
+      );
+      event.currentTarget.value = event.currentTarget.dataset.originalValue || "";
+      return;
+    }
+    // Beim Bearbeiten darf ein Wechsel des Mitglieds niemals den bestehenden
+    // Benutzer in ein vermeintlich neues Konto verwandeln.
+    refreshAllEffectiveRights();
+    return;
+  }
 
   if (linkedUser) {
     editUser(linkedUser);
@@ -3227,10 +3246,10 @@ document.getElementById("users-form").addEventListener("submit", async event => 
     setPermissionOverrideFields(form, {});
     await loadUsers();
   } catch (error) {
+    const detail = String(error?.message || "").trim();
     alert(
-      "Benutzer konnte nicht gespeichert werden. " +
-      "Für ein neues Konto muss das Passwort mindestens 6 Zeichen lang sein. " +
-      "Prüfe auch, ob der Benutzername bereits verwendet wird."
+      "Benutzer konnte nicht gespeichert werden." +
+      (detail ? "\n\n" + detail : "")
     );
     console.error(error);
   }
