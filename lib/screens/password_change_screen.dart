@@ -39,7 +39,9 @@ class _PasswordChangeScreenState extends State<PasswordChangeScreen> {
       return;
     }
     setState(() => saving = true);
-    final ok = await store.changePassword(current.text, next.text);
+    final ok = widget.forced
+        ? await store.changeForcedPassword(next.text)
+        : await store.changePassword(current.text, next.text);
     if (!mounted) return;
     setState(() => saving = false);
     if (!ok) {
@@ -86,23 +88,25 @@ class _PasswordChangeScreenState extends State<PasswordChangeScreen> {
                       const SizedBox(height: 8),
                       if (widget.forced)
                         const Text(
-                          'Das temporäre Passwort muss vor der weiteren Nutzung der App ersetzt werden.',
+                          'Deine Anmeldung wurde bestätigt. Lege jetzt ein neues Passwort mit mindestens 8 Zeichen fest.',
                           style: TextStyle(color: Colors.white60),
                         ),
                       const SizedBox(height: 20),
-                      TextField(
-                        controller: current,
-                        obscureText: obscureCurrent,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: 'Aktuelles / temporäres Passwort',
-                          suffixIcon: IconButton(
-                            onPressed: () => setState(() => obscureCurrent = !obscureCurrent),
-                            icon: Icon(obscureCurrent ? Icons.visibility : Icons.visibility_off),
+                      if (!widget.forced) ...[
+                        TextField(
+                          controller: current,
+                          obscureText: obscureCurrent,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: 'Aktuelles Passwort',
+                            suffixIcon: IconButton(
+                              onPressed: () => setState(() => obscureCurrent = !obscureCurrent),
+                              icon: Icon(obscureCurrent ? Icons.visibility : Icons.visibility_off),
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
+                        const SizedBox(height: 12),
+                      ],
                       TextField(
                         controller: next,
                         obscureText: obscureNext,
