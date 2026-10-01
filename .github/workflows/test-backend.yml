@@ -1705,6 +1705,16 @@ jobs:
           rm -rf /tmp/flapamamaku-club-role-catalogue-backups
           PYTHONPATH=. python tests/test_club_role_catalogue.py
 
+      - name: Test tenant club logos
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-club-logo-tenant.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-club-logo-tenant-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: |
+          rm -f /tmp/flapamamaku-club-logo-tenant.db
+          rm -rf /tmp/flapamamaku-club-logo-tenant-backups
+          PYTHONPATH=. pytest -q tests/test_club_logo_tenant.py
+
       - name: Test club logo cache-busting URL
         run: |
           python - <<'PY'
