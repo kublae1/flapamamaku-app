@@ -244,7 +244,15 @@ class AdminScreen extends StatelessWidget {
     final existing = index == null ? null : store.members[index];
 
     final name = TextEditingController(text: existing?.name ?? '');
-    final role = TextEditingController(text: existing?.role ?? 'Präsident');
+    final role = TextEditingController(text: existing?.role ?? 'Mitglied');
+    const rolePresets = <String>[
+      'Mitglied',
+      'Präsident',
+      'Vizepräsident',
+      'Kassier',
+      'Aktuar',
+      'Vorstand',
+    ];
     final since = TextEditingController(text: existing?.since ?? '');
     final partner = TextEditingController(text: existing?.partnerName ?? '');
     final mobile = TextEditingController(text: existing?.phoneMobile ?? '');
@@ -268,9 +276,30 @@ class AdminScreen extends StatelessWidget {
                 controller: name,
                 decoration: const InputDecoration(labelText: 'Name'),
               ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 6),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: rolePresets
+                        .map(
+                          (value) => ActionChip(
+                            label: Text(value),
+                            onPressed: () => role.text = value,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
               TextField(
                 controller: role,
-                decoration: const InputDecoration(labelText: 'Funktion'),
+                decoration: const InputDecoration(
+                  labelText: 'Funktion',
+                  helperText: 'Paket anklicken oder eigene Funktion eingeben',
+                ),
               ),
               TextField(
                 controller: since,
