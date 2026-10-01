@@ -2852,7 +2852,7 @@ def _user_profile(user_id: int) -> dict[str, Any]:
         item = dict(row)
         item["club_role"] = club_role
         item["current_club_id"] = club_id
-        item["is_super_admin"] = club_role == "super_admin"
+        item["is_super_admin"] = _is_super_admin(db, int(row["id"]))
     return _serialize_user(item)
 
 
@@ -2969,7 +2969,14 @@ def _user_club_access(
         """,
         (user_id, club_id),
     ).fetchone()
-    return str(row["role"]) if row is not None else None
+    if row is None:
+        return None
+    role = str(row["role"])
+    # A stray/legacy super_admin marker on a secondary club must never
+    # elevate that account to platform scope.
+    if role == "super_admin":
+        return "club_admin"
+    return role
 
 
 def _accessible_club_rows(
@@ -3049,7 +3056,7 @@ def current_user(
         item = dict(row)
         item["club_role"] = club_role
         item["current_club_id"] = club_id
-        item["is_super_admin"] = club_role == "super_admin"
+        item["is_super_admin"] = _is_super_admin(db, user_id)
     return _serialize_user(item)
 
 
@@ -5177,6 +5184,11 @@ def set_super_admin_role(
 
     with connect() as db:
         club_id = _active_club_id(db)
+        if club_id != _instance_club_id(db):
+            raise HTTPException(
+                status_code=400,
+                detail="Super-Admin-Rechte können nur im Hauptverein vergeben werden",
+            )
         membership = db.execute(
             """
             SELECT role, active
