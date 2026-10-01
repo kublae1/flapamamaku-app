@@ -995,6 +995,356 @@ def _restore_database_backup(source: Path) -> dict[str, Any]:
     }
 
 
+
+CLUB_BACKUP_FORMAT_VERSION = 1
+CLUB_BACKUP_TABLES: tuple[str, ...] = (
+    "news",
+    "events",
+    "members",
+    "member_filters",
+    "content_items",
+    "member_filter_links",
+    "content_images",
+    "poll_votes",
+    "poll_suggestions",
+    "event_registrations",
+)
+CLUB_BACKUP_CLUB_FIELDS: tuple[str, ...] = (
+    "name",
+    "short_name",
+    "subtitle",
+    "logo",
+    "logo_mime",
+    "primary_color",
+    "secondary_color",
+    "description",
+    "website",
+    "email",
+    "phone",
+    "address",
+    "city",
+    "country",
+    "app_title",
+    "welcome_text",
+)
+
+
+def _club_backup_json_value(value: Any) -> Any:
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        return {
+            "__blob_b64__": base64.b64encode(bytes(value)).decode("ascii"),
+        }
+    return value
+
+
+def _club_backup_decode_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        if set(value) != {"__blob_b64__"}:
+            raise RuntimeError("Vereinsbackup enthält ein unbekanntes Datenformat")
+        encoded = value.get("__blob_b64__")
+        if not isinstance(encoded, str):
+            raise RuntimeError("Vereinsbackup enthält ungültige Binärdaten")
+        try:
+            return base64.b64decode(encoded, validate=True)
+        except Exception as exc:
+            raise RuntimeError("Vereinsbackup enthält ungültige Binärdaten") from exc
+    return value
+
+
+def _club_backup_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        key: _club_backup_json_value(row[key])
+        for key in row.keys()
+    }
+
+
+def _create_club_backup_payload(club_id: int) -> dict[str, Any]:
+    with connect() as db:
+        club = db.execute(
+            "SELECT * FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        if club is None:
+            raise RuntimeError("Verein nicht gefunden")
+
+        club_data = {
+            key: _club_backup_json_value(club[key])
+            for key in CLUB_BACKUP_CLUB_FIELDS
+            if key in club.keys()
+        }
+        features = [
+            _club_backup_row(row)
+            for row in db.execute(
+                """
+                SELECT club_id, feature_key, enabled, label, created_at, updated_at
+                FROM club_features
+                WHERE club_id = ?
+                ORDER BY feature_key
+                """,
+                (club_id,),
+            ).fetchall()
+        ]
+        tables: dict[str, list[dict[str, Any]]] = {}
+        for table in CLUB_BACKUP_TABLES:
+            if "club_id" not in _columns(db, table):
+                raise RuntimeError(f"Vereinsbackup-Tabelle ohne club_id: {table}")
+            rows = db.execute(
+                f"SELECT * FROM {table} WHERE club_id = ? ORDER BY rowid",
+                (club_id,),
+            ).fetchall()
+            tables[table] = [_club_backup_row(row) for row in rows]
+
+        slug = str(club["slug"] or "")
+        return {
+            "format": "flapamamaku-club-backup",
+            "format_version": CLUB_BACKUP_FORMAT_VERSION,
+            "instance_id": INSTANCE_ID,
+            "schema_version": _schema_version(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "club_id": club_id,
+            "club_slug": slug,
+            "club": club_data,
+            "features": features,
+            "tables": tables,
+            "excluded": [
+                "Benutzerpasswörter und Benutzerkonten",
+                "Push-Geräte und Push-Verlauf",
+                "Vereinsabrechnungen und Zahlungsstatus",
+                "temporäre Galerie-Snapshots",
+                "System- und Sicherheitsdaten",
+            ],
+        }
+
+
+def _validate_club_backup_payload(
+    payload: Any,
+    *,
+    club_id: int,
+    club_slug: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RuntimeError("Vereinsbackup ist ungültig")
+    if payload.get("format") != "flapamamaku-club-backup":
+        raise RuntimeError("Datei ist kein FLAPAMAMAKU-Vereinsbackup")
+    if int(payload.get("format_version") or 0) != CLUB_BACKUP_FORMAT_VERSION:
+        raise RuntimeError("Vereinsbackup-Version wird nicht unterstützt")
+    if str(payload.get("instance_id") or "") != INSTANCE_ID:
+        raise RuntimeError("Vereinsbackup gehört zu einer anderen Serverinstanz")
+    if int(payload.get("club_id") or 0) != club_id:
+        raise RuntimeError("Vereinsbackup gehört zu einem anderen Verein")
+    if str(payload.get("club_slug") or "") != club_slug:
+        raise RuntimeError("Vereinsbackup gehört zu einem anderen Verein")
+
+    club_data = payload.get("club")
+    features = payload.get("features")
+    tables = payload.get("tables")
+    if not isinstance(club_data, dict):
+        raise RuntimeError("Vereinsbackup enthält keine gültigen Vereinsdaten")
+    if not isinstance(features, list):
+        raise RuntimeError("Vereinsbackup enthält keine gültigen Moduleinstellungen")
+    if not isinstance(tables, dict):
+        raise RuntimeError("Vereinsbackup enthält keine gültigen Datentabellen")
+
+    unknown = sorted(set(tables) - set(CLUB_BACKUP_TABLES))
+    missing = sorted(set(CLUB_BACKUP_TABLES) - set(tables))
+    if unknown or missing:
+        raise RuntimeError("Vereinsbackup enthält eine unerwartete Tabellenstruktur")
+    for table in CLUB_BACKUP_TABLES:
+        if not isinstance(tables.get(table), list):
+            raise RuntimeError(f"Vereinsbackup-Tabelle ist ungültig: {table}")
+
+    return payload
+
+
+def _validate_club_backup_relations(
+    db: sqlite3.Connection,
+    payload: dict[str, Any],
+    club_id: int,
+) -> None:
+    tables = payload["tables"]
+
+    def ids(table: str, key: str = "id") -> set[int]:
+        result: set[int] = set()
+        for row in tables[table]:
+            if not isinstance(row, dict) or key not in row:
+                raise RuntimeError(f"Vereinsbackup-Tabelle ist ungültig: {table}")
+            result.add(int(row[key]))
+        return result
+
+    member_ids = ids("members")
+    filter_ids = ids("member_filters")
+    content_ids = ids("content_items")
+    event_ids = ids("events")
+
+    user_ids: set[int] = set()
+    for table in ("poll_votes", "poll_suggestions", "event_registrations"):
+        for row in tables[table]:
+            if not isinstance(row, dict):
+                raise RuntimeError(f"Vereinsbackup-Tabelle ist ungültig: {table}")
+            user_ids.add(int(row["user_id"]))
+
+    if user_ids:
+        placeholders = ",".join("?" for _ in user_ids)
+        rows = db.execute(
+            f"""
+            SELECT user_id
+            FROM user_clubs
+            WHERE club_id = ? AND user_id IN ({placeholders})
+            """,
+            (club_id, *sorted(user_ids)),
+        ).fetchall()
+        allowed_users = {int(row["user_id"]) for row in rows}
+        if not user_ids.issubset(allowed_users):
+            raise RuntimeError(
+                "Vereinsbackup enthält Benutzerbezüge ausserhalb dieses Vereins"
+            )
+
+    for row in tables["member_filter_links"]:
+        if int(row["member_id"]) not in member_ids or int(row["filter_id"]) not in filter_ids:
+            raise RuntimeError("Vereinsbackup enthält ungültige Mitgliederfilter-Bezüge")
+    for row in tables["content_images"]:
+        if int(row["content_id"]) not in content_ids:
+            raise RuntimeError("Vereinsbackup enthält ungültige Bild-Bezüge")
+    for table in ("poll_votes", "poll_suggestions"):
+        for row in tables[table]:
+            if int(row["poll_id"]) not in content_ids:
+                raise RuntimeError("Vereinsbackup enthält ungültige Umfrage-Bezüge")
+    for row in tables["event_registrations"]:
+        if int(row["event_id"]) not in event_ids:
+            raise RuntimeError("Vereinsbackup enthält ungültige Termin-Bezüge")
+
+
+def _merge_club_backup(payload: dict[str, Any], club_id: int) -> dict[str, Any]:
+    safety_backup = _create_database_backup("before-club-import")
+    imported_counts: dict[str, int] = {}
+
+    with connect() as db:
+        club = db.execute(
+            "SELECT * FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        if club is None:
+            raise RuntimeError("Verein nicht gefunden")
+        club_slug = str(club["slug"] or "")
+        _validate_club_backup_payload(
+            payload,
+            club_id=club_id,
+            club_slug=club_slug,
+        )
+        _validate_club_backup_relations(db, payload, club_id)
+
+        club_data = payload["club"]
+        values: dict[str, Any] = {}
+        for key in CLUB_BACKUP_CLUB_FIELDS:
+            if key in club_data:
+                values[key] = _club_backup_decode_value(club_data[key])
+        if values:
+            assignments = ", ".join(f"{key} = ?" for key in values)
+            db.execute(
+                f"UPDATE clubs SET {assignments}, updated_at = ? WHERE id = ?",
+                (*values.values(), datetime.now(timezone.utc).isoformat(), club_id),
+            )
+
+        for feature in payload["features"]:
+            if not isinstance(feature, dict):
+                raise RuntimeError("Vereinsbackup enthält ungültige Moduleinstellungen")
+            key = str(feature.get("feature_key") or "")
+            if key not in CLUB_FEATURE_DEFAULTS:
+                raise RuntimeError(f"Vereinsbackup enthält unbekanntes Modul: {key}")
+            _set_club_features(
+                db,
+                club_id,
+                {key: bool(feature.get("enabled", True))},
+                {key: str(feature.get("label") or "")},
+            )
+
+        for table in CLUB_BACKUP_TABLES:
+            current_columns = _columns(db, table)
+            count = 0
+            for raw_row in payload["tables"][table]:
+                if not isinstance(raw_row, dict):
+                    raise RuntimeError(f"Vereinsbackup-Tabelle ist ungültig: {table}")
+                unknown_columns = set(raw_row) - current_columns
+                if unknown_columns:
+                    raise RuntimeError(
+                        f"Vereinsbackup enthält unbekannte Spalten in {table}"
+                    )
+                row = {
+                    key: _club_backup_decode_value(value)
+                    for key, value in raw_row.items()
+                }
+                row["club_id"] = club_id
+
+                if "id" in row:
+                    owner = db.execute(
+                        f"SELECT club_id FROM {table} WHERE id = ?",
+                        (row["id"],),
+                    ).fetchone()
+                    if owner is not None and int(owner["club_id"]) != club_id:
+                        raise RuntimeError(
+                            f"Vereinsbackup-ID in {table} gehört bereits zu einem anderen Verein"
+                        )
+
+                columns = list(row)
+                placeholders = ", ".join("?" for _ in columns)
+                db.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {table}
+                    ({", ".join(columns)})
+                    VALUES ({placeholders})
+                    """,
+                    [row[column] for column in columns],
+                )
+                count += 1
+            imported_counts[table] = count
+
+        if club_id == 1:
+            updated = db.execute(
+                "SELECT * FROM clubs WHERE id = 1",
+            ).fetchone()
+            if updated is not None:
+                db.execute(
+                    """
+                    UPDATE app_config
+                    SET
+                        app_name = ?,
+                        logo_data = ?,
+                        logo_mime = ?,
+                        primary_color = ?,
+                        club_description = ?,
+                        website_url = ?,
+                        contact_email = ?,
+                        contact_phone = ?,
+                        club_address = ?,
+                        updated_at = ?
+                    WHERE id = 1
+                    """,
+                    (
+                        str(updated["name"] or "FLAPAMAMAKU"),
+                        updated["logo"],
+                        str(updated["logo_mime"] or ""),
+                        str(updated["primary_color"] or "#8A101B"),
+                        str(updated["description"] or ""),
+                        str(updated["website"] or ""),
+                        str(updated["email"] or ""),
+                        str(updated["phone"] or ""),
+                        str(updated["address"] or ""),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+
+        db.commit()
+
+    return {
+        "imported": True,
+        "mode": "merge",
+        "club_id": club_id,
+        "tables": imported_counts,
+        "safety_backup": _backup_info(safety_backup),
+    }
+
 def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
@@ -3985,6 +4335,103 @@ async def restore_backup(
             temporary.unlink(missing_ok=True)
         except OSError:
             logger.exception("Could not remove temporary restore upload %s", temporary)
+
+
+@app.get("/api/system/club-backup")
+def download_club_backup(
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> Response:
+    with connect() as db:
+        club_id = _active_club_id(db)
+        club = db.execute(
+            "SELECT slug FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+    if club is None:
+        raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+
+    try:
+        payload = _create_club_backup_payload(club_id)
+        data = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except Exception as exc:
+        logger.exception("Club backup export failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Vereinsbackup konnte nicht erstellt werden",
+        ) from exc
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slug = str(club["slug"] or f"club-{club_id}")
+    filename = f"{slug}-{timestamp}.clubbackup.json"
+    return Response(
+        content=data,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/system/club-restore")
+async def import_club_backup(
+    backup_file: UploadFile = File(...),
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, Any]:
+    filename = Path(backup_file.filename or "").name
+    if not filename.lower().endswith((".json", ".clubbackup")):
+        raise HTTPException(
+            status_code=400,
+            detail="Bitte eine .clubbackup- oder .json-Datei auswählen",
+        )
+
+    total = 0
+    chunks: list[bytes] = []
+    try:
+        while True:
+            chunk = await backup_file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_BACKUP_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Vereinsbackup ist zu gross",
+                )
+            chunks.append(chunk)
+    finally:
+        await backup_file.close()
+
+    if total == 0:
+        raise HTTPException(status_code=400, detail="Vereinsbackup ist leer")
+
+    try:
+        payload = json.loads(b"".join(chunks).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Vereinsbackup ist keine gültige JSON-Datei",
+        ) from exc
+
+    try:
+        with connect() as db:
+            club_id = _active_club_id(db)
+        result = await asyncio.to_thread(_merge_club_backup, payload, club_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Club backup import failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Vereinsbackup konnte nicht importiert werden",
+        ) from exc
+
+    result["uploaded_name"] = filename
+    return result
 
 
 @app.get("/api/auth/status")
