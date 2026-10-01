@@ -638,7 +638,14 @@ class _LinkList extends StatelessWidget {
         : 'https://$raw';
     final uri = Uri.tryParse(normalized);
     if (uri == null || uri.host.isEmpty) return '';
-    return uri.replace(path: '/favicon.ico', query: null, fragment: null).toString();
+    return Uri.https(
+      'www.google.com',
+      '/s2/favicons',
+      <String, String>{
+        'domain_url': uri.toString(),
+        'sz': '128',
+      },
+    ).toString();
   }
 
   @override
