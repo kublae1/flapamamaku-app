@@ -75,6 +75,7 @@ class ApiService {
           body: jsonEncode({
             'username': username,
             'password': password,
+            'client': 'app',
           }),
         )
         .timeout(const Duration(seconds: 8));
