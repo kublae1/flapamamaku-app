@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.81"
+API_VERSION = "0.8.82"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2043,6 +2043,9 @@ def init_db() -> None:
             )
 
         membership_now = datetime.now(timezone.utc).isoformat()
+        # Legacy migration only: assign club 1 when an old user has no
+        # user_clubs membership at all. Never attach current tenant users
+        # (e.g. Noster) to FLAPAMAMAKU on every backend start.
         db.execute(
             """
             INSERT OR IGNORE INTO user_clubs (
@@ -2060,8 +2063,32 @@ def init_db() -> None:
                 ?,
                 ?
             FROM users u
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM user_clubs uc
+                WHERE uc.user_id = u.id
+            )
             """,
             (membership_now, membership_now),
+        )
+
+        # Repair memberships created by the previous legacy migration:
+        # a user linked to a member of another club must not also inherit
+        # an automatic FLAPAMAMAKU membership. Platform super-admins are
+        # deliberately excluded from this cleanup.
+        db.execute(
+            """
+            DELETE FROM user_clubs
+            WHERE club_id = 1
+              AND role != 'super_admin'
+              AND user_id IN (
+                  SELECT u.id
+                  FROM users u
+                  JOIN members m ON m.id = u.member_id
+                  WHERE u.member_id IS NOT NULL
+                    AND m.club_id != 1
+              )
+            """
         )
 
         # Existing non-platform administrators are normal club managers.
