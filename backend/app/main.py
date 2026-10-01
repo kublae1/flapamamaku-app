@@ -1217,8 +1217,8 @@ def _validate_club_backup_relations(
 
 
 def _merge_club_backup(payload: dict[str, Any], club_id: int) -> dict[str, Any]:
-    safety_backup = _create_database_backup("before-club-import")
     imported_counts: dict[str, int] = {}
+    safety_backup: Path | None = None
 
     with connect() as db:
         club = db.execute(
@@ -1234,6 +1234,10 @@ def _merge_club_backup(payload: dict[str, Any], club_id: int) -> dict[str, Any]:
             club_slug=club_slug,
         )
         _validate_club_backup_relations(db, payload, club_id)
+
+        # Validate completely before creating the safety copy. Invalid imports
+        # must not consume backup retention slots.
+        safety_backup = _create_database_backup("before-club-import")
 
         club_data = payload["club"]
         values: dict[str, Any] = {}
@@ -1342,7 +1346,7 @@ def _merge_club_backup(payload: dict[str, Any], club_id: int) -> dict[str, Any]:
         "mode": "merge",
         "club_id": club_id,
         "tables": imported_counts,
-        "safety_backup": _backup_info(safety_backup),
+        "safety_backup": _backup_info(safety_backup) if safety_backup else None,
     }
 
 def init_db() -> None:
