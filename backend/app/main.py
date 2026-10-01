@@ -3330,7 +3330,7 @@ def _app_config() -> dict[str, Any]:
         "app_subtitle": str(club["subtitle"] or ""),
         "primary_color": str(club["primary_color"] or "#8A101B"),
         "secondary_color": str(club["secondary_color"] or "#FFFFFF"),
-        "logo_url": "/api/app-config/logo" if club["logo"] else "",
+        "logo_url": f"/api/app-config/logo?club_id={int(club['id'])}" if club["logo"] else "",
         "club_description": str(club["description"] or ""),
         "website_url": str(club["website"] or ""),
         "contact_email": str(club["email"] or ""),
@@ -3644,18 +3644,19 @@ def put_app_config(
     return _app_config()
 
 @app.get("/api/app-config/logo")
-def get_app_logo() -> Response:
+def get_app_logo(club_id: int | None = None) -> Response:
+    requested_club_id = int(club_id) if club_id is not None else _active_club_id()
     with connect() as db:
         row = db.execute(
-            "SELECT logo, logo_mime FROM clubs WHERE id = ?",
-            (_active_club_id(db),),
+            "SELECT logo, logo_mime FROM clubs WHERE id = ? AND active = 1",
+            (requested_club_id,),
         ).fetchone()
     if row is None or not row["logo"]:
         raise HTTPException(status_code=404, detail="Logo nicht vorhanden")
     return Response(
         content=row["logo"],
         media_type=row["logo_mime"] or "image/webp",
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": "public, max-age=300"},
     )
 
 
