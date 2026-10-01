@@ -197,6 +197,29 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       body: ListView(
         padding: EdgeInsets.zero,
         children: [
+          if (event.imageUrl.isNotEmpty)
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => FlapImageViewerScreen(
+                    title: event.title,
+                    imageUrl: event.imageUrl,
+                  ),
+                ),
+              ),
+              child: Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 460),
+                color: Colors.black,
+                child: OfflineNetworkImage(
+                  event.imageUrl,
+                  headers: AppStoreScope.of(context).api.authHeaders,
+                  width: double.infinity,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const _ImageError(),
+                ),
+              ),
+            ),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 30, 20, 28),
