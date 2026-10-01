@@ -576,7 +576,8 @@
           <label>Benutzername</label>
           <input name="admin_username" maxlength="120" required>
           <label>Passwort</label>
-          <input name="admin_password" type="password" minlength="8" maxlength="200" required>
+          <input name="admin_password" type="password" minlength="8" maxlength="200" required placeholder="Mindestens 8 Zeichen">
+          <p class="meta">Mindestens 8 Zeichen. Beim ersten Login muss die Vereinsverwaltung das temporäre Passwort ändern.</p>
           <p class="meta">Die Vereinsverwaltung wird direkt dem neu angelegten Verein zugeordnet und hat nur Zugriff auf diesen Verein.</p>
           <p><button class="primary" type="submit">Verein anlegen und einrichten</button></p>
           <p id="club-create-status" class="meta"></p>
@@ -851,7 +852,7 @@
             placeholder="Mindestens 8 Zeichen"
           >
           <p class="meta">
-            Neues Konto: temporäres Passwort eingeben. Das Mitglied muss es beim ersten Login ändern.
+            Neues Konto: temporäres Passwort mit mindestens 8 Zeichen eingeben. Das Mitglied muss es beim ersten Login ändern.
             Bestehender Benutzer: Feld leer lassen, wenn das Passwort unverändert bleibt. Wird hier ein
             neues Passwort gesetzt, werden bestehende Sitzungen beendet und beim nächsten Login ist
             ebenfalls eine Passwortänderung Pflicht. Das bisherige Passwort kann aus Sicherheitsgründen
