@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.80"
+API_VERSION = "0.8.81"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -2081,6 +2081,36 @@ def init_db() -> None:
             """
         )
 
+        # Platform super-admin accounts are never club members. Keep them
+        # detached from the members table and restore their internal platform
+        # permission role independently of any club member account.
+        platform_admin_ids = [
+            int(row["user_id"])
+            for row in db.execute(
+                """
+                SELECT user_id
+                FROM user_clubs
+                WHERE club_id = 1
+                  AND role = 'super_admin'
+                  AND active = 1
+                """
+            ).fetchall()
+        ]
+        for platform_admin_id in platform_admin_ids:
+            assignments = [
+                "member_id = NULL",
+                "role_key = 'admin'",
+                "permission_overrides = '{}'",
+            ]
+            values: list[Any] = []
+            for key in PERMISSION_FIELDS:
+                assignments.append(f"{key} = 1")
+            values.append(platform_admin_id)
+            db.execute(
+                f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
+                values,
+            )
+
         super_admin_exists = db.execute(
             """
             SELECT 1 FROM user_clubs
@@ -2942,6 +2972,7 @@ def _serialize_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item["permission_overrides"] = overrides
     item["active"] = bool(item.get("active", 0))
     item["must_change_password"] = bool(item.get("must_change_password", 0))
+    item["platform_only"] = bool(item.get("is_super_admin", False)) and item.get("member_id") is None
     return item
 
 
@@ -4637,7 +4668,7 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
             ) VALUES (?, ?, ?, ?, 1, {", ".join("?" for _ in PERMISSION_FIELDS)}, 'admin', '{{}}', ?)
             """,
             [
-                payload.member_id,
+                None,
                 payload.username.strip(),
                 password_hash,
                 salt,
@@ -4708,6 +4739,7 @@ def recover_super_admin(payload: SuperAdminRecoveryPayload) -> dict[str, Any]:
                 "password_hash = ?",
                 "password_salt = ?",
                 "active = 1",
+                "member_id = NULL",
                 "role_key = 'admin'",
                 "permission_overrides = '{}'",
             ]
@@ -5655,6 +5687,19 @@ def set_super_admin_role(
                 """,
                 (datetime.now(timezone.utc).isoformat(), user_id, club_id),
             )
+            assignments = [
+                "member_id = NULL",
+                "role_key = 'admin'",
+                "permission_overrides = '{}'",
+            ]
+            values: list[Any] = []
+            for key in PERMISSION_FIELDS:
+                assignments.append(f"{key} = 1")
+            values.append(user_id)
+            db.execute(
+                f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
+                values,
+            )
             event_type = "super_admin_granted"
         else:
             if membership["role"] != "super_admin":
@@ -5711,7 +5756,13 @@ def get_users(
             """,
             (_active_club_id(db),),
         ).fetchall()
-    return [_serialize_user(row) for row in rows]
+    result = []
+    with connect() as db:
+        for row in rows:
+            item = dict(row)
+            item["is_super_admin"] = _is_super_admin(db, int(row["id"]))
+            result.append(_serialize_user(item))
+    return result
 
 
 @app.post("/api/users")
@@ -5785,6 +5836,17 @@ def put_user(
     payload: UserPayload,
     actor: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> dict[str, Any]:
+    with connect() as db:
+        target_is_super_admin = _is_super_admin(db, user_id)
+    if target_is_super_admin:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Das Plattform-Super-Admin-Konto wird separat verwaltet und "
+                "kann nicht als Vereinsbenutzer bearbeitet werden"
+            ),
+        )
+
     role_key = _normalize_role_key(payload.role_key)
     overrides = _normalize_permission_overrides(payload.permission_overrides)
     if not overrides and role_key == "member":
