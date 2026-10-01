@@ -769,17 +769,20 @@
           <label>Mitglied</label>
           <select name="member_id"><option value="">Kein Mitglied verknüpft</option></select>
           <label>Benutzername</label><input name="username" required>
-          <label>Passwort</label>
+          <label>Temporäres Passwort</label>
           <input
             name="password"
             type="password"
             minlength="6"
             maxlength="200"
-            placeholder="Mindestens 6 Zeichen"
+            placeholder="Temporäres Passwort"
           >
           <p class="meta">
-            Neues Konto: Passwort mit mindestens 6 Zeichen eingeben.
-            Bestehender Benutzer: Feld leer lassen, wenn das Passwort unverändert bleiben soll.
+            Neues Konto: temporäres Passwort eingeben. Das Mitglied muss es beim ersten Login ändern.
+            Bestehender Benutzer: Feld leer lassen, wenn das Passwort unverändert bleibt. Wird hier ein
+            neues Passwort gesetzt, werden bestehende Sitzungen beendet und beim nächsten Login ist
+            ebenfalls eine Passwortänderung Pflicht. Das bisherige Passwort kann aus Sicherheitsgründen
+            nicht angezeigt oder ausgelesen werden.
           </p>
           <label><input name="active" type="checkbox" checked> Konto aktiv</label>
           <label>Rolle</label>
