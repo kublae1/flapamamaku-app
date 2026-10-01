@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_store.dart';
 import '../theme/flap_brand.dart';
+import 'password_change_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -128,6 +129,34 @@ class SettingsScreen extends StatelessWidget {
               subtitle: Text(
                 'Die Anmeldung bleibt auf diesem Gerät aktiv, bis du dich bewusst abmeldest oder ein Administrator die Sitzung beendet.',
                 style: TextStyle(color: Colors.white60),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _SettingsCard(
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              leading: const Icon(
+                Icons.password_rounded,
+                color: FlapBrand.gold,
+                size: 29,
+              ),
+              title: const Text(
+                'Passwort ändern',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: const Text(
+                'Eigenes Passwort jederzeit ändern',
+                style: TextStyle(color: Colors.white60),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PasswordChangeScreen(),
+                ),
               ),
             ),
           ),
