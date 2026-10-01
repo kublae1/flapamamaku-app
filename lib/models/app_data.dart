@@ -261,6 +261,7 @@ class EventItem {
   final String time;
   final int registrationCount;
   final bool registeredByMe;
+  final String imageUrl;
 
   const EventItem(
     this.day,
@@ -272,6 +273,7 @@ class EventItem {
     this.eventDate = '',
     this.registrationCount = 0,
     this.registeredByMe = false,
+    this.imageUrl = '',
   });
 
   String get displayDate {
@@ -293,6 +295,7 @@ class EventItem {
       eventDate: json['event_date']?.toString() ?? '',
       registrationCount: json['registration_count'] as int? ?? 0,
       registeredByMe: json['registered_by_me'] == true,
+      imageUrl: json['image_url']?.toString() ?? '',
     );
   }
 }
@@ -546,6 +549,7 @@ extension EventItemOfflineCacheJson on EventItem {
         'time': time,
         'registration_count': registrationCount,
         'registered_by_me': registeredByMe,
+        'image_url': imageUrl,
       };
 }
 
