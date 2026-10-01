@@ -74,7 +74,7 @@ def main() -> None:
                 "username": "ztv-admin",
                 "password": PASSWORD,
                 "active": True,
-                "role_key": "admin",
+                "role_key": "club_manager",
                 "permission_overrides": {},
             },
         )
