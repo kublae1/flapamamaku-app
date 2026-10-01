@@ -574,6 +574,10 @@ def main() -> None:
         headers=rogue_headers,
         json={"title": "Fremd", "text": "Nein", "date": "30.09.2026"},
     ).status_code == 404
+    assert client.get(
+        "/api/operator/billing/clubs",
+        headers=rogue_headers,
+    ).status_code == 403
 
     # 15. Club-Admin kann fremde FLAPAMAMAKU-Daten weder lesen noch verändern.
     assert client.put(
