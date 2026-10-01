@@ -5103,6 +5103,9 @@ def create_club(
                 for key, (default_label, _) in CLUB_FEATURE_DEFAULTS.items()
             },
         )
+        # If Noster/Nostradamus is newly provisioned, give that tenant its own
+        # homepage-inspired hero immediately. Existing custom heroes are never replaced.
+        _ensure_noster_default_hero(db)
         db.commit()
 
         row = db.execute(
