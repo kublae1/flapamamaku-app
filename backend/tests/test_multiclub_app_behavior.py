@@ -151,34 +151,27 @@ def main() -> None:
     assert test_login["user"]["current_club_id"] == test_club_id
     assert [club["slug"] for club in test_login["clubs"]] == ["testverein"]
 
+    # Normale Vereinskonten sind in der App single-tenant. Eine alte
+    # zusätzliche FLAPAMAMAKU-Zuordnung darf weder Auswahl noch Wechsel erlauben.
     multi_login = login(client, "multi-user")
-    assert multi_login["requires_club_selection"] is True
-    assert multi_login["user"]["current_club_id"] == 1
-    assert {club["slug"] for club in multi_login["clubs"]} == {
-        "flapamamaku",
-        "testverein",
-    }
+    assert multi_login["requires_club_selection"] is False
+    assert multi_login["user"]["current_club_id"] == test_club_id
+    assert [club["slug"] for club in multi_login["clubs"]] == ["testverein"]
 
     multi_headers = {"Authorization": f"Bearer {multi_login['token']}"}
-    switched = ok(
-        client.post(
-            "/api/auth/club",
-            headers=multi_headers,
-            json={"club_id": test_club_id},
-        )
-    ).json()
-    assert switched["club_id"] == test_club_id
-    assert ok(client.get("/api/auth/me", headers=multi_headers)).json()[
-        "current_club_id"
-    ] == test_club_id
+    denied_root = client.post(
+        "/api/auth/club",
+        headers=multi_headers,
+        json={"club_id": 1},
+    )
+    assert denied_root.status_code == 403
 
-    # Mehrfachmitglied darf nur in tatsächlich zugeordnete Vereine wechseln.
-    denied = client.post(
+    denied_third = client.post(
         "/api/auth/club",
         headers=multi_headers,
         json={"club_id": third_club_id},
     )
-    assert denied.status_code == 403
+    assert denied_third.status_code == 403
 
     # Super-Admin sieht alle aktiven Vereine und kann frei wechseln.
     super_clubs = ok(
@@ -200,7 +193,7 @@ def main() -> None:
         "current_club_id"
     ] == third_club_id
 
-    print("package 10 multi-club app behavior ok")
+    print("package 10 single-tenant app behavior ok")
 
 
 if __name__ == "__main__":
