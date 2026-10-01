@@ -493,7 +493,7 @@
             <label><input type="checkbox" data-key="events" data-label="Termine" checked> Termine</label>
             <label><input type="checkbox" data-key="members" data-label="Mitglieder" checked> Mitglieder</label>
             <label><input type="checkbox" data-key="documents" data-label="Dokumente" checked> Dokumente</label>
-            <label><input type="checkbox" data-key="gallery" data-label="Galerie" checked> Galerie</label>
+            <label><input type="checkbox" data-key="gallery" data-label="Galerie" checked> Galerie (Snapshots 1–7 Tage)</label>
             <label><input type="checkbox" data-key="photos" data-label="Fotoalben" checked> Fotoalben</label>
             <label><input type="checkbox" data-key="sujet_next" data-label="Sujet nächstes Jahr" checked> Sujet nächstes Jahr</label>
             <label><input type="checkbox" data-key="sujet_archive" data-label="Vergangene Sujet" checked> Vergangene Sujet</label>
@@ -906,7 +906,7 @@
             <option value="hero">Startseite / Hauptbild</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
-            <option value="gallery">Galerie · Einzelbilder</option>
+            <option value="gallery">Galerie · Einzelbilder (FLAPAMAMAKU)</option>
             <option value="documents">Dokumente</option>
             <option value="photos">Fotoalben · Alben</option>
             <option value="polls">Umfragen</option>
@@ -939,7 +939,7 @@
           </div>
           <div id="content-images-wrap">
             <label>Bilder (optional)</label>
-            <p class="meta">Für Galerie-Einträge werden die hochgeladenen Bilder einzeln angezeigt. Für Fotoalben bleiben alle Bilder gemeinsam im selben Album.</p>
+            <p class="meta">FLAPAMAMAKU kann dauerhafte Galerie-Einzelbilder verwalten. Bei weiteren Vereinen ist die Galerie ausschließlich für automatisch gelöschte Snapshots (1, 3 oder 7 Tage); dauerhafte Bilder gehören in Fotoalben.</p>
             <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
           </div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
@@ -1254,7 +1254,7 @@ const contentLabels = {
   hero: "Startseite / Hauptbild",
   sujet: "Sujet nächstes Jahr",
   archive: "Vergangene Sujet",
-  gallery: "Galerie / Einzelbilder",
+  gallery: "Galerie / Snapshots",
   documents: "Dokumente",
   photos: "Fotoalben",
   polls: "Umfragen",
@@ -1294,6 +1294,15 @@ async function loadTenantContext() {
   activeClubConfig = config || {};
 
   const name = activeClubConfig.app_name || "Vereins-App";
+  const snapshotOnlyGallery = Number(activeClubConfig.club_id || 0) !== 1;
+  const galleryEditorButton = document.querySelector('[data-section="gallery"]');
+  const galleryEditorOption = document.querySelector('#content-form select[name="section"] option[value="gallery"]');
+  galleryEditorButton?.classList.toggle("hidden", snapshotOnlyGallery);
+  if (galleryEditorOption) galleryEditorOption.disabled = snapshotOnlyGallery;
+  const contentSectionSelect = document.querySelector('#content-form select[name="section"]');
+  if (snapshotOnlyGallery && contentSectionSelect?.value === "gallery") {
+    contentSectionSelect.value = "photos";
+  }
   document.getElementById("tenant-context-name").textContent = name;
   document.getElementById("tenant-context-role").textContent =
     currentUser.is_super_admin
