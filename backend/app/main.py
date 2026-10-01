@@ -59,7 +59,11 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.77"
+API_VERSION = "0.8.78"
+NOSTER_HOMEPAGE_HERO_URL = (
+    "https://static.wixstatic.com/media/"
+    "4100f4_6ad443ac0b9344839e94f4d8be02de66~mv2.jpg"
+)
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -814,107 +818,8 @@ def _optimize_logo_image(data: bytes, mime: str) -> tuple[bytes, str]:
 
 
 
-def _build_noster_default_hero() -> tuple[bytes, str]:
-    """Create a self-contained Noster hero inspired by the public homepage."""
-    width, height = 1200, 1600
-    image = Image.new("RGB", (width, height), "#090909")
-    draw = ImageDraw.Draw(image)
-
-    # The public Noster site uses a stark black/white wordmark and a deliberately
-    # dark, mystical visual language. Keep this independent from FLAPAMAMAKU.
-    for index in range(18):
-        inset = 70 + index * 25
-        shade = 24 + index * 2
-        draw.ellipse(
-            (
-                inset,
-                300 + inset // 3,
-                width - inset,
-                1320 - inset // 3,
-            ),
-            outline=(shade, shade, shade),
-            width=2,
-        )
-
-    center_x = width // 2
-    draw.polygon(
-        [
-            (center_x, 360),
-            (center_x - 270, 760),
-            (center_x - 165, 1120),
-            (center_x, 1260),
-            (center_x + 165, 1120),
-            (center_x + 270, 760),
-        ],
-        fill=(16, 16, 16),
-        outline=(82, 82, 82),
-    )
-    draw.ellipse(
-        (center_x - 185, 590, center_x - 35, 760),
-        outline=(165, 165, 165),
-        width=7,
-    )
-    draw.ellipse(
-        (center_x + 35, 590, center_x + 185, 760),
-        outline=(165, 165, 165),
-        width=7,
-    )
-    draw.line(
-        (
-            center_x,
-            610,
-            center_x - 30,
-            900,
-            center_x,
-            1015,
-            center_x + 30,
-            900,
-            center_x,
-            610,
-        ),
-        fill=(118, 118, 118),
-        width=5,
-    )
-    draw.arc(
-        (center_x - 190, 820, center_x + 190, 1080),
-        start=15,
-        end=165,
-        fill=(125, 125, 125),
-        width=5,
-    )
-
-    draw.rectangle((70, 95, width - 70, 255), fill=(240, 240, 236))
-    draw.rectangle(
-        (70, height - 235, width - 70, height - 105),
-        fill=(240, 240, 236),
-    )
-
-    title_font = ImageFont.load_default(size=80)
-    city_font = ImageFont.load_default(size=54)
-    small_font = ImageFont.load_default(size=30)
-
-    def centered_text(y: int, value: str, font: ImageFont.ImageFont, fill: str) -> None:
-        bounds = draw.textbbox((0, 0), value, font=font)
-        text_width = bounds[2] - bounds[0]
-        draw.text(((width - text_width) // 2, y), value, font=font, fill=fill)
-
-    centered_text(125, "NOSTRADAMUS", title_font, "#090909")
-    centered_text(282, "FASNACHTSGRUPPE · SEIT 1982", small_font, "#A0A0A0")
-    centered_text(height - 205, "L U Z E R N", city_font, "#090909")
-
-    output = io.BytesIO()
-    image.save(
-        output,
-        format="JPEG",
-        quality=86,
-        optimize=True,
-        progressive=True,
-    )
-    return output.getvalue(), "image/jpeg"
-
-
 def _ensure_noster_default_hero(db: sqlite3.Connection) -> None:
-    """Seed only Noster clubs that still have no club-owned hero image."""
+    """Seed the real Noster homepage hero without touching manual uploads."""
     clubs = db.execute(
         """
         SELECT id, slug, name, website
@@ -932,10 +837,7 @@ def _ensure_noster_default_hero(db: sqlite3.Connection) -> None:
     if not clubs:
         return
 
-    hero_bytes: bytes | None = None
-    hero_mime = "image/jpeg"
     now = datetime.now(timezone.utc).isoformat()
-
     for club in clubs:
         club_id = int(club["id"])
         hero = db.execute(
@@ -950,7 +852,7 @@ def _ensure_noster_default_hero(db: sqlite3.Connection) -> None:
         ).fetchone()
 
         if hero is not None:
-            has_gallery_image = db.execute(
+            has_manual_image = db.execute(
                 """
                 SELECT 1
                 FROM content_images
@@ -959,45 +861,49 @@ def _ensure_noster_default_hero(db: sqlite3.Connection) -> None:
                 """,
                 (hero["id"], club_id),
             ).fetchone()
-            if has_gallery_image is not None or hero["image_data"] is not None:
+            is_old_generated_noster = (
+                str(hero["title"] or "").strip().upper() == "NOSTRADAMUS"
+                and not str(hero["text"] or "").strip()
+                and not str(hero["link_url"] or "").strip()
+                and has_manual_image is not None
+            )
+            if has_manual_image is not None and not is_old_generated_noster:
                 continue
-            hero_id = int(hero["id"])
-        else:
-            max_order = int(
+            if hero["image_data"] is not None and not is_old_generated_noster:
+                continue
+
+            if is_old_generated_noster:
                 db.execute(
-                    """
-                    SELECT COALESCE(MAX(sort_order), 0)
-                    FROM content_items
-                    WHERE club_id = ? AND section = 'hero'
-                    """,
-                    (club_id,),
-                ).fetchone()[0]
-            )
-            cursor = db.execute(
+                    "DELETE FROM content_images WHERE content_id = ? AND club_id = ?",
+                    (hero["id"], club_id),
+                )
+            db.execute(
                 """
-                INSERT INTO content_items (
-                    section, title, text, link_url, poll_options,
-                    poll_allow_suggestions, sort_order, created_at, club_id
-                ) VALUES ('hero', 'NOSTRADAMUS', '', '', '[]', 0, ?, ?, ?)
+                UPDATE content_items
+                SET title = 'NOSTRADAMUS',
+                    text = '',
+                    link_url = ?
+                WHERE id = ? AND club_id = ?
                 """,
-                (max_order + 1, now, club_id),
+                (NOSTER_HOMEPAGE_HERO_URL, hero["id"], club_id),
             )
-            hero_id = int(cursor.lastrowid)
+            continue
 
-        if hero_bytes is None:
-            hero_bytes, hero_mime = _build_noster_default_hero()
-
+        max_order = int(
+            db.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM content_items WHERE club_id = ?",
+                (club_id,),
+            ).fetchone()[0]
+        )
         db.execute(
             """
-            INSERT INTO content_images (
-                content_id, image_data, image_mime,
-                sort_order, created_at, club_id
-            ) VALUES (?, ?, ?, 1, ?, ?)
+            INSERT INTO content_items (
+                section, title, text, link_url, poll_options,
+                poll_allow_suggestions, sort_order, created_at, club_id
+            ) VALUES ('hero', 'NOSTRADAMUS', '', ?, '[]', 0, ?, ?, ?)
             """,
-            (hero_id, hero_bytes, hero_mime, now, club_id),
+            (NOSTER_HOMEPAGE_HERO_URL, max_order + 1, now, club_id),
         )
-
-
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
 
@@ -3896,6 +3802,12 @@ def _serialize_content(
         for image_row in image_rows
     ]
     image_urls = [image["url"] for image in images]
+    if (
+        not image_urls
+        and item.get("section") == "hero"
+        and str(item.get("link_url") or "").startswith(("https://", "http://"))
+    ):
+        image_urls = [str(item["link_url"])]
     item["images"] = images
     item["image_urls"] = image_urls
     item["image_url"] = image_urls[0] if image_urls else ""
