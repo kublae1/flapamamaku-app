@@ -33,7 +33,7 @@ def main() -> None:
     assert root["is_super_admin"] is True
 
     second = post_user(
-        UserPayload(username="second-admin", password="Testpass123!", active=True, role_key="admin"),
+        UserPayload(username="second-admin", password="Testpass123!", active=True, role_key="club_manager"),
         root,
     )
     promoted = set_super_admin_role(
