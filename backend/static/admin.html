@@ -455,6 +455,7 @@
           <label for="tenant-switch">Verein wechseln</label>
           <select id="tenant-switch"></select>
           <button type="button" id="club-create-open" style="margin-top:8px;width:100%">+ Neuer Verein</button>
+          <button type="button" id="club-delete-button" class="hidden" style="margin-top:8px;width:100%;background:#8A101B;color:#fff;border-color:#A52A2A">Verein vollständig löschen</button>
         </div>
       </div>
       <div class="meta" id="tenant-context-features" style="margin-top:10px">Module werden geladen …</div>
@@ -1372,6 +1373,11 @@ async function loadTenantContext() {
   const wrap = document.getElementById("tenant-switch-wrap");
   const select = document.getElementById("tenant-switch");
   wrap.classList.toggle("hidden", !currentUser.is_super_admin);
+  const deleteClubButton = document.getElementById("club-delete-button");
+  deleteClubButton?.classList.toggle(
+    "hidden",
+    !currentUser.is_super_admin || Number(activeClubConfig.club_id || 0) === 1,
+  );
   document.getElementById("club-create-card")
     ?.classList.toggle("hidden", !currentUser.is_super_admin || document.getElementById("club-create-card")?.dataset.open !== "1");
   select.innerHTML = "";
@@ -1410,6 +1416,42 @@ document.querySelectorAll("#member-role-presets [data-member-role]").forEach(but
   button.addEventListener("click", () => {
     document.getElementById("members-form").elements.role.value = button.dataset.memberRole || "";
   });
+});
+
+document.getElementById("club-delete-button").addEventListener("click", async () => {
+  if (!currentUser?.is_super_admin) return;
+  const clubId = Number(activeClubConfig.club_id || 0);
+  const clubName = String(activeClubConfig.app_name || "").trim();
+  if (!clubId || clubId === 1 || !clubName) return;
+
+  const entered = window.prompt(
+    "ACHTUNG: Der Verein und seine Daten werden vollständig gelöscht.\n\n" +
+    "Vorher wird automatisch ein Datenbank-Backup erstellt.\n\n" +
+    "Zum Bestätigen den Vereinsnamen exakt eingeben:\n" + clubName
+  );
+  if (entered === null) return;
+  if (entered.trim() !== clubName) {
+    window.alert("Abgebrochen: Der Vereinsname stimmt nicht überein.");
+    return;
+  }
+  const second = window.confirm(
+    "Verein „" + clubName + "“ jetzt endgültig löschen?\n\n" +
+    "Vereinsadmins, alte Zuordnungen, Sitzungen und alle Vereinsdaten werden bereinigt."
+  );
+  if (!second) return;
+
+  try {
+    const result = await api("/api/clubs/" + clubId + "/delete", {
+      method: "POST",
+      body: JSON.stringify({confirm_name: clubName}),
+    });
+    window.alert(
+      "Verein gelöscht.\nSicherungsbackup: " + (result.backup_file || "erstellt")
+    );
+    await switchClub(1);
+  } catch (error) {
+    window.alert("Verein konnte nicht gelöscht werden:\n" + error.message);
+  }
 });
 
 document.getElementById("club-create-open").addEventListener("click", () => {
