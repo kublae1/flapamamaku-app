@@ -2412,7 +2412,7 @@ async function loadUsers() {
         ${currentUser?.is_super_admin && Number(user.id) !== Number(currentUser.id)
           ? `<button type="button" class="super-admin-toggle">${user.club_role === "super_admin" ? "Super-Admin entziehen" : "Zum Super-Admin machen"}</button>`
           : ""}
-        <button type="button" class="delete">Löschen</button>
+        ${user.platform_only ? "" : '<button type="button" class="delete">Löschen</button>'}
       </div>`;
     div.querySelector(".edit")?.addEventListener("click", () => editUser(user));
     div.querySelector(".revoke-sessions").onclick = () => revokeUserSessions(user);
@@ -3999,6 +3999,7 @@ document.getElementById("auth-form").addEventListener("submit", async event => {
       body:JSON.stringify({
         username:form.elements.username.value.trim(),
         password:form.elements.password.value,
+        client:"admin",
       }),
     });
     token = result.token;
