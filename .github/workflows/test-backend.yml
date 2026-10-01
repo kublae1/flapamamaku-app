@@ -1709,6 +1709,15 @@ jobs:
           rm -rf /tmp/flapamamaku-system-backup-permissions-backups
           PYTHONPATH=. python tests/test_system_backup_permissions.py
 
+      - name: Test club-scoped backup export and import
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-club-backup.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-club-backups
+        run: |
+          rm -f /tmp/flapamamaku-club-backup.db
+          rm -rf /tmp/flapamamaku-club-backups
+          PYTHONPATH=. python tests/test_club_backup.py
+
       - name: Build Docker image
         run: docker build -t flapamamaku-backend:test .
 # final-release-validation-sync
