@@ -566,6 +566,11 @@ class AppStore extends ChangeNotifier {
       authError = null;
       clubSelectionRequired = false;
       await _loadAccessibleClubs();
+      if (accessibleClubs.length <= 1) {
+        clubSelectionRequired = false;
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await _loadRemoteBranding(prefs);
       await refreshFromServer();
       if (pushEnabled && showPushNotifications) {
         await pushService.enable();
@@ -774,7 +779,14 @@ class AppStore extends ChangeNotifier {
       if (accessibleClubs.isEmpty) {
         await _loadAccessibleClubs();
       }
+      // Never show a club picker when the account has zero or one accessible
+      // club. This also protects against stale server flags after role changes.
+      if (accessibleClubs.length <= 1) {
+        clubSelectionRequired = false;
+      }
       if (!clubSelectionRequired) {
+        final prefs = await SharedPreferences.getInstance();
+        await _loadRemoteBranding(prefs);
         await refreshFromServer();
         if (pushEnabled && showPushNotifications) {
           await pushService.enable();
