@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/app_store.dart';
 import '../models/app_data.dart';
@@ -154,48 +155,83 @@ class AdminScreen extends StatelessWidget {
     final title = TextEditingController(text: existing?.title ?? '');
     final location = TextEditingController(text: existing?.location ?? '');
     final time = TextEditingController(text: existing?.time ?? '');
+    XFile? selectedImage;
+    bool removeExistingImage = false;
 
     final save = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(index == null ? 'Termin erfassen' : 'Termin bearbeiten'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: eventDate,
-                keyboardType: TextInputType.datetime,
-                decoration: const InputDecoration(
-                  labelText: 'Datum',
-                  hintText: 'YYYY-MM-DD',
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(index == null ? 'Termin erfassen' : 'Termin bearbeiten'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: eventDate,
+                  keyboardType: TextInputType.datetime,
+                  decoration: const InputDecoration(
+                    labelText: 'Datum',
+                    hintText: 'YYYY-MM-DD',
+                  ),
                 ),
-              ),
-              TextField(
-                controller: title,
-                decoration: const InputDecoration(labelText: 'Titel'),
-              ),
-              TextField(
-                controller: location,
-                decoration: const InputDecoration(labelText: 'Ort'),
-              ),
-              TextField(
-                controller: time,
-                decoration: const InputDecoration(labelText: 'Zeit'),
-              ),
-            ],
+                TextField(
+                  controller: title,
+                  decoration: const InputDecoration(labelText: 'Titel'),
+                ),
+                TextField(
+                  controller: location,
+                  decoration: const InputDecoration(labelText: 'Ort'),
+                ),
+                TextField(
+                  controller: time,
+                  decoration: const InputDecoration(labelText: 'Zeit'),
+                ),
+                const SizedBox(height: 14),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await ImagePicker().pickImage(
+                      source: ImageSource.gallery,
+                      imageQuality: 88,
+                      maxWidth: 1800,
+                    );
+                    if (picked != null) {
+                      setDialogState(() {
+                        selectedImage = picked;
+                        removeExistingImage = false;
+                      });
+                    }
+                  },
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: Text(
+                    selectedImage == null
+                        ? 'Bild aus Telefon-Galerie auswählen'
+                        : 'Gewählt: ${selectedImage!.name}',
+                  ),
+                ),
+                if (existing?.imageUrl.isNotEmpty == true && selectedImage == null)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: removeExistingImage,
+                    onChanged: (value) => setDialogState(
+                      () => removeExistingImage = value == true,
+                    ),
+                    title: const Text('Vorhandenes Terminbild entfernen'),
+                  ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Speichern'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Speichern'),
-          ),
-        ],
       ),
     );
 
@@ -212,14 +248,22 @@ class AdminScreen extends StatelessWidget {
       time.text.trim(),
       id: existing?.id,
       eventDate: eventDate.text.trim(),
+      imageUrl: existing?.imageUrl ?? '',
     );
 
     try {
-      if (index == null) {
-        await store.addEvent(item);
-      } else {
-        await store.updateEvent(index, item);
+      final saved = await store.api.saveEvent(item);
+      if (removeExistingImage && saved.id != null) {
+        await store.api.deleteEventImage(saved.id!);
       }
+      if (selectedImage != null && saved.id != null) {
+        await store.api.uploadEventImage(
+          eventId: saved.id!,
+          bytes: await selectedImage!.readAsBytes(),
+          filename: selectedImage!.name,
+        );
+      }
+      await store.refreshFromServer();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
