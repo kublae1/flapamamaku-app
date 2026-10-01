@@ -1122,7 +1122,7 @@ jobs:
               'api("/api/app-config/features"',
               'api("/api/app-config/logo"',
               'api("/api/users"',
-              'role_key: "admin"',
+              'role_key: "club_manager"',
               'Verein ist einsatzbereit.',
           )
           for marker in required:
@@ -1624,21 +1624,8 @@ jobs:
           assert role["label"] == "Vereinsverwaltung"
           assert permissions["can_admin_page"] is True
           assert permissions["can_manage_settings"] is True
-          assert permissions["can_manage_users"] is False
-
-          blocked = [
-              "can_news",
-              "can_events",
-              "can_members",
-              "can_documents",
-              "can_photos",
-              "can_gallery_upload",
-              "can_polls",
-              "can_links",
-              "can_contact",
-              "can_about",
-          ]
-          assert all(permissions[key] is False for key in blocked), permissions
+          assert permissions["can_manage_users"] is True
+          assert all(permissions.values()), permissions
 
           print("club manager role ok")
           PY
