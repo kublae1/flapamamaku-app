@@ -152,3 +152,14 @@ def test_logo_replacement_changes_cache_key_without_touching_other_tenant():
     second = _upload(club2, _image_bytes("PNG", (7, 8, 9, 255)), "second.png", "image/png")
     assert first["logo_url"] != second["logo_url"]
     assert _config(1)["logo_url"] == club1_url
+
+
+def main() -> None:
+    test_logo_format_validation_preserves_supported_types()
+    test_tenant_logo_upload_public_delivery_and_restart_persistence()
+    test_logo_replacement_changes_cache_key_without_touching_other_tenant()
+    print("tenant club logo delivery and persistence ok")
+
+
+if __name__ == "__main__":
+    main()
