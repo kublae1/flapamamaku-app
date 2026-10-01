@@ -733,6 +733,82 @@ def _optimize_image(data: bytes, mime: str) -> tuple[bytes, str]:
     return optimized, optimized_mime
 
 
+def _optimize_logo_image(data: bytes, mime: str) -> tuple[bytes, str]:
+    """Validate and resize club logos while preserving PNG/JPEG/WebP format."""
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image")
+    if len(data) > MAX_UPLOAD_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large")
+
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            detected = (source.format or "").upper()
+            if detected not in {"PNG", "JPEG", "WEBP"}:
+                raise HTTPException(
+                    status_code=415,
+                    detail="Logo must be PNG, JPEG or WebP",
+                )
+
+            image = ImageOps.exif_transpose(source)
+            image.thumbnail(
+                (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
+                Image.Resampling.LANCZOS,
+            )
+            output = io.BytesIO()
+
+            if detected == "PNG":
+                if image.mode not in {"RGB", "RGBA", "L", "LA", "P"}:
+                    image = image.convert("RGBA")
+                image.save(output, format="PNG", optimize=True)
+                optimized_mime = "image/png"
+            elif detected == "JPEG":
+                if image.mode != "RGB":
+                    background = Image.new("RGB", image.size, "white")
+                    if "A" in image.getbands():
+                        background.paste(image, mask=image.getchannel("A"))
+                    else:
+                        background.paste(image)
+                    image = background
+                image.save(
+                    output,
+                    format="JPEG",
+                    quality=82,
+                    optimize=True,
+                    progressive=True,
+                )
+                optimized_mime = "image/jpeg"
+            else:
+                if image.mode not in {"RGB", "RGBA"}:
+                    image = image.convert(
+                        "RGBA" if "A" in image.getbands() else "RGB"
+                    )
+                image.save(
+                    output,
+                    format="WEBP",
+                    quality=82,
+                    method=6,
+                )
+                optimized_mime = "image/webp"
+
+            optimized = output.getvalue()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=415,
+            detail="Invalid or unsupported logo",
+        ) from exc
+
+    if not optimized:
+        raise HTTPException(status_code=400, detail="Logo optimization failed")
+    if len(optimized) > MAX_STORED_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Optimized logo is still too large",
+        )
+    return optimized, optimized_mime
+
+
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
 
@@ -3728,7 +3804,12 @@ def _app_config() -> dict[str, Any]:
         "app_subtitle": str(club["subtitle"] or ""),
         "primary_color": str(club["primary_color"] or "#8A101B"),
         "secondary_color": str(club["secondary_color"] or "#FFFFFF"),
-        "logo_url": f"/api/app-config/logo?club_id={int(club['id'])}" if club["logo"] else "",
+        "logo_url": (
+            f"/api/app-config/logo?club_id={int(club['id'])}"
+            f"&v={hashlib.sha256(bytes(club['logo'])).hexdigest()[:12]}"
+            if club["logo"]
+            else ""
+        ),
         "club_description": str(club["description"] or ""),
         "website_url": str(club["website"] or ""),
         "contact_email": str(club["email"] or ""),
@@ -4058,7 +4139,7 @@ def get_app_logo(club_id: int | None = None) -> Response:
     return Response(
         content=row["logo"],
         media_type=row["logo_mime"] or "image/webp",
-        headers={"Cache-Control": "public, max-age=300"},
+        headers={"Cache-Control": "public, max-age=300, must-revalidate"},
     )
 
 
@@ -4068,7 +4149,7 @@ async def upload_app_logo(
     _: dict[str, Any] = Depends(require("can_manage_settings")),
 ) -> dict[str, Any]:
     raw = await logo.read()
-    optimized, mime = _optimize_image(raw, logo.content_type or "")
+    optimized, mime = _optimize_logo_image(raw, logo.content_type or "")
     with connect() as db:
         club_id = _active_club_id(db)
         now = datetime.now(timezone.utc).isoformat()
