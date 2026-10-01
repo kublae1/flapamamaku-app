@@ -142,7 +142,10 @@ def main() -> None:
     assert config["app_subtitle"] == "Neutraler Verein"
     assert config["primary_color"] == "#225588"
     assert config["secondary_color"] == "#F2F2F2"
-    assert config["logo_url"]
+    assert config["logo_url"] == f"/api/app-config/logo?club_id={club_id}"
+    logo_response = client.get(config["logo_url"])
+    assert logo_response.status_code == 200
+    assert logo_response.headers["content-type"].startswith("image/")
     assert config["features"]["polls"]["enabled"] is False
     assert config["features"]["push_notifications"]["enabled"] is True
     assert config["features"]["participant_lists"]["enabled"] is True
