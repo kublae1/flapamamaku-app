@@ -37,7 +37,11 @@ class StartScreen extends StatelessWidget {
     final heroTitle = hero == null || hero.title.trim().isEmpty
         ? store.appName
         : hero.title.trim();
-    const fallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
+    const flapamamakuFallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
+    final isFlapamamaku = store.appName.trim().toUpperCase() == 'FLAPAMAMAKU';
+    final fallbackNetworkImage =
+        !isFlapamamaku && store.appLogoUrl.isNotEmpty ? store.appLogoUrl : '';
+    final fallbackAsset = isFlapamamaku ? flapamamakuFallbackHero : '';
     final latestNews = store.news.take(3).toList();
 
     return Scaffold(
@@ -91,8 +95,8 @@ class StartScreen extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (_) => FlapImageViewerScreen(
                     title: heroTitle,
-                    imageUrl: heroImage,
-                    imageAsset: fallbackHero,
+                    imageUrl: heroImage.isNotEmpty ? heroImage : fallbackNetworkImage,
+                    imageAsset: fallbackAsset,
                   ),
                 ),
               ),
@@ -107,17 +111,35 @@ class StartScreen extends StatelessWidget {
                             headers: store.api.authHeaders,
                             fit: BoxFit.contain,
                             alignment: Alignment.center,
-                            errorBuilder: (_, __, ___) => Image.asset(
-                              fallbackHero,
-                              fit: BoxFit.contain,
-                              alignment: Alignment.center,
-                            ),
+                            errorBuilder: (_, __, ___) => fallbackNetworkImage.isNotEmpty
+                                ? OfflineNetworkImage(
+                                    fallbackNetworkImage,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.center,
+                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                  )
+                                : fallbackAsset.isNotEmpty
+                                    ? Image.asset(
+                                        fallbackAsset,
+                                        fit: BoxFit.contain,
+                                        alignment: Alignment.center,
+                                      )
+                                    : const SizedBox.shrink(),
                           )
-                        : Image.asset(
-                            fallbackHero,
-                            fit: BoxFit.contain,
-                            alignment: Alignment.center,
-                          ),
+                        : fallbackNetworkImage.isNotEmpty
+                            ? OfflineNetworkImage(
+                                fallbackNetworkImage,
+                                fit: BoxFit.contain,
+                                alignment: Alignment.center,
+                                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                              )
+                            : fallbackAsset.isNotEmpty
+                                ? Image.asset(
+                                    fallbackAsset,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.center,
+                                  )
+                                : const SizedBox.shrink(),
                   ),
                   Positioned(
                     right: 14,
