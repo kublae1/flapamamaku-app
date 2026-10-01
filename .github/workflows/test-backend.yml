@@ -1709,6 +1709,15 @@ jobs:
           rm -rf /tmp/flapamamaku-system-backup-permissions-backups
           PYTHONPATH=. python tests/test_system_backup_permissions.py
 
+      - name: Test club role catalogue
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-club-role-catalogue.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-club-role-catalogue-backups
+        run: |
+          rm -f /tmp/flapamamaku-club-role-catalogue.db
+          rm -rf /tmp/flapamamaku-club-role-catalogue-backups
+          PYTHONPATH=. python tests/test_club_role_catalogue.py
+
       - name: Test club-scoped backup export and import
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-club-backup.db
