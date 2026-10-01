@@ -1285,6 +1285,11 @@ const contentLabels = {
   whatsapp: "WhatsApp-Gruppe",
 };
 
+function cacheBustUrl(url) {
+  if (!url) return "";
+  return url + (url.includes("?") ? "&" : "?") + "v=" + Date.now();
+}
+
 const resources = {
   news: ["title", "text", "date", "image_url"],
   events: ["event_date", "day", "month", "title", "location", "time"],
@@ -1339,7 +1344,7 @@ async function loadTenantContext() {
 
   const logo = document.getElementById("tenant-context-logo");
   if (activeClubConfig.logo_url) {
-    logo.src = activeClubConfig.logo_url + "?v=" + Date.now();
+    logo.src = cacheBustUrl(activeClubConfig.logo_url);
     logo.style.display = "block";
   } else {
     logo.removeAttribute("src");
@@ -3185,7 +3190,7 @@ async function loadAppConfig() {
     const preview = document.getElementById("app-logo-preview");
     const image = document.getElementById("app-logo-image");
     if (config.logo_url) {
-      image.src = config.logo_url + "?v=" + Date.now();
+      image.src = cacheBustUrl(config.logo_url);
       preview.classList.remove("hidden");
     } else {
       image.removeAttribute("src");
