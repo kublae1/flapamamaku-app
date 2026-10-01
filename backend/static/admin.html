@@ -576,7 +576,7 @@
           <label>Benutzername</label>
           <input name="admin_username" maxlength="120" required>
           <label>Passwort</label>
-          <input name="admin_password" type="password" minlength="6" maxlength="200" required>
+          <input name="admin_password" type="password" minlength="8" maxlength="200" required>
           <p class="meta">Die Vereinsverwaltung wird direkt dem neu angelegten Verein zugeordnet und hat nur Zugriff auf diesen Verein.</p>
           <p><button class="primary" type="submit">Verein anlegen und einrichten</button></p>
           <p id="club-create-status" class="meta"></p>
@@ -688,13 +688,13 @@
             <input
               name="account_password"
               type="password"
-              minlength="6"
+              minlength="8"
               maxlength="200"
               autocomplete="new-password"
-              placeholder="Mindestens 6 Zeichen"
+              placeholder="Mindestens 8 Zeichen"
             >
             <p class="meta">
-              Neues Konto: Passwort mit mindestens 6 Zeichen eingeben.
+              Neues Konto: Passwort mit mindestens 8 Zeichen eingeben.
               Bestehendes Konto: Feld leer lassen, wenn das Passwort unverändert bleiben soll.
             </p>
             <label><input name="account_active" type="checkbox" checked> Konto aktiv</label>
@@ -846,9 +846,9 @@
           <input
             name="password"
             type="password"
-            minlength="6"
+            minlength="8"
             maxlength="200"
-            placeholder="Temporäres Passwort"
+            placeholder="Mindestens 8 Zeichen"
           >
           <p class="meta">
             Neues Konto: temporäres Passwort eingeben. Das Mitglied muss es beim ersten Login ändern.
@@ -965,6 +965,28 @@
         </form>
         <div class="card"><h2>Benutzerkonten</h2><div id="users-list"></div></div>
       </div>
+
+      <form class="card hidden" id="superadmin-account-form" style="margin-top:18px;max-width:640px">
+        <h2>Plattform-Superadmin-Konto bearbeiten</h2>
+        <p class="meta">
+          Dieses Konto bleibt vollständig von Vereinsmitgliedern getrennt. Benutzername und Passwort
+          können hier geändert werden, ohne Mitglieds- oder Vereinsdaten anzutasten.
+        </p>
+        <label>Benutzername</label>
+        <input name="username" maxlength="120" required autocomplete="username">
+        <label>Aktuelles Passwort</label>
+        <input name="current_password" type="password" minlength="6" maxlength="200" required autocomplete="current-password">
+        <label>Neues Passwort (optional)</label>
+        <input name="new_password" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="Leer lassen, wenn unverändert">
+        <label>Neues Passwort wiederholen</label>
+        <input name="confirm_password" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="Nur bei Passwortänderung">
+        <p class="meta">Neu vergebene Passwörter müssen mindestens 8 Zeichen haben.</p>
+        <div class="actions">
+          <button class="primary" type="submit">SuperAdmin-Konto speichern</button>
+          <button type="button" id="superadmin-account-cancel">Abbrechen</button>
+        </div>
+        <p id="superadmin-account-status" class="meta"></p>
+      </form>
     </section>
 
     <section id="content" class="panel">
@@ -2450,6 +2472,9 @@ async function loadUsers() {
         <button type="button" class="move-up" title="Nach oben">↑</button>
         <button type="button" class="move-down" title="Nach unten">↓</button>
         ${user.platform_only ? "" : '<button type="button" class="edit">Bearbeiten</button>'}
+        ${user.platform_only && Number(user.id) === Number(currentUser?.id)
+          ? '<button type="button" class="edit-superadmin-account">SuperAdmin-Konto bearbeiten</button>'
+          : ""}
         <button type="button" class="revoke-sessions">Sitzungen beenden</button>
         ${currentUser?.is_super_admin && Number(user.id) !== Number(currentUser.id)
           ? `<button type="button" class="super-admin-toggle">${user.club_role === "super_admin" ? "Super-Admin entziehen" : "Zum Super-Admin machen"}</button>`
@@ -2457,12 +2482,78 @@ async function loadUsers() {
         ${user.platform_only ? "" : '<button type="button" class="delete">Löschen</button>'}
       </div>`;
     div.querySelector(".edit")?.addEventListener("click", () => editUser(user));
+    div.querySelector(".edit-superadmin-account")?.addEventListener("click", () => editSuperAdminAccount(user));
     div.querySelector(".revoke-sessions").onclick = () => revokeUserSessions(user);
     div.querySelector(".super-admin-toggle")?.addEventListener("click", () => toggleSuperAdmin(user));
     div.querySelector(".delete")?.addEventListener("click", () => removeUser(user.id));
     list.appendChild(div);
   });
 }
+
+function editSuperAdminAccount(user) {
+  if (!currentUser?.is_super_admin || Number(user.id) !== Number(currentUser.id)) return;
+  const form = document.getElementById("superadmin-account-form");
+  form.reset();
+  form.elements.username.value = currentUser.username || user.username || "";
+  document.getElementById("superadmin-account-status").textContent = "";
+  form.classList.remove("hidden");
+  form.scrollIntoView({behavior:"smooth", block:"start"});
+  form.elements.username.focus();
+}
+
+document.getElementById("superadmin-account-cancel")?.addEventListener("click", () => {
+  const form = document.getElementById("superadmin-account-form");
+  form.reset();
+  form.classList.add("hidden");
+  document.getElementById("superadmin-account-status").textContent = "";
+});
+
+document.getElementById("superadmin-account-form")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser?.is_super_admin) return;
+  const form = event.currentTarget;
+  const status = document.getElementById("superadmin-account-status");
+  status.textContent = "";
+
+  const username = form.elements.username.value.trim();
+  const currentPassword = form.elements.current_password.value;
+  const newPassword = form.elements.new_password.value;
+  const confirmPassword = form.elements.confirm_password.value;
+
+  if (newPassword && newPassword.length < 8) {
+    status.textContent = "Das neue Passwort muss mindestens 8 Zeichen haben.";
+    status.className = "error";
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    status.textContent = "Die neuen Passwörter stimmen nicht überein.";
+    status.className = "error";
+    return;
+  }
+
+  try {
+    currentUser = await api("/api/auth/superadmin-account", {
+      method:"PUT",
+      body:JSON.stringify({
+        username,
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+    form.reset();
+    form.classList.add("hidden");
+    status.className = "meta";
+    await loadUsers();
+    await loadTenantContext();
+    document.getElementById("status").textContent =
+      `Angemeldet: ${currentUser.member_name || currentUser.username} · ${activeClubConfig?.app_name || "Verein"} · API v${apiVersion || "?"}`;
+    alert("SuperAdmin-Konto wurde aktualisiert.");
+  } catch (error) {
+    status.className = "error";
+    status.textContent = String(error?.message || "SuperAdmin-Konto konnte nicht gespeichert werden.");
+    console.error(error);
+  }
+});
 
 function editUser(user) {
   const form = document.getElementById("users-form");
@@ -2571,8 +2662,8 @@ Object.keys(resources).forEach(resource => {
       const password = form.elements.account_password.value;
 
       if (username) {
-        if (!accountId && password.length < 6) {
-          alert("Für ein neues Benutzerkonto ist ein Passwort mit mindestens 6 Zeichen nötig.");
+        if (!accountId && password.length < 8) {
+          alert("Für ein neues Benutzerkonto ist ein Passwort mit mindestens 8 Zeichen nötig.");
           return;
         }
 
@@ -2594,7 +2685,7 @@ Object.keys(resources).forEach(resource => {
         } catch (error) {
           alert(
             "Benutzerkonto konnte nicht gespeichert werden. " +
-            "Das Passwort muss bei einem neuen Konto mindestens 6 Zeichen lang sein. " +
+            "Das Passwort muss bei einem neuen Konto mindestens 8 Zeichen lang sein. " +
             "Prüfe auch, ob der Benutzername bereits verwendet wird."
           );
           console.error(error);
@@ -3271,8 +3362,8 @@ document.getElementById("users-form").addEventListener("submit", async event => 
   const form = event.currentTarget;
   const id = form.elements.id.value;
   const data = userFormData(form);
-  if (!id && data.password.length < 6) {
-    alert("Für einen neuen Benutzer ist ein Passwort mit mindestens 6 Zeichen nötig.");
+  if (!id && data.password.length < 8) {
+    alert("Für einen neuen Benutzer ist ein Passwort mit mindestens 8 Zeichen nötig.");
     return;
   }
   try {
