@@ -503,12 +503,12 @@
             <label><input type="checkbox" data-key="polls" data-label="Umfragen" checked> Umfragen</label>
             <label><input type="checkbox" data-key="links" data-label="Links" checked> Links</label>
           </div>
-          <h3 style="margin-top:18px">Vereinsadmin</h3>
+          <h3 style="margin-top:18px">Vereinsverwaltung</h3>
           <label>Benutzername</label>
           <input name="admin_username" maxlength="120" required>
           <label>Passwort</label>
           <input name="admin_password" type="password" minlength="6" maxlength="200" required>
-          <p class="meta">Der Vereinsadmin wird direkt dem neu angelegten Verein zugeordnet.</p>
+          <p class="meta">Die Vereinsverwaltung wird direkt dem neu angelegten Verein zugeordnet und hat nur Zugriff auf diesen Verein.</p>
           <p><button class="primary" type="submit">Verein anlegen und einrichten</button></p>
           <p id="club-create-status" class="meta"></p>
         </div>
@@ -1492,14 +1492,14 @@ document.getElementById("club-create-form").addEventListener("submit", async eve
       await api("/api/app-config/logo", {method: "POST", body: upload});
     }
 
-    status.textContent = "Vereinsadmin wird erstellt …";
+    status.textContent = "Vereinsverwaltung wird erstellt …";
     await api("/api/users", {
       method: "POST",
       body: JSON.stringify({
         username: form.elements.admin_username.value.trim(),
         password: form.elements.admin_password.value,
         active: true,
-        role_key: "admin",
+        role_key: "club_manager",
         permission_overrides: {},
       }),
     });
