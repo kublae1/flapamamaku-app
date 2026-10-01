@@ -2866,15 +2866,23 @@ def _extract_token(authorization: str | None) -> str:
 
 
 def _is_super_admin(db: sqlite3.Connection, user_id: int) -> bool:
+    """Platform super-admin is valid only on the instance/root club.
+
+    A role on any secondary club must never grant cross-club access.
+    """
+    instance_club_id = _instance_club_id(db)
     return bool(
         db.execute(
             """
             SELECT 1
             FROM user_clubs
-            WHERE user_id = ? AND active = 1 AND role = 'super_admin'
+            WHERE user_id = ?
+              AND club_id = ?
+              AND active = 1
+              AND role = 'super_admin'
             LIMIT 1
             """,
-            (user_id,),
+            (user_id, instance_club_id),
         ).fetchone()
     )
 
@@ -2933,6 +2941,17 @@ def _record_security_event(
             datetime.now(timezone.utc).isoformat(),
         ),
     )
+
+
+def _require_user_club_access(
+    db: sqlite3.Connection,
+    user_id: int,
+    club_id: int,
+) -> str:
+    role = _user_club_access(db, user_id, club_id)
+    if role is None:
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Verein")
+    return role
 
 
 def _user_club_access(
@@ -3017,9 +3036,9 @@ def current_user(
             """,
             (club_id,),
         ).fetchone()
-        club_role = _user_club_access(db, int(row["id"]), club_id)
-        if club is None or club_role is None:
-            raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+        if club is None:
+            raise HTTPException(status_code=401, detail="Verein nicht verfügbar")
+        club_role = _require_user_club_access(db, int(row["id"]), club_id)
         if str(club["billing_status"] or "active") != "active" and club_role != "super_admin":
             reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
             raise HTTPException(
@@ -5103,9 +5122,11 @@ def switch_active_club(
         ).fetchone()
         if club is None:
             raise HTTPException(status_code=404, detail="Verein nicht gefunden")
-        role = _user_club_access(db, int(user["id"]), int(payload.club_id))
-        if role is None:
-            raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Verein")
+        role = _require_user_club_access(
+            db,
+            int(user["id"]),
+            int(payload.club_id),
+        )
         if str(club["billing_status"] or "active") != "active" and role != "super_admin":
             reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
             raise HTTPException(status_code=403, detail=f"Verein gesperrt: {reason}")
