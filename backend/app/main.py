@@ -296,7 +296,7 @@ CLUB_FEATURE_DEFAULTS: dict[str, tuple[str, bool]] = {
 
 def _normalize_role_key(value: str) -> str:
     role_key = str(value or "member").strip().lower()
-    if role_key not in ROLE_DEFINITIONS:
+    if role_key not in ROLE_DEFINITIONS or role_key == "admin":
         raise HTTPException(status_code=422, detail="Unbekannte Benutzerrolle")
     return role_key
 
