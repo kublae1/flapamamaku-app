@@ -1190,6 +1190,27 @@
           <div id="system-health-details" style="margin-top:14px"></div>
           <div id="system-readiness" style="margin-top:14px"></div>
         </div>
+        <div class="card" id="club-backup-card">
+          <div class="preview-heading">
+            <h2>Vereinsbackup</h2>
+            <button type="button" id="club-backup-download">Vereinsbackup herunterladen</button>
+          </div>
+          <p class="meta">
+            Enthält nur Daten und Medien des aktuell ausgewählten Vereins.
+            Benutzerpasswörter, Push-Geräte, Vereinsabrechnungen, temporäre Snapshots
+            sowie System- und Sicherheitsdaten werden nicht exportiert.
+          </p>
+          <h3>Vereinsbackup importieren</h3>
+          <p class="meta">
+            Nur für denselben Verein auf derselben Serverinstanz. Vor dem Import wird
+            automatisch eine vollständige Sicherheitskopie erstellt. Der Import führt
+            die Sicherung mit vorhandenen Vereinsdaten zusammen und löscht keine neueren Einträge.
+          </p>
+          <div class="actions" style="align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="file" id="club-restore-file" accept=".clubbackup,.json,application/json">
+            <button type="button" id="club-restore-start">Vereinsbackup importieren</button>
+          </div>
+        </div>
         <div class="card" id="system-admin-backup-card">
           <div class="preview-heading">
             <h2>Datenbank-Backups</h2>
@@ -1312,6 +1333,8 @@ async function loadTenantContext() {
 
   document.getElementById("system-admin-backup-card")
     ?.classList.toggle("hidden", !currentUser.is_super_admin);
+  document.getElementById("club-backup-card")
+    ?.classList.toggle("hidden", !currentUser.can_manage_settings);
 
   const logo = document.getElementById("tenant-context-logo");
   if (activeClubConfig.logo_url) {
@@ -1759,7 +1782,9 @@ function applyPermissions() {
   document.getElementById("system-admin-status-card")
     ?.classList.toggle("hidden", !currentUser?.can_manage_users);
   document.getElementById("system-admin-backup-card")
-    ?.classList.toggle("hidden", !currentUser?.can_manage_users);
+    ?.classList.toggle("hidden", !currentUser?.is_super_admin);
+  document.getElementById("club-backup-card")
+    ?.classList.toggle("hidden", !currentUser?.can_manage_settings);
   document.getElementById("billing-nav")
     ?.classList.toggle("hidden", !currentUser?.is_super_admin);
 
@@ -3010,6 +3035,44 @@ function formatBytes(value) {
   return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
+async function downloadClubBackup() {
+  const response = await fetch("/api/system/club-backup", {
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
+  });
+  if (!response.ok) throw new Error(await response.text());
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const name = match?.[1] || "vereinsbackup.clubbackup.json";
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function restoreClubBackup(file) {
+  const form = new FormData();
+  form.append("backup_file", file, file.name);
+  const response = await fetch("/api/system/club-restore", {
+    method: "POST",
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
+    body: form,
+  });
+  if (!response.ok) {
+    let detail = "Vereinsbackup konnte nicht importiert werden.";
+    try {
+      const payload = await response.json();
+      if (payload?.detail) detail = payload.detail;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
 async function downloadSystemBackup(name) {
   const response = await fetch(`/api/system/backups/${encodeURIComponent(name)}`, {
     headers: token ? {Authorization: `Bearer ${token}`} : {},
@@ -3458,6 +3521,53 @@ document.getElementById("app-logo-delete").addEventListener("click", async () =>
 
 document.getElementById("system-nav").addEventListener("click", loadSystem);
 document.getElementById("system-refresh").addEventListener("click", loadSystem);
+document.getElementById("club-backup-download")?.addEventListener("click", async event => {
+  if (!currentUser?.can_manage_settings) return;
+  event.currentTarget.disabled = true;
+  try {
+    await downloadClubBackup();
+  } catch (error) {
+    alert("Vereinsbackup konnte nicht heruntergeladen werden.");
+    console.error(error);
+  } finally {
+    event.currentTarget.disabled = false;
+  }
+});
+
+document.getElementById("club-restore-start")?.addEventListener("click", async event => {
+  if (!currentUser?.can_manage_settings) return;
+  const input = document.getElementById("club-restore-file");
+  const file = input.files?.[0];
+  if (!file) {
+    alert("Bitte zuerst ein Vereinsbackup auswählen.");
+    return;
+  }
+  const confirmed = confirm(
+    "Vereinsbackup jetzt importieren?\n\n" +
+    "Es werden ausschließlich Daten des aktuell ausgewählten Vereins zusammengeführt. " +
+    "Vorher wird automatisch eine vollständige Sicherheitskopie erstellt."
+  );
+  if (!confirmed) return;
+
+  event.currentTarget.disabled = true;
+  input.disabled = true;
+  try {
+    const result = await restoreClubBackup(file);
+    alert(
+      "Vereinsbackup wurde importiert.\n" +
+      "Modus: sichere Zusammenführung\n" +
+      "Sicherheitsbackup: " + (result.safety_backup?.name || "erstellt")
+    );
+    window.location.reload();
+  } catch (error) {
+    alert(error?.message || "Vereinsbackup konnte nicht importiert werden.");
+    console.error(error);
+  } finally {
+    event.currentTarget.disabled = false;
+    input.disabled = false;
+  }
+});
+
 document.getElementById("system-backup-create").addEventListener("click", async () => {
   const button = document.getElementById("system-backup-create");
   button.disabled = true;
