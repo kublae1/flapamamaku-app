@@ -3,7 +3,7 @@ name: Validate White Label Profiles
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/profile-registry-validation-v1, feature/neutral-club-template-v1, feature/test-club-profile-v1 ]
+    branches: [ main, feature/profile-registry-validation-v1, feature/neutral-club-template-v1, feature/test-club-profile-v1, feature/gallery-snapshot-retention-v1 ]
     paths:
       - "config/white-label/**"
       - ".github/workflows/validate-white-label-profiles.yml"
@@ -78,11 +78,10 @@ jobs:
 
               icon_url = str(data["app_icon_url"]).strip()
               if icon_url:
-                  icon = urlparse(icon_url)
-                  if icon.scheme != "https" or not icon.netloc:
-                      raise SystemExit(
-                          f"{path}: app_icon_url must be HTTPS when set"
-                      )
+                  raise SystemExit(
+                      f"{path}: per-club app_icon_url is disabled; "
+                      "all clubs use the shared neutral app icon"
+                  )
 
               if not isinstance(data["allow_server_change"], bool):
                   raise SystemExit(
