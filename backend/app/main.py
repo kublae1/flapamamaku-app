@@ -3056,7 +3056,7 @@ def current_user(
         item = dict(row)
         item["club_role"] = club_role
         item["current_club_id"] = club_id
-        item["is_super_admin"] = _is_super_admin(db, user_id)
+        item["is_super_admin"] = _is_super_admin(db, int(row["id"]))
     return _serialize_user(item)
 
 
