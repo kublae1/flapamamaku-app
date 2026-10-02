@@ -8,9 +8,13 @@ import 'package:flapamamaku_app/screens/login_screen.dart';
 void main() {
   testWidgets('login stays neutral and hides server administration',
       (tester) async {
-    final store = AppStore(api: ApiService(baseUrl: ''));
+    final store = AppStore(api: ApiService(baseUrl: ''), initialize: false);
     store.authReady = true;
     store.isAuthenticated = false;
+    store.appName = 'Vereins-App';
+    store.appSubtitle = 'Bitte anmelden';
+    store.appLogoUrl = '';
+    store.themeColorValue = 0xFF6B7280;
 
     await tester.pumpWidget(
       AppStoreScope(
