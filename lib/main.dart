@@ -6,6 +6,7 @@ import 'screens/password_change_screen.dart';
 import 'screens/biometric_lock_screen.dart';
 import 'screens/club_selection_screen.dart';
 import 'theme/flap_brand.dart';
+import 'widgets/offline_network_image.dart';
 
 void main() {
   runApp(const FlapamamakuApp());
@@ -74,11 +75,23 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
                                   ),
                                 ],
                               ),
-                              child: const Icon(
-                                Icons.groups_rounded,
-                                size: 92,
-                                color: Color(0xFF6B7280),
-                              ),
+                              child: store.isAuthenticated &&
+                                      store.appLogoUrl.trim().isNotEmpty
+                                  ? OfflineNetworkImage(
+                                      store.appLogoUrl,
+                                      headers: store.api.authHeaders,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => const Icon(
+                                        Icons.groups_rounded,
+                                        size: 92,
+                                        color: Color(0xFF6B7280),
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.groups_rounded,
+                                      size: 92,
+                                      color: Color(0xFF6B7280),
+                                    ),
                             ),
                             const SizedBox(height: 22),
                             const Text(
