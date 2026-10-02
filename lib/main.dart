@@ -74,17 +74,18 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
                                   ),
                                 ],
                               ),
-                              child: Image.asset(
-                                'assets/FLAPAMAMAKU App-Icon.png',
-                                fit: BoxFit.contain,
+                              child: const Icon(
+                                Icons.groups_rounded,
+                                size: 92,
+                                color: Color(0xFF6B7280),
                               ),
                             ),
                             const SizedBox(height: 22),
-                            Text(
-                              store.appName,
+                            const Text(
+                              'Vereins-App',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: store.themeColor,
+                                color: Colors.white,
                                 fontSize: 24,
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: 0.8,
