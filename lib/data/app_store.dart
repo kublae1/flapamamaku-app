@@ -918,152 +918,15 @@ class AppStore extends ChangeNotifier {
       final redirectUrl =
           result['server_redirect_url']?.toString().trim() ?? '';
       if (redirectUrl.isNotEmpty) {
-        final normalizedRedirect =
-            redirectUrl.replaceFirst(RegExp(r'/+
-      if (token.isEmpty) {
-        throw const ApiException('Kein Sitzungstoken erhalten.');
-      }
-
-      await _secureStorage.write(
-        key: 'flapamamaku_token',
-        value: token,
-      );
-      currentUser = Map<String, dynamic>.from(
-        result['user'] as Map<String, dynamic>,
-      );
-      accessibleClubs
-        ..clear()
-        ..addAll(
-          (result['clubs'] as List<dynamic>? ?? const [])
-              .whereType<Map>()
-              .map((value) => Map<String, dynamic>.from(value)),
-        );
-      isAuthenticated = true;
-      _pendingForcedPassword = mustChangePassword ? password : null;
-      clubSelectionRequired = result['requires_club_selection'] == true;
-
-      // A temporary password must be replaced before the app makes any
-      // authenticated content requests. The login response already contains
-      // the current user and club list, so we can safely show the forced
-      // password screen immediately.
-      if (mustChangePassword) {
-        clubSelectionRequired = false;
-        authError = null;
-        return true;
-      }
-
-      if (accessibleClubs.isEmpty) {
-        await _loadAccessibleClubs();
-      }
-      // Never show a club picker when the account has zero or one accessible
-      // club. This also protects against stale server flags after role changes.
-      if (accessibleClubs.length <= 1) {
-        clubSelectionRequired = false;
-      }
-      if (!clubSelectionRequired) {
-        final prefs = await SharedPreferences.getInstance();
-        await _loadRemoteBranding(prefs);
-        await refreshFromServer();
-        if (pushEnabled && showPushNotifications) {
-          await pushService.enable();
+        String trimTrailingSlash(String value) {
+          var normalized = value;
+          while (normalized.endsWith('/')) {
+            normalized = normalized.substring(0, normalized.length - 1);
+          }
+          return normalized;
         }
-      }
-      return true;
-    } catch (error) {
-      authError = error is ApiException && error.statusCode == 401
-          ? 'Benutzername oder Passwort falsch.'
-          : friendlyErrorMessage(
-              error,
-              fallback: 'Anmeldung momentan nicht möglich. Bitte nochmals versuchen.',
-            );
-      isAuthenticated = false;
-      currentUser = null;
-      _pendingForcedPassword = null;
-      accessibleClubs.clear();
-      clubSelectionRequired = false;
-      _resetToNeutralBranding();
-      return false;
-    } finally {
-      isAuthenticating = false;
-      authReady = true;
-      notifyListeners();
-    }
-  }
-
-), '');
-        final normalizedCurrent =
-            api.baseUrl.replaceFirst(RegExp(r'/+
-      if (token.isEmpty) {
-        throw const ApiException('Kein Sitzungstoken erhalten.');
-      }
-
-      await _secureStorage.write(
-        key: 'flapamamaku_token',
-        value: token,
-      );
-      currentUser = Map<String, dynamic>.from(
-        result['user'] as Map<String, dynamic>,
-      );
-      accessibleClubs
-        ..clear()
-        ..addAll(
-          (result['clubs'] as List<dynamic>? ?? const [])
-              .whereType<Map>()
-              .map((value) => Map<String, dynamic>.from(value)),
-        );
-      isAuthenticated = true;
-      _pendingForcedPassword = mustChangePassword ? password : null;
-      clubSelectionRequired = result['requires_club_selection'] == true;
-
-      // A temporary password must be replaced before the app makes any
-      // authenticated content requests. The login response already contains
-      // the current user and club list, so we can safely show the forced
-      // password screen immediately.
-      if (mustChangePassword) {
-        clubSelectionRequired = false;
-        authError = null;
-        return true;
-      }
-
-      if (accessibleClubs.isEmpty) {
-        await _loadAccessibleClubs();
-      }
-      // Never show a club picker when the account has zero or one accessible
-      // club. This also protects against stale server flags after role changes.
-      if (accessibleClubs.length <= 1) {
-        clubSelectionRequired = false;
-      }
-      if (!clubSelectionRequired) {
-        final prefs = await SharedPreferences.getInstance();
-        await _loadRemoteBranding(prefs);
-        await refreshFromServer();
-        if (pushEnabled && showPushNotifications) {
-          await pushService.enable();
-        }
-      }
-      return true;
-    } catch (error) {
-      authError = error is ApiException && error.statusCode == 401
-          ? 'Benutzername oder Passwort falsch.'
-          : friendlyErrorMessage(
-              error,
-              fallback: 'Anmeldung momentan nicht möglich. Bitte nochmals versuchen.',
-            );
-      isAuthenticated = false;
-      currentUser = null;
-      _pendingForcedPassword = null;
-      accessibleClubs.clear();
-      clubSelectionRequired = false;
-      _resetToNeutralBranding();
-      return false;
-    } finally {
-      isAuthenticating = false;
-      authReady = true;
-      notifyListeners();
-    }
-  }
-
-), '');
+        final normalizedRedirect = trimTrailingSlash(redirectUrl);
+        final normalizedCurrent = trimTrailingSlash(api.baseUrl);
         if (normalizedRedirect != normalizedCurrent) {
           api.configureBaseUrl(normalizedRedirect);
           result = await api.login(username.trim(), password);
@@ -1098,10 +961,6 @@ class AppStore extends ChangeNotifier {
       _pendingForcedPassword = mustChangePassword ? password : null;
       clubSelectionRequired = result['requires_club_selection'] == true;
 
-      // A temporary password must be replaced before the app makes any
-      // authenticated content requests. The login response already contains
-      // the current user and club list, so we can safely show the forced
-      // password screen immediately.
       if (mustChangePassword) {
         clubSelectionRequired = false;
         authError = null;
@@ -1111,8 +970,6 @@ class AppStore extends ChangeNotifier {
       if (accessibleClubs.isEmpty) {
         await _loadAccessibleClubs();
       }
-      // Never show a club picker when the account has zero or one accessible
-      // club. This also protects against stale server flags after role changes.
       if (accessibleClubs.length <= 1) {
         clubSelectionRequired = false;
       }
@@ -1145,7 +1002,6 @@ class AppStore extends ChangeNotifier {
       notifyListeners();
     }
   }
-
   Future<void> logout() async {
     await pushService.disable();
     try {
