@@ -5088,6 +5088,253 @@ async def import_club_backup(
     return result
 
 
+@app.get("/api/system/server-migration")
+def get_server_migration_status(
+    user: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, Any]:
+    with connect() as db:
+        club_id = _active_club_id(db)
+        club = db.execute(
+            "SELECT id, slug, name, server_url FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        latest = db.execute(
+            """
+            SELECT *
+            FROM club_server_migrations
+            WHERE club_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (club_id,),
+        ).fetchone()
+        pending = []
+        if bool(user.get("is_super_admin")):
+            pending = [
+                _serialize_server_migration(row)
+                for row in db.execute(
+                    """
+                    SELECT m.*, c.name AS club_name, c.slug AS club_slug
+                    FROM club_server_migrations m
+                    JOIN clubs c ON c.id = m.club_id
+                    WHERE m.status IN ('pending', 'approved')
+                    ORDER BY m.requested_at ASC
+                    """
+                ).fetchall()
+            ]
+    return {
+        "club": dict(club) if club is not None else None,
+        "latest": _serialize_server_migration(latest),
+        "pending": pending,
+        "is_super_admin": bool(user.get("is_super_admin")),
+    }
+
+
+@app.post("/api/system/server-migration/test")
+def test_server_migration_target(
+    payload: ServerMigrationRequestPayload,
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, Any]:
+    return _check_target_server(payload.target_server_url)
+
+
+@app.post("/api/system/server-migration/request")
+def request_server_migration(
+    request: Request,
+    payload: ServerMigrationRequestPayload,
+    user: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, Any]:
+    target = _normalize_server_url(payload.target_server_url)
+    health = _check_target_server(target)
+    source = PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+    if target.rstrip("/") == source.rstrip("/"):
+        raise HTTPException(status_code=422, detail="Quell- und Zielserver sind identisch")
+
+    with connect() as db:
+        club_id = _active_club_id(db)
+        existing = db.execute(
+            """
+            SELECT id FROM club_server_migrations
+            WHERE club_id = ? AND status IN ('pending', 'approved')
+            ORDER BY id DESC LIMIT 1
+            """,
+            (club_id,),
+        ).fetchone()
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Für diesen Verein ist bereits ein Serverwechsel offen",
+            )
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = db.execute(
+            """
+            INSERT INTO club_server_migrations (
+                club_id, source_server_url, target_server_url, status,
+                requested_by_user_id, requested_at, target_health_json
+            ) VALUES (?, ?, ?, 'pending', ?, ?, ?)
+            """,
+            (
+                club_id, source, target, int(user["id"]), now,
+                json.dumps(health, ensure_ascii=False),
+            ),
+        )
+        migration_id = int(cursor.lastrowid)
+        _record_security_event(
+            db, "server_migration_requested", int(user["id"]), None,
+            f"club_id={club_id}; target={target}",
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM club_server_migrations WHERE id = ?",
+            (migration_id,),
+        ).fetchone()
+    return _serialize_server_migration(row) or {}
+
+
+@app.post("/api/system/server-migration/{migration_id}/decision")
+def decide_server_migration(
+    migration_id: int,
+    payload: ServerMigrationDecisionPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(status_code=403, detail="Nur der SuperAdmin darf Serverwechsel freigeben")
+    with connect() as db:
+        row = db.execute(
+            "SELECT * FROM club_server_migrations WHERE id = ?",
+            (migration_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Serverwechsel nicht gefunden")
+        if str(row["status"]) != "pending":
+            raise HTTPException(status_code=409, detail="Serverwechsel wurde bereits bearbeitet")
+        now = datetime.now(timezone.utc).isoformat()
+        status = "approved" if payload.decision == "approve" else "rejected"
+        db.execute(
+            """
+            UPDATE club_server_migrations
+            SET status = ?, reviewed_by_user_id = ?, reviewed_at = ?, review_note = ?
+            WHERE id = ?
+            """,
+            (status, int(user["id"]), now, payload.note.strip(), migration_id),
+        )
+        _record_security_event(
+            db, f"server_migration_{status}", int(user["id"]), None,
+            f"migration_id={migration_id}; club_id={int(row['club_id'])}",
+        )
+        db.commit()
+        updated = db.execute(
+            "SELECT * FROM club_server_migrations WHERE id = ?",
+            (migration_id,),
+        ).fetchone()
+    return _serialize_server_migration(updated) or {}
+
+
+@app.get("/api/system/server-migration/{migration_id}/package")
+def download_server_migration_package(
+    migration_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> Response:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(status_code=403, detail="Nur der SuperAdmin darf Transferpakete herunterladen")
+    try:
+        payload = _create_server_migration_package(migration_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    filename = f"{payload['club_slug']}-servermigration-{migration_id}.json"
+    return Response(
+        content=data,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/system/server-migration/import")
+async def import_server_migration_package(
+    migration_file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(status_code=403, detail="Nur der SuperAdmin darf Servermigrationen importieren")
+    total = 0
+    chunks: list[bytes] = []
+    try:
+        while True:
+            chunk = await migration_file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_BACKUP_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="Migrationspaket ist zu gross")
+            chunks.append(chunk)
+    finally:
+        await migration_file.close()
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Migrationspaket ist leer")
+    try:
+        payload = json.loads(b"".join(chunks).decode("utf-8"))
+        result = await asyncio.to_thread(_import_server_migration_package, payload)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Server migration import failed")
+        raise HTTPException(status_code=500, detail="Servermigration konnte nicht importiert werden") from exc
+    with connect() as db:
+        _record_security_event(
+            db, "server_migration_imported", int(user["id"]), None,
+            f"club_slug={result.get('club_slug', '')}",
+        )
+        db.commit()
+    return result
+
+
+@app.post("/api/system/server-migration/{migration_id}/activate")
+def activate_server_migration(
+    migration_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(status_code=403, detail="Nur der SuperAdmin darf die Umschaltung aktivieren")
+    with connect() as db:
+        row = db.execute(
+            "SELECT * FROM club_server_migrations WHERE id = ?",
+            (migration_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Serverwechsel nicht gefunden")
+        if str(row["status"]) != "approved":
+            raise HTTPException(status_code=409, detail="Serverwechsel ist nicht freigegeben")
+        health = _check_target_server(str(row["target_server_url"]))
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE clubs SET server_url = ?, updated_at = ? WHERE id = ?",
+            (str(row["target_server_url"]), now, int(row["club_id"])),
+        )
+        db.execute(
+            """
+            UPDATE club_server_migrations
+            SET status = 'activated', activated_by_user_id = ?, activated_at = ?,
+                target_health_json = ?
+            WHERE id = ?
+            """,
+            (int(user["id"]), now, json.dumps(health, ensure_ascii=False), migration_id),
+        )
+        _record_security_event(
+            db, "server_migration_activated", int(user["id"]), None,
+            f"migration_id={migration_id}; club_id={int(row['club_id'])}; target={row['target_server_url']}",
+        )
+        db.commit()
+        updated = db.execute(
+            "SELECT * FROM club_server_migrations WHERE id = ?",
+            (migration_id,),
+        ).fetchone()
+    return _serialize_server_migration(updated) or {}
+
+
 @app.get("/api/auth/status")
 def auth_status() -> dict[str, bool]:
     with connect() as db:
@@ -5313,6 +5560,19 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
             initial_club_id = instance_club_id
         else:
             initial_club_id = club_ids[0]
+
+        if payload.client == "app":
+            route = db.execute(
+                "SELECT server_url FROM clubs WHERE id = ?",
+                (initial_club_id,),
+            ).fetchone()
+            redirect_url = str(route["server_url"] or "").strip().rstrip("/") if route else ""
+            if redirect_url:
+                _clear_login_failures(rate_key)
+                return {
+                    "server_redirect_url": redirect_url,
+                    "requires_relogin": True,
+                }
 
         requires_club_selection = (
             not _is_super_admin(db, user_id) and len(clubs) > 1
