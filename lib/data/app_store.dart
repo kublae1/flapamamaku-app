@@ -98,6 +98,38 @@ class AppStore extends ChangeNotifier {
   bool showLinks = true;
   String labelLinks = 'Links';
 
+  void _resetToNeutralBranding() {
+    themeColorValue = 0xFF6B7280;
+    appName = 'Vereins-App';
+    appSubtitle = 'Bitte anmelden';
+    appLogoUrl = '';
+    clubDescription = '';
+    websiteUrl = '';
+    contactEmail = '';
+    contactPhone = '';
+    clubAddress = '';
+
+    showNews = true;
+    showEvents = true;
+    showMembers = true;
+    showGallery = true;
+    showPushNotifications = true;
+    showCalendar = true;
+    showParticipantLists = true;
+    showSujet = true;
+    labelSujet = 'Sujet nächstes Jahr';
+    showArchive = true;
+    labelArchive = 'Vergangene Sujet';
+    showPhotos = true;
+    labelPhotos = 'Fotoalben';
+    showDocuments = true;
+    labelDocuments = 'Dokumente';
+    showPolls = true;
+    labelPolls = 'Umfragen';
+    showLinks = true;
+    labelLinks = 'Links';
+  }
+
   Color get themeColor => Color(themeColorValue);
 
   String get _offlineCacheKey =>
@@ -916,9 +948,12 @@ class AppStore extends ChangeNotifier {
     await _secureStorage.delete(key: 'flapamamaku_token');
     currentUser = null;
     _pendingForcedPassword = null;
+    accessibleClubs.clear();
+    clubSelectionRequired = false;
     isAuthenticated = false;
     biometricUnlockPending = false;
     authError = null;
+    _resetToNeutralBranding();
     news
       ..clear()
       ..addAll(newsItems);
