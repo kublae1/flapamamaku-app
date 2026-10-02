@@ -629,7 +629,38 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final headers = AppStoreScope.of(context).api.authHeaders;
+    final store = AppStoreScope.of(context);
+    final headers = store.api.authHeaders;
+    final clubLogoUrl = store.appLogoUrl.trim();
+
+    Widget memberPhotoFallback() {
+      if (clubLogoUrl.isNotEmpty) {
+        return Container(
+          color: FlapBrand.burgundy,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.all(28),
+          child: OfflineNetworkImage(
+            clubLogoUrl,
+            headers: headers,
+            width: double.infinity,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => _ImageError(),
+          ),
+        );
+      }
+      return Container(
+        color: FlapBrand.burgundy,
+        alignment: Alignment.center,
+        child: Text(
+          member.name.isEmpty ? '?' : member.name.characters.first,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 76,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
+    }
 
     Widget phoneTile(String label, String number, IconData icon) {
       return _DarkInfoTile(
@@ -690,22 +721,9 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                             headers: headers,
                             width: double.infinity,
                             fit: BoxFit.contain,
-                            errorBuilder: (_, __, ___) => const _ImageError(),
+                            errorBuilder: (_, __, ___) => memberPhotoFallback(),
                           )
-                        : Container(
-                            color: FlapBrand.burgundy,
-                            alignment: Alignment.center,
-                            child: Text(
-                              member.name.isEmpty
-                                  ? '?'
-                                  : member.name.characters.first,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 76,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                          ),
+                        : memberPhotoFallback(),
                   ),
                 ),
               ),
