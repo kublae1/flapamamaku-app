@@ -1394,6 +1394,44 @@
           <div id="system-health-details" style="margin-top:14px"></div>
           <div id="system-readiness" style="margin-top:14px"></div>
         </div>
+        <div class="card" id="server-migration-card">
+          <div class="preview-heading">
+            <h2>Server / Mandantenmigration</h2>
+            <button type="button" id="server-migration-refresh">Aktualisieren</button>
+          </div>
+          <p class="meta">
+            Der Vereinsserver wird zentral verwaltet. Mitglieder können ihn in der App nicht ändern.
+            Ein Vereinsadmin kann einen Wechsel beantragen; die Freigabe und endgültige Umschaltung
+            erfolgen ausschliesslich durch den Plattform-SuperAdmin.
+          </p>
+          <div id="server-migration-current" class="meta"></div>
+          <label>Zielserver</label>
+          <input id="server-migration-target" type="url" placeholder="https://verein.example.ch">
+          <div class="actions" style="gap:10px;flex-wrap:wrap">
+            <button type="button" id="server-migration-test">Verbindung testen</button>
+            <button type="button" id="server-migration-request" class="primary">Serverwechsel beantragen</button>
+          </div>
+          <p id="server-migration-status" class="meta"></p>
+
+          <div id="server-migration-superadmin" class="hidden" style="margin-top:18px">
+            <hr style="border:0;border-top:1px solid rgba(255,255,255,.12)">
+            <h3>SuperAdmin-Freigaben</h3>
+            <p class="meta">
+              Ablauf: Antrag freigeben → Transferpaket herunterladen → auf dem Zielserver importieren →
+              Zielserver prüfen → Umschaltung aktivieren. Erst die letzte Aktion leitet App-Logins auf den neuen Server.
+            </p>
+            <div id="server-migration-pending"></div>
+            <h3 style="margin-top:18px">Transferpaket auf diesem Server importieren</h3>
+            <p class="meta">
+              Das Paket enthält die Daten und Medien genau eines Vereins sowie dessen App-Benutzerkonten
+              inklusive Passwort-Hashes. Nur über eine sichere HTTPS-Verbindung und nur durch SuperAdmins verwenden.
+            </p>
+            <div class="actions" style="gap:10px;flex-wrap:wrap;align-items:center">
+              <input type="file" id="server-migration-import-file" accept=".json,application/json">
+              <button type="button" id="server-migration-import">Transferpaket importieren</button>
+            </div>
+          </div>
+        </div>
         <div class="card" id="club-backup-card">
           <div class="preview-heading">
             <h2>Vereinsbackup</h2>
@@ -1643,6 +1681,13 @@ async function loadTenantContext() {
     ?.classList.toggle("hidden", !currentUser.is_super_admin);
   document.getElementById("club-backup-card")
     ?.classList.toggle("hidden", !currentUser.can_manage_settings);
+  document.getElementById("server-migration-card")
+    ?.classList.toggle("hidden", !currentUser.can_manage_settings);
+  document.getElementById("server-migration-superadmin")
+    ?.classList.toggle("hidden", !currentUser.is_super_admin);
+  if (currentUser.can_manage_settings) {
+    loadServerMigrationStatus();
+  }
 
   const logo = document.getElementById("tenant-context-logo");
   if (activeClubConfig.logo_url) {
@@ -1703,6 +1748,190 @@ async function loadTenantContext() {
       !featureVisibility.push || !currentUser.can_manage_users,
     );
 }
+
+function migrationStatusLabel(status) {
+  return {
+    pending: "Wartet auf SuperAdmin-Freigabe",
+    approved: "Freigegeben – Transfer/Import vorbereiten",
+    rejected: "Abgelehnt",
+    activated: "Aktiv – App-Logins werden auf den Zielserver geleitet",
+  }[status] || "Kein offener Serverwechsel";
+}
+
+async function downloadAuthenticatedFile(path, filename) {
+  const headers = token ? {Authorization: `Bearer ${token}`} : {};
+  const response = await fetch(path, {headers});
+  if (!response.ok) throw new Error(await response.text());
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function loadServerMigrationStatus() {
+  const status = document.getElementById("server-migration-status");
+  const current = document.getElementById("server-migration-current");
+  const pending = document.getElementById("server-migration-pending");
+  if (!status || !current) return;
+  try {
+    const data = await api("/api/system/server-migration");
+    const club = data.club || {};
+    current.textContent = club.server_url
+      ? "Aktives Routing: " + club.server_url
+      : "Aktives Routing: dieser Server";
+    const latest = data.latest;
+    if (latest) {
+      document.getElementById("server-migration-target").value =
+        latest.target_server_url || "";
+      status.textContent =
+        "Letzter Antrag: " + migrationStatusLabel(latest.status) +
+        " · Ziel: " + (latest.target_server_url || "–");
+    } else {
+      status.textContent = "Kein Serverwechsel beantragt.";
+    }
+
+    if (pending && currentUser?.is_super_admin) {
+      pending.innerHTML = "";
+      if (!(data.pending || []).length) {
+        pending.innerHTML = '<p class="meta">Keine offenen Freigaben.</p>';
+      }
+      (data.pending || []).forEach(item => {
+        const row = document.createElement("div");
+        row.className = "entry";
+        row.innerHTML = `
+          <h3>${item.club_name || item.club_slug || "Verein"}</h3>
+          <div class="meta">
+            Status: <strong>${migrationStatusLabel(item.status)}</strong><br>
+            Von: ${item.source_server_url || "dieser Server"}<br>
+            Nach: ${item.target_server_url}
+          </div>
+          <div class="actions" style="gap:8px;flex-wrap:wrap">
+            ${item.status === "pending" ? `
+              <button type="button" data-migration-approve="${item.id}" class="primary">Freigeben</button>
+              <button type="button" data-migration-reject="${item.id}">Ablehnen</button>
+            ` : ""}
+            ${item.status === "approved" ? `
+              <button type="button" data-migration-package="${item.id}" data-migration-slug="${item.club_slug || "verein"}">Transferpaket herunterladen</button>
+              <button type="button" data-migration-activate="${item.id}" class="primary">Umschaltung aktivieren</button>
+            ` : ""}
+          </div>
+        `;
+        pending.appendChild(row);
+      });
+      pending.querySelectorAll("[data-migration-approve]").forEach(button => {
+        button.onclick = async () => {
+          await api(`/api/system/server-migration/${button.dataset.migrationApprove}/decision`, {
+            method:"POST", body:JSON.stringify({decision:"approve", note:""}),
+          });
+          await loadServerMigrationStatus();
+        };
+      });
+      pending.querySelectorAll("[data-migration-reject]").forEach(button => {
+        button.onclick = async () => {
+          const note = prompt("Grund für die Ablehnung (optional):") || "";
+          await api(`/api/system/server-migration/${button.dataset.migrationReject}/decision`, {
+            method:"POST", body:JSON.stringify({decision:"reject", note}),
+          });
+          await loadServerMigrationStatus();
+        };
+      });
+      pending.querySelectorAll("[data-migration-package]").forEach(button => {
+        button.onclick = async () => {
+          await downloadAuthenticatedFile(
+            `/api/system/server-migration/${button.dataset.migrationPackage}/package`,
+            `${button.dataset.migrationSlug}-servermigration.json`,
+          );
+        };
+      });
+      pending.querySelectorAll("[data-migration-activate]").forEach(button => {
+        button.onclick = async () => {
+          if (!confirm(
+            "Umschaltung jetzt aktivieren?\n\n" +
+            "Nur fortfahren, wenn das Transferpaket auf dem Zielserver importiert und dort geprüft wurde."
+          )) return;
+          await api(`/api/system/server-migration/${button.dataset.migrationActivate}/activate`, {
+            method:"POST",
+          });
+          await loadServerMigrationStatus();
+        };
+      });
+    }
+  } catch (error) {
+    status.textContent = "Servermigration konnte nicht geladen werden.";
+    console.error(error);
+  }
+}
+
+document.getElementById("server-migration-refresh")?.addEventListener("click", loadServerMigrationStatus);
+
+document.getElementById("server-migration-test")?.addEventListener("click", async () => {
+  const target = document.getElementById("server-migration-target").value.trim();
+  const status = document.getElementById("server-migration-status");
+  if (!target) return;
+  status.textContent = "Zielserver wird geprüft …";
+  try {
+    const result = await api("/api/system/server-migration/test", {
+      method:"POST", body:JSON.stringify({target_server_url:target}),
+    });
+    status.textContent =
+      `Verbindung OK · API v${result.version || "?"} · Instanz ${result.instance_id || "?"} · Schema ${result.schema_version || "?"}`;
+  } catch (error) {
+    status.textContent = "Zielserver nicht erreichbar oder ungültig.";
+    console.error(error);
+  }
+});
+
+document.getElementById("server-migration-request")?.addEventListener("click", async () => {
+  const target = document.getElementById("server-migration-target").value.trim();
+  const status = document.getElementById("server-migration-status");
+  if (!target) return;
+  if (!confirm("Serverwechsel zu " + target + " beantragen?")) return;
+  status.textContent = "Antrag wird erstellt …";
+  try {
+    await api("/api/system/server-migration/request", {
+      method:"POST", body:JSON.stringify({target_server_url:target}),
+    });
+    await loadServerMigrationStatus();
+  } catch (error) {
+    status.textContent = "Antrag konnte nicht erstellt werden.";
+    console.error(error);
+  }
+});
+
+document.getElementById("server-migration-import")?.addEventListener("click", async () => {
+  if (!currentUser?.is_super_admin) return;
+  const input = document.getElementById("server-migration-import-file");
+  const file = input?.files?.[0];
+  if (!file) {
+    alert("Bitte zuerst ein Transferpaket auswählen.");
+    return;
+  }
+  if (!confirm(
+    "Transferpaket jetzt importieren?\n\n" +
+    "Vor dem Import wird automatisch ein vollständiges Sicherheitsbackup erstellt."
+  )) return;
+  const form = new FormData();
+  form.append("migration_file", file);
+  try {
+    const result = await api("/api/system/server-migration/import", {
+      method:"POST", body:form,
+    });
+    alert(
+      "Migration importiert.\nVerein: " + (result.club_slug || "") +
+      "\nMitglieder: " + (result.members || 0) +
+      "\nBenutzer: " + (result.users || 0)
+    );
+    input.value = "";
+  } catch (error) {
+    alert("Transferpaket konnte nicht importiert werden.");
+    console.error(error);
+  }
+});
 
 document.querySelectorAll("#member-role-presets [data-member-role]").forEach(button => {
   button.addEventListener("click", () => {
