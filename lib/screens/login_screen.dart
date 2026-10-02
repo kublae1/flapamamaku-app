@@ -15,6 +15,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   bool _obscure = true;
+  bool _showServerOptions = false;
 
   @override
   void dispose() {
@@ -232,24 +233,53 @@ class _LoginScreenState extends State<LoginScreen> {
                         if (store.canChangeServer) ...[
                           const SizedBox(height: 14),
                           TextButton.icon(
-                            onPressed: _changeServer,
-                            icon: const Icon(Icons.dns_outlined),
-                            label: Text(
-                              store.serverConfigured
-                                  ? 'Vereinsserver wechseln'
-                                  : 'Vereinsserver einrichten',
+                            onPressed: () => setState(
+                              () => _showServerOptions = !_showServerOptions,
                             ),
+                            icon: Icon(
+                              _showServerOptions
+                                  ? Icons.expand_less_rounded
+                                  : Icons.dns_outlined,
+                            ),
+                            label: const Text('Vereinsserver'),
                           ),
-                          if (store.serverConfigured) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              store.serverUrl,
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white38,
-                                fontSize: 11,
+                          if (_showServerOptions) ...[
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF111315),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: const Color(0x22FFFFFF),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  if (store.serverConfigured)
+                                    Text(
+                                      store.serverUrl,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  if (store.serverConfigured)
+                                    const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    onPressed: _changeServer,
+                                    icon: const Icon(Icons.swap_horiz_rounded),
+                                    label: Text(
+                                      store.serverConfigured
+                                          ? 'Vereinsserver wechseln'
+                                          : 'Vereinsserver einrichten',
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
