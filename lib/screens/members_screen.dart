@@ -227,6 +227,7 @@ class _MembersScreenState extends State<MembersScreen> {
                       child: _MemberCard(
                         member: member,
                         headers: store.api.authHeaders,
+                        clubLogoUrl: store.appLogoUrl,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => MemberDetailScreen(member: member),
@@ -282,13 +283,27 @@ class _MembersScreenState extends State<MembersScreen> {
 class _MemberCard extends StatelessWidget {
   final MemberItem member;
   final Map<String, String> headers;
+  final String clubLogoUrl;
   final VoidCallback onTap;
 
   const _MemberCard({
     required this.member,
     required this.headers,
+    required this.clubLogoUrl,
     required this.onTap,
   });
+
+  Widget _fallbackImage() {
+    if (clubLogoUrl.trim().isNotEmpty) {
+      return OfflineNetworkImage(
+        clubLogoUrl,
+        headers: headers,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _Initial(member.name),
+      );
+    }
+    return _Initial(member.name);
+  }
 
   String get _subtitle {
     final values = [
@@ -326,9 +341,9 @@ class _MemberCard extends StatelessWidget {
                           member.photoUrl,
                           headers: headers,
                           fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => _Initial(member.name),
+                          errorBuilder: (_, __, ___) => _fallbackImage(),
                         )
-                      : _Initial(member.name),
+                      : _fallbackImage(),
                 ),
               ),
               const SizedBox(width: 14),
