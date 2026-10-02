@@ -1088,7 +1088,7 @@
             <option value="hero">Startseite / Hauptbild</option>
             <option value="sujet">Sujet nächstes Jahr</option>
             <option value="archive">Vergangene Sujet</option>
-            <option value="gallery">Galerie · Einzelbilder (FLAPAMAMAKU)</option>
+            <option value="gallery">Galerie · Einzelbilder</option>
             <option value="documents">Dokumente</option>
             <option value="photos">Fotoalben · Alben</option>
             <option value="polls">Umfragen</option>
@@ -1121,7 +1121,7 @@
           </div>
           <div id="content-images-wrap">
             <label>Bilder (optional)</label>
-            <p class="meta">FLAPAMAMAKU kann dauerhafte Galerie-Einzelbilder verwalten. Bei weiteren Vereinen ist die Galerie ausschließlich für automatisch gelöschte Snapshots (1, 3 oder 7 Tage); dauerhafte Bilder gehören in Fotoalben.</p>
+            <p class="meta" id="content-media-policy-hint"></p>
             <input name="image_files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
           </div>
           <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
@@ -1628,6 +1628,7 @@ async function loadTenantContext() {
   if (snapshotOnlyGallery && contentSectionSelect?.value === "gallery") {
     contentSectionSelect.value = "photos";
   }
+  updateContentImageRecommendation();
   document.getElementById("tenant-context-name").textContent = name;
   document.getElementById("tenant-context-role").textContent =
     currentUser.is_super_admin
@@ -3058,11 +3059,41 @@ const contentImageRecommendations = {
   whatsapp: "<strong>WhatsApp-Gruppenlink:</strong> Einladungslink in das Feld Link eintragen. Kein Bild nötig.",
 };
 
+function updateContentMediaPolicyHint() {
+  const form = document.getElementById("content-form");
+  const hint = document.getElementById("content-media-policy-hint");
+  if (!form || !hint) return;
+
+  const section = form.elements.section.value;
+  const clubId = Number(activeClubConfig?.club_id || 0);
+  const isRootClub = clubId === 1;
+
+  const messages = {
+    hero: "Dieses Bild wird als Hauptbild auf der Startseite der App verwendet.",
+    sujet: "Dieses Bild wird für das Sujet des nächsten Jahres verwendet.",
+    archive: "Bilder in diesem Bereich werden dauerhaft bei den vergangenen Sujets gespeichert.",
+    photos: "Bilder im Fotoalbum werden dauerhaft gespeichert.",
+    links: "Optionales Bild oder Logo für diesen Link.",
+    whatsapp: "Für den WhatsApp-Gruppenlink ist normalerweise kein Bild nötig.",
+    polls: "Für Umfragen ist normalerweise kein Bild nötig.",
+  };
+
+  if (section === "gallery") {
+    hint.textContent = isRootClub
+      ? "Dauerhafte Galerie-Einzelbilder sind in diesem Verein erlaubt."
+      : "Die Galerie ist für diesen Verein nur für automatisch gelöschte Snapshots (1, 3 oder 7 Tage) vorgesehen. Dauerhafte Bilder gehören ins Fotoalbum.";
+    return;
+  }
+
+  hint.textContent = messages[section] || "";
+}
+
 function updateContentImageRecommendation() {
   const form = document.getElementById("content-form");
   const section = form.elements.section.value;
   const hint = document.getElementById("content-image-size-hint");
   hint.innerHTML = contentImageRecommendations[section] || "";
+  updateContentMediaPolicyHint();
 }
 
 function updateContentFormMode() {
