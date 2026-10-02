@@ -1,0 +1,239 @@
+name: Build iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "White-label build profile"
+        required: false
+        default: "flapamamaku"
+      upload_testflight:
+        description: "Upload the signed IPA to TestFlight"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      BUILD_PROFILE: ${{ inputs.profile || 'flapamamaku' }}
+      IOS_BUNDLE_ID: ${{ vars.FLAPAMAMAKU_IOS_BUNDLE_ID || 'ch.flapamamaku.app' }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+      FIREBASE_API_KEY_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_API_KEY || secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+      FIREBASE_APP_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_IOS_APP_ID || secrets.FLAPAMAMAKU_FIREBASE_IOS_APP_ID }}
+      FIREBASE_MESSAGING_SENDER_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_MESSAGING_SENDER_ID || secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_PROJECT_ID_VALUE: ${{ secrets.WHITE_LABEL_FIREBASE_PROJECT_ID || secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        shell: bash
+        run: |
+          missing=0
+          for name in APPLE_TEAM_ID IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_DISTRIBUTION_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: $name"
+              missing=1
+            fi
+          done
+          if [ "${{ inputs.upload_testflight }}" = "true" ]; then
+            for name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_PRIVATE_KEY; do
+              if [ -z "${!name}" ]; then
+                echo "::error::Missing required TestFlight secret: $name"
+                missing=1
+              fi
+            done
+          fi
+          exit "$missing"
+
+      - name: Load white label profile
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          profile = os.environ["BUILD_PROFILE"].strip()
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", profile):
+              raise SystemExit("Invalid white-label profile name")
+
+          path = Path("config/white-label") / f"{profile}.json"
+          if not path.exists():
+              raise SystemExit(f"White-label profile not found: {path}")
+
+          data = json.loads(path.read_text())
+          values = {
+              "CLUB_INSTANCE_ID": str(data["instance_id"]).strip().lower(),
+              "APP_DISPLAY_NAME": str(data["app_name"]).strip(),
+              "APP_DISPLAY_SUBTITLE": str(data["app_subtitle"]).strip(),
+              "API_BASE_URL": str(data["api_base_url"]).rstrip("/"),
+              "ALLOW_SERVER_CHANGE": "true" if data["allow_server_change"] else "false",
+          }
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a") as handle:
+              for key, value in values.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit(f"{key} must be a single line")
+                  handle.write(f"{key}={value}\n")
+          PY
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate iOS platform files
+        shell: bash
+        run: |
+          mkdir -p build/ios/SourcePackages
+          if [ ! -d ios ]; then
+            flutter create --platforms=ios --project-name flapamamaku_app .
+          fi
+
+      - name: Generate iOS app icon
+        shell: bash
+        run: |
+          cat > /tmp/flutter_launcher_icons_ios.yaml <<'EOF'
+          flutter_launcher_icons:
+            android: false
+            ios: true
+            image_path: "assets/FLAPAMAMAKU App-Icon.png"
+            remove_alpha_ios: true
+          EOF
+          dart run flutter_launcher_icons -f /tmp/flutter_launcher_icons_ios.yaml
+
+      - name: Configure iOS application
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import plistlib
+          import re
+          from pathlib import Path
+
+          bundle_id = os.environ["IOS_BUNDLE_ID"].strip()
+          app_name = os.environ["APP_DISPLAY_NAME"].strip()
+
+          project = Path("ios/Runner.xcodeproj/project.pbxproj")
+          text = project.read_text()
+          text, count = re.subn(
+              r"PRODUCT_BUNDLE_IDENTIFIER = [^;]+;",
+              f"PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};",
+              text,
+          )
+          if count == 0:
+              raise SystemExit("Could not configure iOS bundle identifier")
+          text = text.replace(
+              "DEVELOPMENT_TEAM = \"\";",
+              f"DEVELOPMENT_TEAM = {os.environ['APPLE_TEAM_ID']};",
+          )
+          project.write_text(text)
+
+          plist_path = Path("ios/Runner/Info.plist")
+          with plist_path.open("rb") as handle:
+              plist = plistlib.load(handle)
+          plist["CFBundleDisplayName"] = app_name
+          plist["NSFaceIDUsageDescription"] = f"{app_name} verwendet Face ID zum sicheren Entsperren der App."
+          plist["NSCameraUsageDescription"] = f"{app_name} benötigt die Kamera zum Aufnehmen von Vereinsfotos."
+          plist["NSPhotoLibraryUsageDescription"] = f"{app_name} benötigt Zugriff auf Fotos für Vereinsinhalte."
+          plist["NSPhotoLibraryAddUsageDescription"] = f"{app_name} darf Bilder in deiner Fotomediathek speichern."
+          with plist_path.open("wb") as handle:
+              plistlib.dump(plist, handle)
+          PY
+
+      - name: Install Apple signing certificate
+        shell: bash
+        run: |
+          CERT_PATH="$RUNNER_TEMP/distribution.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          echo "$IOS_DISTRIBUTION_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "temporary" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "temporary" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "temporary" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Install provisioning profile
+        shell: bash
+        run: |
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+          UUID=$(security cms -D -i "$PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin)
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          echo "PROVISIONING_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
+
+      - name: Create export options
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$IOS_BUNDLE_ID</key>
+              <string>$PROVISIONING_PROFILE_UUID</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Flutter analyze
+        run: flutter analyze
+
+      - name: Flutter tests
+        run: flutter test
+
+      - name: Build signed IPA
+        shell: bash
+        run: |
+          flutter build ipa --release             --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"             --dart-define=API_BASE_URL="$API_BASE_URL"             --dart-define=APP_NAME="$APP_DISPLAY_NAME"             --dart-define=APP_SUBTITLE="$APP_DISPLAY_SUBTITLE"             --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID"             --dart-define=ALLOW_SERVER_CHANGE="$ALLOW_SERVER_CHANGE"             --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY_VALUE"             --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID_VALUE"             --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID_VALUE"             --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID_VALUE"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-testflight-ipa
+          path: build/ios/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare App Store Connect API key
+        if: ${{ inputs.upload_testflight }}
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$HOME/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8"
+          chmod 600 "$HOME/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8"
+
+      - name: Upload to TestFlight
+        if: ${{ inputs.upload_testflight }}
+        shell: bash
+        run: |
+          IPA=$(find build/ios/ipa -name '*.ipa' -print -quit)
+          xcrun altool --upload-app             --type ios             --file "$IPA"             --apiKey "$APP_STORE_CONNECT_KEY_ID"             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
