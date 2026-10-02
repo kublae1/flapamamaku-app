@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -1170,6 +1171,358 @@ def _club_backup_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         key: _club_backup_json_value(row[key])
         for key in row.keys()
+    }
+
+
+MIGRATION_USER_FIELDS: tuple[str, ...] = (
+    "id", "member_id", "username", "password_hash", "password_salt", "active",
+    *PERMISSION_FIELDS,
+    "role_key", "permission_overrides",
+    "must_change_password", "password_policy_version", "created_at",
+)
+
+
+def _normalize_server_url(value: str) -> str:
+    candidate = str(value or "").strip().rstrip("/")
+    if not candidate:
+        raise HTTPException(status_code=422, detail="Serveradresse fehlt")
+    try:
+        parsed = urllib.parse.urlparse(candidate)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Serveradresse ist ungültig") from exc
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+        raise HTTPException(status_code=422, detail="Serveradresse ist ungültig")
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" and host not in {"localhost", "127.0.0.1", "::1"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Für einen externen Vereinsserver ist HTTPS erforderlich",
+        )
+    return candidate
+
+
+def _check_target_server(target_server_url: str) -> dict[str, Any]:
+    target = _normalize_server_url(target_server_url)
+    request = urllib.request.Request(
+        f"{target}/api/health",
+        headers={"Accept": "application/json", "User-Agent": "Vereins-App-Migration/1"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            if response.status != 200:
+                raise RuntimeError(f"HTTP {response.status}")
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Zielserver ist nicht als Vereins-App-Server erreichbar",
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        raise HTTPException(status_code=400, detail="Zielserver meldet keinen gültigen Status")
+    return {
+        "url": target,
+        "status": str(payload.get("status") or ""),
+        "instance_id": str(payload.get("instance_id") or ""),
+        "version": str(payload.get("version") or ""),
+        "schema_version": int(payload.get("schema_version") or 0),
+        "production_ready": bool(payload.get("production_ready")),
+    }
+
+
+def _serialize_server_migration(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    item = dict(row)
+    try:
+        item["target_health"] = json.loads(str(item.pop("target_health_json", "{}") or "{}"))
+    except Exception:
+        item["target_health"] = {}
+    return item
+
+
+def _create_server_migration_package(migration_id: int) -> dict[str, Any]:
+    with connect() as db:
+        migration = db.execute(
+            """
+            SELECT m.*, c.slug AS club_slug, c.name AS club_name
+            FROM club_server_migrations m
+            JOIN clubs c ON c.id = m.club_id
+            WHERE m.id = ?
+            """,
+            (migration_id,),
+        ).fetchone()
+        if migration is None:
+            raise RuntimeError("Serverwechsel nicht gefunden")
+        if str(migration["status"]) not in {"approved", "activated"}:
+            raise RuntimeError("Serverwechsel ist noch nicht durch den SuperAdmin freigegeben")
+        club_id = int(migration["club_id"])
+        backup = _create_club_backup_payload(club_id)
+
+        user_columns = _columns(db, "users")
+        fields = [field for field in MIGRATION_USER_FIELDS if field in user_columns]
+        rows = db.execute(
+            f"""
+            SELECT {", ".join("u." + field for field in fields)}
+            FROM users u
+            JOIN user_clubs uc ON uc.user_id = u.id
+            WHERE uc.club_id = ?
+              AND uc.active = 1
+              AND uc.role != 'super_admin'
+            ORDER BY u.id
+            """,
+            (club_id,),
+        ).fetchall()
+        users = [_club_backup_row(row) for row in rows]
+        memberships = [
+            _club_backup_row(row)
+            for row in db.execute(
+                """
+                SELECT user_id, role, active, created_at, updated_at
+                FROM user_clubs
+                WHERE club_id = ? AND active = 1 AND role != 'super_admin'
+                ORDER BY user_id
+                """,
+                (club_id,),
+            ).fetchall()
+        ]
+
+    return {
+        "format": "flapamamaku-server-migration",
+        "format_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_instance_id": INSTANCE_ID,
+        "source_server_url": str(migration["source_server_url"] or ""),
+        "target_server_url": str(migration["target_server_url"] or ""),
+        "migration_id": int(migration["id"]),
+        "club_slug": str(migration["club_slug"] or ""),
+        "club_name": str(migration["club_name"] or ""),
+        "club_backup": backup,
+        "users": users,
+        "memberships": memberships,
+        "sensitive": True,
+        "notice": (
+            "Dieses Transferpaket enthält Passwort-Hashes und darf nur zwischen "
+            "berechtigten SuperAdmins über eine sichere Verbindung übertragen werden."
+        ),
+    }
+
+
+def _insert_migration_row(
+    db: sqlite3.Connection,
+    table: str,
+    raw: dict[str, Any],
+    *,
+    club_id: int,
+    overrides: dict[str, Any] | None = None,
+    omit: set[str] | None = None,
+) -> int:
+    current = _columns(db, table)
+    omit = set(omit or set()) | {"id", "club_id"}
+    row = {
+        key: _club_backup_decode_value(value)
+        for key, value in raw.items()
+        if key in current and key not in omit
+    }
+    row["club_id"] = club_id
+    if overrides:
+        row.update(overrides)
+    columns = list(row)
+    placeholders = ", ".join("?" for _ in columns)
+    cursor = db.execute(
+        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
+        [row[column] for column in columns],
+    )
+    return int(cursor.lastrowid)
+
+
+def _import_server_migration_package(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict) or payload.get("format") != "flapamamaku-server-migration":
+        raise RuntimeError("Datei ist kein gültiges Server-Migrationspaket")
+    if int(payload.get("format_version") or 0) != 1:
+        raise RuntimeError("Migrationspaket-Version wird nicht unterstützt")
+    backup = payload.get("club_backup")
+    users = payload.get("users")
+    memberships = payload.get("memberships")
+    if not isinstance(backup, dict) or not isinstance(users, list) or not isinstance(memberships, list):
+        raise RuntimeError("Migrationspaket ist unvollständig")
+    slug = str(payload.get("club_slug") or backup.get("club_slug") or "").strip().lower()
+    if not slug:
+        raise RuntimeError("Migrationspaket enthält keine Vereinskennung")
+
+    safety_backup = _create_database_backup("before-server-migration-import")
+    now = datetime.now(timezone.utc).isoformat()
+
+    with connect() as db:
+        existing = db.execute("SELECT id FROM clubs WHERE slug = ? COLLATE NOCASE", (slug,)).fetchone()
+        if existing is None:
+            club_values = backup.get("club") or {}
+            cursor = db.execute(
+                """
+                INSERT INTO clubs (
+                    slug, name, short_name, active, primary_color, secondary_color,
+                    description, website, email, phone, address, city, country,
+                    app_title, welcome_text, created_at, updated_at
+                ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    slug,
+                    str(club_values.get("name") or payload.get("club_name") or slug),
+                    str(club_values.get("short_name") or ""),
+                    str(club_values.get("primary_color") or "#8A101B"),
+                    str(club_values.get("secondary_color") or "#FFFFFF"),
+                    str(club_values.get("description") or ""),
+                    str(club_values.get("website") or ""),
+                    str(club_values.get("email") or ""),
+                    str(club_values.get("phone") or ""),
+                    str(club_values.get("address") or ""),
+                    str(club_values.get("city") or ""),
+                    str(club_values.get("country") or ""),
+                    str(club_values.get("app_title") or ""),
+                    str(club_values.get("welcome_text") or ""),
+                    now, now,
+                ),
+            )
+            club_id = int(cursor.lastrowid)
+        else:
+            club_id = int(existing["id"])
+            occupied = 0
+            for table in ("members", "news", "events", "content_items"):
+                occupied += int(db.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE club_id = ?", (club_id,)
+                ).fetchone()[0])
+            if occupied:
+                raise RuntimeError(
+                    "Zielverein enthält bereits Daten. Import nur in einen leeren Zielverein erlaubt."
+                )
+
+        club_values = backup.get("club") or {}
+        allowed_club_fields = [
+            field for field in CLUB_BACKUP_CLUB_FIELDS
+            if field in _columns(db, "clubs") and field in club_values
+        ]
+        if allowed_club_fields:
+            db.execute(
+                f"UPDATE clubs SET {', '.join(field + ' = ?' for field in allowed_club_fields)}, "
+                "server_url = '', updated_at = ? WHERE id = ?",
+                [
+                    *[_club_backup_decode_value(club_values[field]) for field in allowed_club_fields],
+                    now, club_id,
+                ],
+            )
+
+        for feature in backup.get("features") or []:
+            if not isinstance(feature, dict):
+                continue
+            key = str(feature.get("feature_key") or "")
+            if key in CLUB_FEATURE_DEFAULTS:
+                _set_club_features(
+                    db, club_id,
+                    {key: bool(feature.get("enabled", True))},
+                    {key: str(feature.get("label") or "")},
+                )
+
+        tables = backup.get("tables") or {}
+        maps: dict[str, dict[int, int]] = {
+            "members": {}, "member_filters": {}, "news": {},
+            "events": {}, "content_items": {}, "users": {},
+        }
+        for table in ("members", "member_filters", "news", "events", "content_items"):
+            for raw in tables.get(table, []):
+                old_id = int(raw.get("id") or 0)
+                new_id = _insert_migration_row(db, table, raw, club_id=club_id)
+                maps[table][old_id] = new_id
+
+        for raw in users:
+            if not isinstance(raw, dict):
+                raise RuntimeError("Ungültiger Benutzer im Migrationspaket")
+            username = str(raw.get("username") or "").strip()
+            if not username:
+                raise RuntimeError("Benutzer ohne Benutzername im Migrationspaket")
+            if db.execute(
+                "SELECT 1 FROM users WHERE username = ? COLLATE NOCASE", (username,)
+            ).fetchone():
+                raise RuntimeError(f"Benutzername auf Zielserver bereits vorhanden: {username}")
+            current = _columns(db, "users")
+            row = {
+                key: _club_backup_decode_value(value)
+                for key, value in raw.items()
+                if key in current and key != "id"
+            }
+            old_member_id = int(row.get("member_id") or 0)
+            row["member_id"] = maps["members"].get(old_member_id) if old_member_id else None
+            columns = list(row)
+            cursor = db.execute(
+                f"INSERT INTO users ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
+                [row[column] for column in columns],
+            )
+            maps["users"][int(raw.get("id") or 0)] = int(cursor.lastrowid)
+
+        for membership in memberships:
+            old_user_id = int(membership.get("user_id") or 0)
+            new_user_id = maps["users"].get(old_user_id)
+            if not new_user_id:
+                continue
+            role = str(membership.get("role") or "member")
+            if role == "super_admin":
+                role = "club_admin"
+            db.execute(
+                """
+                INSERT INTO user_clubs (user_id, club_id, role, active, created_at, updated_at)
+                VALUES (?, ?, ?, 1, ?, ?)
+                """,
+                (new_user_id, club_id, role, now, now),
+            )
+
+        for raw in tables.get("content_images", []):
+            _insert_migration_row(
+                db, "content_images", raw, club_id=club_id,
+                overrides={"content_id": maps["content_items"][int(raw["content_id"])]},
+                omit={"content_id"},
+            )
+        for raw in tables.get("member_filter_links", []):
+            _insert_migration_row(
+                db, "member_filter_links", raw, club_id=club_id,
+                overrides={
+                    "member_id": maps["members"][int(raw["member_id"])],
+                    "filter_id": maps["member_filters"][int(raw["filter_id"])],
+                },
+                omit={"member_id", "filter_id"},
+            )
+        for table in ("poll_votes", "poll_suggestions"):
+            for raw in tables.get(table, []):
+                old_user_id = int(raw["user_id"])
+                if old_user_id not in maps["users"]:
+                    continue
+                _insert_migration_row(
+                    db, table, raw, club_id=club_id,
+                    overrides={
+                        "poll_id": maps["content_items"][int(raw["poll_id"])],
+                        "user_id": maps["users"][old_user_id],
+                    },
+                    omit={"poll_id", "user_id"},
+                )
+        for raw in tables.get("event_registrations", []):
+            old_user_id = int(raw["user_id"])
+            if old_user_id not in maps["users"]:
+                continue
+            _insert_migration_row(
+                db, "event_registrations", raw, club_id=club_id,
+                overrides={
+                    "event_id": maps["events"][int(raw["event_id"])],
+                    "user_id": maps["users"][old_user_id],
+                },
+                omit={"event_id", "user_id"},
+            )
+
+        db.commit()
+
+    return {
+        "imported": True,
+        "club_id": club_id,
+        "club_slug": slug,
+        "users": len(maps["users"]),
+        "members": len(maps["members"]),
+        "safety_backup": _backup_info(safety_backup),
     }
 
 
