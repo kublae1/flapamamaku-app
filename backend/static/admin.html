@@ -703,6 +703,7 @@
       <div class="grid">
         <form class="card" id="members-form">
           <h2>Mitglied</h2>
+          <div id="member-save-status" class="hidden" style="margin:10px 0 16px;padding:12px 14px;border-radius:10px;background:#e9f7ef;color:#176b3a;font-weight:700"></div>
           <input type="hidden" name="id">
           <label>Name</label><input name="name" required>
           <label>Funktion</label>
@@ -2388,6 +2389,11 @@ function edit(resource, item) {
   });
 
   if (resource === "members") {
+    const saveStatus = document.getElementById("member-save-status");
+    if (saveStatus) {
+      saveStatus.textContent = "";
+      saveStatus.classList.add("hidden");
+    }
     const selected = new Set((item.filter_ids || []).map(Number));
     document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]').forEach(input => {
       input.checked = selected.has(Number(input.value));
@@ -2915,6 +2921,10 @@ Object.keys(resources).forEach(resource => {
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const id = form.elements.id.value;
+    const wasEditingMember = resource === "members" && !!id;
+    const savedMemberName = resource === "members"
+      ? form.elements.name.value.trim()
+      : "";
     const body = JSON.stringify(formData(form, resource));
     const saved = await api(
       id ? `/api/${resource}/${id}` : `/api/${resource}`,
@@ -3007,6 +3017,19 @@ Object.keys(resources).forEach(resource => {
       if (currentUser?.can_manage_users) {
         await loadMembersForSelects();
       }
+
+      const status = document.getElementById("member-save-status");
+      if (status) {
+        status.textContent = wasEditingMember
+          ? `✓ Änderungen bei „${savedMemberName}“ wurden gespeichert.`
+          : `✓ Mitglied „${savedMemberName}“ wurde neu erstellt und gespeichert.`;
+        status.classList.remove("hidden");
+      }
+
+      form.scrollIntoView({behavior:"smooth", block:"start"});
+      window.setTimeout(() => {
+        form.elements.name.focus({preventScroll:true});
+      }, 450);
     }
   });
 });
