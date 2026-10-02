@@ -1181,6 +1181,63 @@ MIGRATION_USER_FIELDS: tuple[str, ...] = (
     "must_change_password", "password_policy_version", "created_at",
 )
 
+SERVER_MIGRATION_FORMAT_VERSION = 2
+
+
+def _server_migration_checksum(payload: dict[str, Any]) -> str:
+    canonical = dict(payload)
+    manifest = canonical.get("manifest")
+    if isinstance(manifest, dict):
+        manifest_without_checksum = dict(manifest)
+        manifest_without_checksum.pop("checksum_sha256", None)
+        canonical["manifest"] = manifest_without_checksum
+    encoded = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_server_migration_envelope(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict) or payload.get("format") != "flapamamaku-server-migration":
+        raise RuntimeError("Datei ist kein gültiges Server-Migrationspaket")
+    version = int(payload.get("format_version") or 0)
+    if version == 1:
+        return payload
+    if version != SERVER_MIGRATION_FORMAT_VERSION:
+        raise RuntimeError("Migrationspaket-Version wird nicht unterstützt")
+
+    manifest = payload.get("manifest")
+    if not isinstance(manifest, dict):
+        raise RuntimeError("Migrationspaket enthält kein gültiges Manifest")
+    checksum = str(manifest.get("checksum_sha256") or "").strip().lower()
+    if len(checksum) != 64 or any(char not in "0123456789abcdef" for char in checksum):
+        raise RuntimeError("Migrationspaket enthält keine gültige Prüfsumme")
+    if not secrets.compare_digest(checksum, _server_migration_checksum(payload)):
+        raise RuntimeError("Migrationspaket-Prüfsumme ist ungültig")
+
+    club_id = int(manifest.get("club_id") or 0)
+    club_slug = str(manifest.get("club_slug") or "").strip().lower()
+    club_name = str(manifest.get("club_name") or "").strip()
+    schema_version = int(manifest.get("schema_version") or 0)
+    package_version = int(manifest.get("package_version") or 0)
+    if club_id <= 0 or not club_slug or not club_name:
+        raise RuntimeError("Migrationspaket-Manifest enthält keine gültige Vereinsidentität")
+    if package_version != SERVER_MIGRATION_FORMAT_VERSION:
+        raise RuntimeError("Migrationspaket-Manifest hat eine ungültige Paketversion")
+    if schema_version <= 0 or schema_version > CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Migrationspaket-Schema {schema_version} wird von Schema {CURRENT_SCHEMA_VERSION} nicht unterstützt"
+        )
+    if club_slug != str(payload.get("club_slug") or "").strip().lower():
+        raise RuntimeError("Migrationspaket-Manifest gehört zu einem anderen Verein")
+    if club_name != str(payload.get("club_name") or "").strip():
+        raise RuntimeError("Migrationspaket-Manifest enthält einen abweichenden Vereinsnamen")
+    return payload
+
 
 def _normalize_server_url(value: str) -> str:
     candidate = str(value or "").strip().rstrip("/")
@@ -1286,25 +1343,39 @@ def _create_server_migration_package(migration_id: int) -> dict[str, Any]:
             ).fetchall()
         ]
 
-    return {
+    created_at = datetime.now(timezone.utc).isoformat()
+    payload = {
         "format": "flapamamaku-server-migration",
-        "format_version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "format_version": SERVER_MIGRATION_FORMAT_VERSION,
+        "created_at": created_at,
         "source_instance_id": INSTANCE_ID,
         "source_server_url": str(migration["source_server_url"] or ""),
         "target_server_url": str(migration["target_server_url"] or ""),
         "migration_id": int(migration["id"]),
+        "club_id": club_id,
         "club_slug": str(migration["club_slug"] or ""),
         "club_name": str(migration["club_name"] or ""),
         "club_backup": backup,
         "users": users,
         "memberships": memberships,
+        "manifest": {
+            "club_id": club_id,
+            "club_slug": str(migration["club_slug"] or ""),
+            "club_name": str(migration["club_name"] or ""),
+            "exported_at": created_at,
+            "source_server_url": str(migration["source_server_url"] or ""),
+            "schema_version": int(backup.get("schema_version") or _schema_version()),
+            "package_version": SERVER_MIGRATION_FORMAT_VERSION,
+            "checksum_sha256": "",
+        },
         "sensitive": True,
         "notice": (
             "Dieses Transferpaket enthält Passwort-Hashes und darf nur zwischen "
             "berechtigten SuperAdmins über eine sichere Verbindung übertragen werden."
         ),
     }
+    payload["manifest"]["checksum_sha256"] = _server_migration_checksum(payload)
+    return payload
 
 
 def _insert_migration_row(
@@ -1336,10 +1407,7 @@ def _insert_migration_row(
 
 
 def _import_server_migration_package(payload: Any) -> dict[str, Any]:
-    if not isinstance(payload, dict) or payload.get("format") != "flapamamaku-server-migration":
-        raise RuntimeError("Datei ist kein gültiges Server-Migrationspaket")
-    if int(payload.get("format_version") or 0) != 1:
-        raise RuntimeError("Migrationspaket-Version wird nicht unterstützt")
+    payload = _validate_server_migration_envelope(payload)
     backup = payload.get("club_backup")
     users = payload.get("users")
     memberships = payload.get("memberships")
