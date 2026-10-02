@@ -59,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.84"
+API_VERSION = "0.8.85"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -70,7 +70,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 18
+CURRENT_SCHEMA_VERSION = 19
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -98,6 +98,11 @@ SUPERADMIN_RECOVERY_TOKEN = os.getenv(
     "FLAPAMAMAKU_SUPERADMIN_RECOVERY_TOKEN",
     "",
 ).strip()
+
+PUBLIC_BASE_URL = os.getenv(
+    "FLAPAMAMAKU_PUBLIC_BASE_URL",
+    "",
+).strip().rstrip("/")
 
 if not FIREBASE_SERVICE_ACCOUNT_JSON:
     firebase_b64 = os.getenv(
@@ -462,6 +467,15 @@ class ClubBillingSettingsPayload(BaseModel):
 
 class ClubBillingSuspendPayload(BaseModel):
     reason: str = Field(default="Ausstehende Zahlung", min_length=1, max_length=500)
+
+
+class ServerMigrationRequestPayload(BaseModel):
+    target_server_url: str = Field(min_length=8, max_length=500)
+
+
+class ServerMigrationDecisionPayload(BaseModel):
+    decision: str = Field(pattern=r"^(approve|reject)$")
+    note: str = Field(default="", max_length=1000)
 
 
 class PollVotePayload(BaseModel):
@@ -885,6 +899,7 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (16, "club-billing-and-suspension"),
         (17, "club-billing-pdf-and-grace"),
         (18, "noster-home-hero-and-tenant-hardening"),
+        (19, "tenant-server-migration-workflow"),
     ]
     applied = {
         int(row["version"])
@@ -1590,6 +1605,36 @@ def init_db() -> None:
         _ensure_column(db, "clubs", "billing_next_invoice_date", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "clubs", "billing_auto_suspend", "INTEGER NOT NULL DEFAULT 1")
         _ensure_column(db, "clubs", "billing_suspension_reason", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "clubs", "server_url", "TEXT NOT NULL DEFAULT ''")
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS club_server_migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                club_id INTEGER NOT NULL,
+                source_server_url TEXT NOT NULL DEFAULT '',
+                target_server_url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'approved', 'rejected', 'activated')),
+                requested_by_user_id INTEGER NOT NULL,
+                requested_at TEXT NOT NULL,
+                reviewed_by_user_id INTEGER,
+                reviewed_at TEXT NOT NULL DEFAULT '',
+                review_note TEXT NOT NULL DEFAULT '',
+                activated_by_user_id INTEGER,
+                activated_at TEXT NOT NULL DEFAULT '',
+                target_health_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY(club_id) REFERENCES clubs(id),
+                FOREIGN KEY(requested_by_user_id) REFERENCES users(id),
+                FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id),
+                FOREIGN KEY(activated_by_user_id) REFERENCES users(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_club_server_migrations_club "
+            "ON club_server_migrations(club_id, requested_at DESC)"
+        )
 
         db.execute(
             """
