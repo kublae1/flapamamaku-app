@@ -17,7 +17,7 @@ enum UserRole {
 }
 
 class AppStore extends ChangeNotifier {
-  AppStore({ApiService? api})
+  AppStore({ApiService? api, bool initialize = true})
       : api = api ?? ApiService(),
         news = List<NewsItem>.from(newsItems),
         events = List<EventItem>.from(eventItems),
@@ -26,8 +26,9 @@ class AppStore extends ChangeNotifier {
     pushService = PushService(this.api);
     _sortNews();
     _sortEvents();
-    _initialize();
-  
+    if (initialize) {
+      _initialize();
+    }
   }
 
   final ApiService api;
