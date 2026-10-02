@@ -283,8 +283,13 @@ class AppStore extends ChangeNotifier {
   Future<void> _initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final savedServer = prefs.getString('flapamamaku_server_url')?.trim() ?? '';
-    if (savedServer.isNotEmpty) {
+    if (_allowServerChange && savedServer.isNotEmpty) {
       api.configureBaseUrl(savedServer);
+    } else if (!_allowServerChange && savedServer.isNotEmpty) {
+      // Old app versions allowed members to override the server locally.
+      // Once managed-server mode is enabled, discard that override and use
+      // only the centrally configured API_BASE_URL shipped with the app.
+      await prefs.remove('flapamamaku_server_url');
     }
 
     // Before authentication the app must stay completely neutral.
@@ -419,7 +424,7 @@ class AppStore extends ChangeNotifier {
       !api.isConfigured || canNews || canEvents || canMembers;
   static const bool _allowServerChange = bool.fromEnvironment(
     'ALLOW_SERVER_CHANGE',
-    defaultValue: true,
+    defaultValue: false,
   );
 
   bool get serverConfigured => api.isConfigured;
@@ -433,6 +438,11 @@ class AppStore extends ChangeNotifier {
       friendlyErrorMessage(error, fallback: fallback);
 
   Future<bool> changeServerUrl(String value) async {
+    if (!_allowServerChange) {
+      authError = 'Die Serveradresse wird zentral verwaltet.';
+      notifyListeners();
+      return false;
+    }
     var candidate = value.trim();
     while (candidate.endsWith('/')) {
       candidate = candidate.substring(0, candidate.length - 1);
