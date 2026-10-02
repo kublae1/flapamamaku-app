@@ -702,7 +702,10 @@
     <section id="members" class="panel">
       <div class="grid">
         <form class="card" id="members-form">
-          <h2>Mitglied</h2>
+          <div class="preview-heading">
+            <h2>Mitglied</h2>
+            <button type="button" id="member-new-button">+ Neues Mitglied</button>
+          </div>
           <div id="member-save-status" class="hidden" style="margin:10px 0 16px;padding:12px 14px;border-radius:10px;background:#e9f7ef;color:#176b3a;font-weight:700"></div>
           <input type="hidden" name="id">
           <label>Name</label><input name="name" required>
@@ -2374,6 +2377,48 @@ document.getElementById("news-new-button").addEventListener("click", () => {
   document.getElementById("news-form").elements.title.focus();
 });
 
+function resetMemberForm({clearStatus = true, focus = true} = {}) {
+  const form = document.getElementById("members-form");
+  form.reset();
+  form.elements.id.value = "";
+  form.elements.role.value = "Mitglied";
+  form.elements.status.value = "Aktiv";
+  resetMemberPhotoCropState();
+
+  document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]').forEach(input => {
+    input.checked = false;
+  });
+
+  if (currentUser?.can_manage_users) {
+    form.elements.account_user_id.value = "";
+    form.elements.account_username.value = "";
+    form.elements.account_password.value = "";
+    form.elements.account_active.checked = true;
+    form.elements.account_role_key.value = "member";
+    setPermissionOverrideFields(form, {}, "account_");
+    refreshAllEffectiveRights();
+  }
+
+  if (clearStatus) {
+    const status = document.getElementById("member-save-status");
+    if (status) {
+      status.textContent = "";
+      status.classList.add("hidden");
+    }
+  }
+
+  form.scrollIntoView({behavior:"smooth", block:"start"});
+  if (focus) {
+    window.setTimeout(() => {
+      form.elements.name.focus({preventScroll:true});
+    }, 450);
+  }
+}
+
+document.getElementById("member-new-button")?.addEventListener("click", () => {
+  resetMemberForm();
+});
+
 function edit(resource, item) {
   const form = document.getElementById(`${resource}-form`);
   form.elements.id.value = item.id;
@@ -2996,20 +3041,7 @@ Object.keys(resources).forEach(resource => {
       form.elements.id.value = "";
     }
     if (resource === "members") {
-      resetMemberPhotoCropState();
-      form.elements.role.value = "Präsident";
-      form.elements.status.value = "Aktiv";
-      document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]').forEach(input => {
-        input.checked = false;
-      });
-      if (currentUser?.can_manage_users) {
-        form.elements.account_user_id.value = "";
-        form.elements.account_username.value = "";
-        form.elements.account_password.value = "";
-        form.elements.account_active.checked = true;
-        form.elements.account_role_key.value = "member";
-        setPermissionOverrideFields(form, {}, "account_");
-      }
+      resetMemberForm({clearStatus:false, focus:false});
     }
     await load(resource);
     if (resource === "members") {
@@ -3026,10 +3058,8 @@ Object.keys(resources).forEach(resource => {
         status.classList.remove("hidden");
       }
 
-      form.scrollIntoView({behavior:"smooth", block:"start"});
-      window.setTimeout(() => {
-        form.elements.name.focus({preventScroll:true});
-      }, 450);
+      // Always finish in a clean "new member" state after saving.
+      resetMemberForm({clearStatus:false, focus:true});
     }
   });
 });
