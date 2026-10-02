@@ -287,14 +287,12 @@ class AppStore extends ChangeNotifier {
       api.configureBaseUrl(savedServer);
     }
 
-    themeColorValue =
-        prefs.getInt('flapamamaku_brand_color') ?? 0xFF8A101B;
+    // Before authentication the app must stay completely neutral.
+    // Never reuse the last club's cached branding on startup.
+    _resetToNeutralBranding();
     notifyListeners();
 
     if (api.isConfigured) {
-      // Branding is public and must be available before the first login so a
-      // white-label instance never shows FLAPAMAMAKU branding to another club.
-      await _loadRemoteBranding(prefs);
       await restoreSession();
       _startSyncTimer();
     } else {
@@ -482,7 +480,7 @@ class AppStore extends ChangeNotifier {
     memberFilters.clear();
     content.clear();
 
-    await _loadRemoteBranding(prefs);
+    _resetToNeutralBranding();
     _startSyncTimer();
     notifyListeners();
     return true;
@@ -626,9 +624,13 @@ class AppStore extends ChangeNotifier {
     final token = await _secureStorage.read(key: 'flapamamaku_token');
     if (token == null || token.isEmpty) {
       api.setToken(null);
-      authReady = true;
+      currentUser = null;
+      accessibleClubs.clear();
+      clubSelectionRequired = false;
       isAuthenticated = false;
       biometricUnlockPending = false;
+      _resetToNeutralBranding();
+      authReady = true;
       notifyListeners();
       return;
     }
@@ -659,6 +661,7 @@ class AppStore extends ChangeNotifier {
         isAuthenticated = false;
         biometricUnlockPending = false;
         await _secureStorage.delete(key: 'flapamamaku_token');
+        _resetToNeutralBranding();
         return;
       }
 
@@ -684,6 +687,7 @@ class AppStore extends ChangeNotifier {
         isAuthenticated = false;
         biometricUnlockPending = false;
         authError = null;
+        _resetToNeutralBranding();
         await _secureStorage.delete(key: 'flapamamaku_token');
       } else {
         final restored = await _loadOfflineCache();
@@ -697,6 +701,7 @@ class AppStore extends ChangeNotifier {
           clubSelectionRequired = false;
           isAuthenticated = false;
           biometricUnlockPending = false;
+          _resetToNeutralBranding();
           await _secureStorage.delete(key: 'flapamamaku_token');
         }
       }
@@ -780,6 +785,7 @@ class AppStore extends ChangeNotifier {
     isAuthenticated = false;
     biometricUnlockPending = false;
     authError = null;
+    _resetToNeutralBranding();
     authReady = true;
     notifyListeners();
   }
@@ -930,6 +936,7 @@ class AppStore extends ChangeNotifier {
       _pendingForcedPassword = null;
       accessibleClubs.clear();
       clubSelectionRequired = false;
+      _resetToNeutralBranding();
       return false;
     } finally {
       isAuthenticating = false;
