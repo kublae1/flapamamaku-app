@@ -59,7 +59,7 @@ def main() -> None:
         pass
 
     init_db()
-    assert CURRENT_SCHEMA_VERSION == 18
+    assert CURRENT_SCHEMA_VERSION == 19
     client = TestClient(app)
 
     # 1. Bestehender FLAPAMAMAKU-Login funktioniert.
