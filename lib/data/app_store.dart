@@ -919,21 +919,7 @@ class AppStore extends ChangeNotifier {
           result['server_redirect_url']?.toString().trim() ?? '';
       if (redirectUrl.isNotEmpty) {
         final normalizedRedirect =
-            redirectUrl.replaceFirst(RegExp(r'/+$'), '');
-        final normalizedCurrent =
-            api.baseUrl.replaceFirst(RegExp(r'/+$'), '');
-        if (normalizedRedirect != normalizedCurrent) {
-          api.configureBaseUrl(normalizedRedirect);
-          result = await api.login(username.trim(), password);
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString(
-            'flapamamaku_server_url',
-            normalizedRedirect,
-          );
-        }
-      }
-
-      final token = result['token']?.toString() ?? '';
+            redirectUrl.replaceFirst(RegExp(r'/+
       if (token.isEmpty) {
         throw const ApiException('Kein Sitzungstoken erhalten.');
       }
@@ -942,450 +928,6 @@ class AppStore extends ChangeNotifier {
         key: 'flapamamaku_token',
         value: token,
       );
-      currentUser = Map<String, dynamic>.from(
-        result['user'] as Map<String, dynamic>,
-      );
-      accessibleClubs
-        ..clear()
-        ..addAll(
-          (result['clubs'] as List<dynamic>? ?? const [])
-              .whereType<Map>()
-              .map((value) => Map<String, dynamic>.from(value)),
-        );
-      isAuthenticated = true;
-      _pendingForcedPassword = mustChangePassword ? password : null;
-      clubSelectionRequired = result['requires_club_selection'] == true;
-
-      if (mustChangePassword) {
-        clubSelectionRequired = false;
-        authError = null;
-        return true;
-      }
-
-      if (accessibleClubs.isEmpty) {
-        await _loadAccessibleClubs();
-      }
-      if (accessibleClubs.length <= 1) {
-        clubSelectionRequired = false;
-      }
-      if (!clubSelectionRequired) {
-        final prefs = await SharedPreferences.getInstance();
-        await _loadRemoteBranding(prefs);
-        await refreshFromServer();
-        if (pushEnabled && showPushNotifications) {
-          await pushService.enable();
-        }
-      }
-      return true;
-    } catch (error) {
-      authError = error is ApiException && error.statusCode == 401
-          ? 'Benutzername oder Passwort falsch.'
-          : friendlyErrorMessage(
-              error,
-              fallback: 'Anmeldung momentan nicht möglich. Bitte nochmals versuchen.',
-            );
-      isAuthenticated = false;
-      currentUser = null;
-      _pendingForcedPassword = null;
-      accessibleClubs.clear();
-      clubSelectionRequired = false;
-      _resetToNeutralBranding();
-      return false;
-    } finally {
-      isAuthenticating = false;
-      authReady = true;
-      notifyListeners();
-    }
-  }
-
-  Future<void> logout() async {
-    await pushService.disable();
-    try {
-      await api.logout();
-    } catch (_) {
-      api.setToken(null);
-    }
-    await _secureStorage.delete(key: 'flapamamaku_token');
-    currentUser = null;
-    _pendingForcedPassword = null;
-    accessibleClubs.clear();
-    clubSelectionRequired = false;
-    isAuthenticated = false;
-    biometricUnlockPending = false;
-    authError = null;
-    _resetToNeutralBranding();
-    news
-      ..clear()
-      ..addAll(newsItems);
-    events
-      ..clear()
-      ..addAll(eventItems);
-    members
-      ..clear()
-      ..addAll(initialMembers);
-    memberFilters.clear();
-    content.clear();
-    _sortNews();
-    _sortEvents();
-    notifyListeners();
-  }
-
-  List<ContentItem> contentFor(String section) {
-    return content.where((item) => item.section == section).toList();
-  }
-
-  void _sortNews() {
-    news.sort((a, b) {
-      final aOrder = a.sortOrder;
-      final bOrder = b.sortOrder;
-      if (aOrder > 0 || bOrder > 0) {
-        final normalizedA = aOrder > 0 ? aOrder : 1 << 30;
-        final normalizedB = bOrder > 0 ? bOrder : 1 << 30;
-        final byOrder = normalizedA.compareTo(normalizedB);
-        if (byOrder != 0) return byOrder;
-      }
-      return b.createdAt.compareTo(a.createdAt);
-    });
-  }
-
-  void _sortEvents() {
-    events.sort((a, b) {
-      final aDate = DateTime.tryParse(a.eventDate);
-      final bDate = DateTime.tryParse(b.eventDate);
-      if (aDate == null && bDate == null) return 0;
-      if (aDate == null) return 1;
-      if (bDate == null) return -1;
-      final dateCompare = aDate.compareTo(bDate);
-      if (dateCompare != 0) return dateCompare;
-      return a.time.compareTo(b.time);
-    });
-  }
-
-  Future<void> refreshFromServer() async {
-    if (!api.isConfigured ||
-        !isAuthenticated ||
-        mustChangePassword ||
-        isSyncing) {
-      return;
-    }
-
-    isSyncing = true;
-    notifyListeners();
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await _loadRemoteBranding(prefs);
-
-      final remoteNews =
-          showNews ? await api.fetchNews() : <NewsItem>[];
-      final remoteEvents =
-          showEvents ? await api.fetchEvents() : <EventItem>[];
-      final remoteMembers =
-          showMembers ? await api.fetchMembers() : <MemberItem>[];
-      final remoteMemberFilters =
-          showMembers ? await api.fetchMemberFilters() : <MemberFilterItem>[];
-      final remoteContent = await api.fetchContent();
-      final remotePolls =
-          showPolls ? await api.fetchPolls() : <ContentItem>[];
-
-      news
-        ..clear()
-        ..addAll(remoteNews);
-      events
-        ..clear()
-        ..addAll(remoteEvents);
-      members
-        ..clear()
-        ..addAll(remoteMembers);
-      memberFilters
-        ..clear()
-        ..addAll(remoteMemberFilters);
-      content
-        ..clear()
-        ..addAll(
-          remoteContent.where((item) {
-            switch (item.section) {
-              case 'gallery':
-                return showGallery;
-              case 'sujet':
-                return showSujet;
-              case 'archive':
-                return showArchive;
-              case 'photos':
-                return showPhotos;
-              case 'documents':
-                return showDocuments;
-              case 'links':
-              case 'whatsapp':
-                return showLinks;
-              case 'polls':
-                return showPolls;
-              default:
-                return true;
-            }
-          }),
-        )
-        ..addAll(remotePolls);
-
-      _sortNews();
-      _sortEvents();
-      isUsingServer = true;
-      syncError = null;
-      lastSuccessfulSync = DateTime.now();
-      await _saveOfflineCache();
-    } catch (error) {
-      isUsingServer = false;
-      syncError = friendlyErrorMessage(error);
-      if (news.isEmpty && events.isEmpty && members.isEmpty && content.isEmpty) {
-        await _loadOfflineCache();
-      }
-    } finally {
-      isSyncing = false;
-      notifyListeners();
-    }
-  }
-
-  void setRole(UserRole role) {
-    if (role == currentRole) return;
-    currentRole = role;
-    notifyListeners();
-  }
-
-  Future<void> deleteContentItem(ContentItem item) async {
-    if (item.isSnapshot && item.snapshotId != null) {
-      try {
-        await api.deleteGallerySnapshot(item.snapshotId!);
-        await refreshFromServer();
-      } catch (error) {
-        syncError = friendlyErrorMessage(error);
-        notifyListeners();
-        rethrow;
-      }
-      return;
-    }
-    if (item.id == null) return;
-    try {
-      if (item.section == 'polls') {
-        await api.deletePoll(item.id!);
-      } else {
-        await api.deleteContent(item.id!);
-      }
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> uploadGallerySnapshot({
-    required Uint8List bytes,
-    required String filename,
-    required int expiresDays,
-  }) async {
-    try {
-      await api.uploadGallerySnapshot(
-        bytes: bytes,
-        filename: filename,
-        expiresDays: expiresDays,
-      );
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> addNews(NewsItem item) async {
-    if (!api.isConfigured) {
-      news.add(item);
-      _sortNews();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveNews(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> updateNews(int index, NewsItem item) async {
-    if (!api.isConfigured) {
-      news[index] = item;
-      _sortNews();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveNews(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> deleteNews(int index) async {
-    final item = news[index];
-    if (!api.isConfigured || item.id == null) {
-      news.removeAt(index);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.deleteNews(item.id!);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> setEventRegistration(
-    EventItem event,
-    bool registered,
-  ) async {
-    if (!api.isConfigured || event.id == null) return;
-    try {
-      await api.setEventRegistration(event.id!, registered);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> addEvent(EventItem item) async {
-    if (!api.isConfigured) {
-      events.add(item);
-      _sortEvents();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveEvent(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> updateEvent(int index, EventItem item) async {
-    if (!api.isConfigured) {
-      events[index] = item;
-      _sortEvents();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveEvent(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> deleteEvent(int index) async {
-    final item = events[index];
-    if (!api.isConfigured || item.id == null) {
-      events.removeAt(index);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.deleteEvent(item.id!);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> addMember(MemberItem item) async {
-    if (!api.isConfigured) {
-      members.add(item);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveMember(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> updateMember(int index, MemberItem item) async {
-    if (!api.isConfigured) {
-      members[index] = item;
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveMember(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> deleteMember(int index) async {
-    final item = members[index];
-    if (!api.isConfigured || item.id == null) {
-      members.removeAt(index);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.deleteMember(item.id!);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  @override
-  void dispose() {
-    _syncTimer?.cancel();
-    super.dispose();
-  }
-}
-
-class AppStoreScope extends InheritedNotifier<AppStore> {
-  const AppStoreScope({
-    required AppStore store,
-    required super.child,
-    super.key,
-  }) : super(notifier: store);
-
-  static AppStore of(BuildContext context) {
-    final scope =
-        context.dependOnInheritedWidgetOfExactType<AppStoreScope>();
-    assert(scope != null, 'AppStoreScope fehlt im Widget-Baum.');
-    return scope!.notifier!;
-  }
-}
-), '') !=
-              api.baseUrl.replaceAll(RegExp(r'/+
       currentUser = Map<String, dynamic>.from(
         result['user'] as Map<String, dynamic>,
       );
@@ -1448,397 +990,89 @@ class AppStoreScope extends InheritedNotifier<AppStore> {
     }
   }
 
-  Future<void> logout() async {
-    await pushService.disable();
-    try {
-      await api.logout();
-    } catch (_) {
-      api.setToken(null);
-    }
-    await _secureStorage.delete(key: 'flapamamaku_token');
-    currentUser = null;
-    _pendingForcedPassword = null;
-    accessibleClubs.clear();
-    clubSelectionRequired = false;
-    isAuthenticated = false;
-    biometricUnlockPending = false;
-    authError = null;
-    _resetToNeutralBranding();
-    news
-      ..clear()
-      ..addAll(newsItems);
-    events
-      ..clear()
-      ..addAll(eventItems);
-    members
-      ..clear()
-      ..addAll(initialMembers);
-    memberFilters.clear();
-    content.clear();
-    _sortNews();
-    _sortEvents();
-    notifyListeners();
-  }
-
-  List<ContentItem> contentFor(String section) {
-    return content.where((item) => item.section == section).toList();
-  }
-
-  void _sortNews() {
-    news.sort((a, b) {
-      final aOrder = a.sortOrder;
-      final bOrder = b.sortOrder;
-      if (aOrder > 0 || bOrder > 0) {
-        final normalizedA = aOrder > 0 ? aOrder : 1 << 30;
-        final normalizedB = bOrder > 0 ? bOrder : 1 << 30;
-        final byOrder = normalizedA.compareTo(normalizedB);
-        if (byOrder != 0) return byOrder;
+), '');
+        final normalizedCurrent =
+            api.baseUrl.replaceFirst(RegExp(r'/+
+      if (token.isEmpty) {
+        throw const ApiException('Kein Sitzungstoken erhalten.');
       }
-      return b.createdAt.compareTo(a.createdAt);
-    });
-  }
 
-  void _sortEvents() {
-    events.sort((a, b) {
-      final aDate = DateTime.tryParse(a.eventDate);
-      final bDate = DateTime.tryParse(b.eventDate);
-      if (aDate == null && bDate == null) return 0;
-      if (aDate == null) return 1;
-      if (bDate == null) return -1;
-      final dateCompare = aDate.compareTo(bDate);
-      if (dateCompare != 0) return dateCompare;
-      return a.time.compareTo(b.time);
-    });
-  }
-
-  Future<void> refreshFromServer() async {
-    if (!api.isConfigured ||
-        !isAuthenticated ||
-        mustChangePassword ||
-        isSyncing) {
-      return;
-    }
-
-    isSyncing = true;
-    notifyListeners();
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await _loadRemoteBranding(prefs);
-
-      final remoteNews =
-          showNews ? await api.fetchNews() : <NewsItem>[];
-      final remoteEvents =
-          showEvents ? await api.fetchEvents() : <EventItem>[];
-      final remoteMembers =
-          showMembers ? await api.fetchMembers() : <MemberItem>[];
-      final remoteMemberFilters =
-          showMembers ? await api.fetchMemberFilters() : <MemberFilterItem>[];
-      final remoteContent = await api.fetchContent();
-      final remotePolls =
-          showPolls ? await api.fetchPolls() : <ContentItem>[];
-
-      news
-        ..clear()
-        ..addAll(remoteNews);
-      events
-        ..clear()
-        ..addAll(remoteEvents);
-      members
-        ..clear()
-        ..addAll(remoteMembers);
-      memberFilters
-        ..clear()
-        ..addAll(remoteMemberFilters);
-      content
+      await _secureStorage.write(
+        key: 'flapamamaku_token',
+        value: token,
+      );
+      currentUser = Map<String, dynamic>.from(
+        result['user'] as Map<String, dynamic>,
+      );
+      accessibleClubs
         ..clear()
         ..addAll(
-          remoteContent.where((item) {
-            switch (item.section) {
-              case 'gallery':
-                return showGallery;
-              case 'sujet':
-                return showSujet;
-              case 'archive':
-                return showArchive;
-              case 'photos':
-                return showPhotos;
-              case 'documents':
-                return showDocuments;
-              case 'links':
-              case 'whatsapp':
-                return showLinks;
-              case 'polls':
-                return showPolls;
-              default:
-                return true;
-            }
-          }),
-        )
-        ..addAll(remotePolls);
+          (result['clubs'] as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map((value) => Map<String, dynamic>.from(value)),
+        );
+      isAuthenticated = true;
+      _pendingForcedPassword = mustChangePassword ? password : null;
+      clubSelectionRequired = result['requires_club_selection'] == true;
 
-      _sortNews();
-      _sortEvents();
-      isUsingServer = true;
-      syncError = null;
-      lastSuccessfulSync = DateTime.now();
-      await _saveOfflineCache();
-    } catch (error) {
-      isUsingServer = false;
-      syncError = friendlyErrorMessage(error);
-      if (news.isEmpty && events.isEmpty && members.isEmpty && content.isEmpty) {
-        await _loadOfflineCache();
+      // A temporary password must be replaced before the app makes any
+      // authenticated content requests. The login response already contains
+      // the current user and club list, so we can safely show the forced
+      // password screen immediately.
+      if (mustChangePassword) {
+        clubSelectionRequired = false;
+        authError = null;
+        return true;
       }
-    } finally {
-      isSyncing = false;
-      notifyListeners();
-    }
-  }
 
-  void setRole(UserRole role) {
-    if (role == currentRole) return;
-    currentRole = role;
-    notifyListeners();
-  }
-
-  Future<void> deleteContentItem(ContentItem item) async {
-    if (item.isSnapshot && item.snapshotId != null) {
-      try {
-        await api.deleteGallerySnapshot(item.snapshotId!);
-        await refreshFromServer();
-      } catch (error) {
-        syncError = friendlyErrorMessage(error);
-        notifyListeners();
-        rethrow;
+      if (accessibleClubs.isEmpty) {
+        await _loadAccessibleClubs();
       }
-      return;
-    }
-    if (item.id == null) return;
-    try {
-      if (item.section == 'polls') {
-        await api.deletePoll(item.id!);
-      } else {
-        await api.deleteContent(item.id!);
+      // Never show a club picker when the account has zero or one accessible
+      // club. This also protects against stale server flags after role changes.
+      if (accessibleClubs.length <= 1) {
+        clubSelectionRequired = false;
       }
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> uploadGallerySnapshot({
-    required Uint8List bytes,
-    required String filename,
-    required int expiresDays,
-  }) async {
-    try {
-      await api.uploadGallerySnapshot(
-        bytes: bytes,
-        filename: filename,
-        expiresDays: expiresDays,
-      );
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> addNews(NewsItem item) async {
-    if (!api.isConfigured) {
-      news.add(item);
-      _sortNews();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveNews(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> updateNews(int index, NewsItem item) async {
-    if (!api.isConfigured) {
-      news[index] = item;
-      _sortNews();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveNews(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> deleteNews(int index) async {
-    final item = news[index];
-    if (!api.isConfigured || item.id == null) {
-      news.removeAt(index);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.deleteNews(item.id!);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> setEventRegistration(
-    EventItem event,
-    bool registered,
-  ) async {
-    if (!api.isConfigured || event.id == null) return;
-    try {
-      await api.setEventRegistration(event.id!, registered);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> addEvent(EventItem item) async {
-    if (!api.isConfigured) {
-      events.add(item);
-      _sortEvents();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveEvent(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> updateEvent(int index, EventItem item) async {
-    if (!api.isConfigured) {
-      events[index] = item;
-      _sortEvents();
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveEvent(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> deleteEvent(int index) async {
-    final item = events[index];
-    if (!api.isConfigured || item.id == null) {
-      events.removeAt(index);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.deleteEvent(item.id!);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> addMember(MemberItem item) async {
-    if (!api.isConfigured) {
-      members.add(item);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveMember(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> updateMember(int index, MemberItem item) async {
-    if (!api.isConfigured) {
-      members[index] = item;
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.saveMember(item);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  Future<void> deleteMember(int index) async {
-    final item = members[index];
-    if (!api.isConfigured || item.id == null) {
-      members.removeAt(index);
-      notifyListeners();
-      return;
-    }
-    try {
-      await api.deleteMember(item.id!);
-      await refreshFromServer();
-    } catch (error) {
-      syncError = friendlyErrorMessage(error);
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  @override
-  void dispose() {
-    _syncTimer?.cancel();
-    super.dispose();
-  }
-}
-
-class AppStoreScope extends InheritedNotifier<AppStore> {
-  const AppStoreScope({
-    required AppStore store,
-    required super.child,
-    super.key,
-  }) : super(notifier: store);
-
-  static AppStore of(BuildContext context) {
-    final scope =
-        context.dependOnInheritedWidgetOfExactType<AppStoreScope>();
-    assert(scope != null, 'AppStoreScope fehlt im Widget-Baum.');
-    return scope!.notifier!;
-  }
-}
-), '')) {
-        api.configureBaseUrl(redirectUrl);
-        result = await api.login(username.trim(), password);
+      if (!clubSelectionRequired) {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('flapamamaku_server_url', redirectUrl);
+        await _loadRemoteBranding(prefs);
+        await refreshFromServer();
+        if (pushEnabled && showPushNotifications) {
+          await pushService.enable();
+        }
+      }
+      return true;
+    } catch (error) {
+      authError = error is ApiException && error.statusCode == 401
+          ? 'Benutzername oder Passwort falsch.'
+          : friendlyErrorMessage(
+              error,
+              fallback: 'Anmeldung momentan nicht möglich. Bitte nochmals versuchen.',
+            );
+      isAuthenticated = false;
+      currentUser = null;
+      _pendingForcedPassword = null;
+      accessibleClubs.clear();
+      clubSelectionRequired = false;
+      _resetToNeutralBranding();
+      return false;
+    } finally {
+      isAuthenticating = false;
+      authReady = true;
+      notifyListeners();
+    }
+  }
+
+), '');
+        if (normalizedRedirect != normalizedCurrent) {
+          api.configureBaseUrl(normalizedRedirect);
+          result = await api.login(username.trim(), password);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(
+            'flapamamaku_server_url',
+            normalizedRedirect,
+          );
+        }
       }
 
       final token = result['token']?.toString() ?? '';
