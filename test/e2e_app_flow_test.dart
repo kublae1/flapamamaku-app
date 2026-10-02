@@ -18,11 +18,11 @@ Widget _appWithStore(AppStore store) {
   );
 }
 
-Future<AppStore> _authenticatedStore() async {
-  final store = AppStore(api: ApiService(baseUrl: 'https://verein.example.test'));
-  while (!store.authReady) {
-    await Future<void>.delayed(const Duration(milliseconds: 1));
-  }
+AppStore _authenticatedStore() {
+  final store = AppStore(
+    api: ApiService(baseUrl: 'https://example.invalid'),
+    initialize: false,
+  );
   store.authReady = true;
   store.isAuthenticated = true;
   store.currentUser = {
@@ -95,7 +95,7 @@ void main() {
 
   testWidgets('authenticated member can navigate core app areas end to end',
       (tester) async {
-    final store = await _authenticatedStore();
+    final store = _authenticatedStore();
     addTearDown(store.dispose);
 
     await tester.pumpWidget(_appWithStore(store));
@@ -140,7 +140,7 @@ void main() {
 
   testWidgets('module visibility and permissions survive the full menu flow',
       (tester) async {
-    final store = await _authenticatedStore();
+    final store = _authenticatedStore();
     addTearDown(store.dispose);
     store.showSujet = false;
     store.showArchive = false;
