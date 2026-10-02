@@ -22,8 +22,14 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('FLAPAMAMAKU'), findsOneWidget);
+    expect(find.text('Vereins-App'), findsOneWidget);
     expect(find.text('Anmelden'), findsWidgets);
+    expect(find.text('Vereinsserver'), findsOneWidget);
+    expect(find.text('Vereinsserver einrichten'), findsNothing);
+
+    await tester.tap(find.text('Vereinsserver'));
+    await tester.pumpAndSettle();
+
     expect(find.text('Vereinsserver einrichten'), findsOneWidget);
 
     store.dispose();
