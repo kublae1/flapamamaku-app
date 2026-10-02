@@ -284,13 +284,42 @@ class AppStore extends ChangeNotifier {
   Future<void> _initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final savedServer = prefs.getString('flapamamaku_server_url')?.trim() ?? '';
-    if (_allowServerChange && savedServer.isNotEmpty) {
+    if (savedServer.isNotEmpty) {
+      // Existing installations may already be provisioned for a specific
+      // club server. Keep that routing even when server controls are hidden
+      // from normal members.
       api.configureBaseUrl(savedServer);
-    } else if (!_allowServerChange && savedServer.isNotEmpty) {
-      // Old app versions allowed members to override the server locally.
-      // Once managed-server mode is enabled, discard that override and use
-      // only the centrally configured API_BASE_URL shipped with the app.
-      await prefs.remove('flapamamaku_server_url');
+    } else if (!_allowServerChange) {
+      // A previous managed-server build may have removed the saved URL.
+      // Recover the most recently used club server from the authenticated
+      // offline cache so existing members are not redirected to another club.
+      String recoveredServer = '';
+      DateTime? recoveredAt;
+      for (final key in prefs.getKeys()) {
+        if (!key.startsWith('flapamamaku_offline_cache_')) continue;
+        final raw = prefs.getString(key);
+        if (raw == null || raw.trim().isEmpty) continue;
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is! Map) continue;
+          final data = Map<String, dynamic>.from(decoded);
+          final server = data['server_url']?.toString().trim() ?? '';
+          if (server.isEmpty) continue;
+          final savedAt = DateTime.tryParse(data['saved_at']?.toString() ?? '');
+          if (recoveredServer.isEmpty ||
+              (savedAt != null &&
+                  (recoveredAt == null || savedAt.isAfter(recoveredAt)))) {
+            recoveredServer = server;
+            recoveredAt = savedAt;
+          }
+        } catch (_) {
+          // Ignore malformed legacy cache entries.
+        }
+      }
+      if (recoveredServer.isNotEmpty) {
+        api.configureBaseUrl(recoveredServer);
+        await prefs.setString('flapamamaku_server_url', recoveredServer);
+      }
     }
 
     // Before authentication the app must stay completely neutral.
