@@ -11,6 +11,8 @@ from app.main import (
     NewsPayload,
     _REQUEST_CLUB_ID,
     _create_club_backup_payload,
+    _server_migration_checksum,
+    _validate_server_migration_envelope,
     _merge_club_backup,
     bootstrap,
     connect,
@@ -168,6 +170,42 @@ def main() -> None:
             raise AssertionError("Cross-club import must be rejected")
         backups_after = len(list((os.environ.get("FLAPAMAMAKU_BACKUP_DIR") and __import__("pathlib").Path(os.environ["FLAPAMAMAKU_BACKUP_DIR"]).glob("*.db")) or []))
         assert backups_after == backups_before
+
+        migration_payload = {
+            "format": "flapamamaku-server-migration",
+            "format_version": 2,
+            "club_slug": "backup-test",
+            "club_name": "Backup Test",
+            "club_backup": payload,
+            "users": [],
+            "memberships": [],
+            "manifest": {
+                "club_id": club_id,
+                "club_slug": "backup-test",
+                "club_name": "Backup Test",
+                "exported_at": "2026-10-02T10:00:00+00:00",
+                "source_server_url": "https://source.example.ch",
+                "schema_version": payload["schema_version"],
+                "package_version": 2,
+                "checksum_sha256": "",
+            },
+        }
+        migration_payload["manifest"]["checksum_sha256"] = _server_migration_checksum(migration_payload)
+        assert _validate_server_migration_envelope(migration_payload) is migration_payload
+
+        tampered = copy.deepcopy(migration_payload)
+        tampered["club_name"] = "Manipuliert"
+        try:
+            _validate_server_migration_envelope(tampered)
+        except RuntimeError as exc:
+            assert "Prüfsumme" in str(exc)
+        else:
+            raise AssertionError("Manipuliertes Migrationspaket muss abgelehnt werden")
+
+        legacy_migration_payload = copy.deepcopy(migration_payload)
+        legacy_migration_payload["format_version"] = 1
+        legacy_migration_payload.pop("manifest")
+        assert _validate_server_migration_envelope(legacy_migration_payload) is legacy_migration_payload
 
         html = open("static/admin.html", encoding="utf-8").read()
         assert 'id="club-backup-card"' in html
