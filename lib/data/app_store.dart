@@ -915,13 +915,33 @@ class AppStore extends ChangeNotifier {
     try {
       var result = await api.login(username.trim(), password);
 
-      // A club can be moved to another backend without exposing server
-      // controls to members. The platform login may return the approved
-      // target server; retry the same login there and remember it locally.
       final redirectUrl =
           result['server_redirect_url']?.toString().trim() ?? '';
-      if (redirectUrl.isNotEmpty &&
-          redirectUrl.replaceAll(RegExp(r'/+
+      if (redirectUrl.isNotEmpty) {
+        final normalizedRedirect =
+            redirectUrl.replaceFirst(RegExp(r'/+$'), '');
+        final normalizedCurrent =
+            api.baseUrl.replaceFirst(RegExp(r'/+$'), '');
+        if (normalizedRedirect != normalizedCurrent) {
+          api.configureBaseUrl(normalizedRedirect);
+          result = await api.login(username.trim(), password);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(
+            'flapamamaku_server_url',
+            normalizedRedirect,
+          );
+        }
+      }
+
+      final token = result['token']?.toString() ?? '';
+      if (token.isEmpty) {
+        throw const ApiException('Kein Sitzungstoken erhalten.');
+      }
+
+      await _secureStorage.write(
+        key: 'flapamamaku_token',
+        value: token,
+      );
       currentUser = Map<String, dynamic>.from(
         result['user'] as Map<String, dynamic>,
       );
@@ -936,10 +956,6 @@ class AppStore extends ChangeNotifier {
       _pendingForcedPassword = mustChangePassword ? password : null;
       clubSelectionRequired = result['requires_club_selection'] == true;
 
-      // A temporary password must be replaced before the app makes any
-      // authenticated content requests. The login response already contains
-      // the current user and club list, so we can safely show the forced
-      // password screen immediately.
       if (mustChangePassword) {
         clubSelectionRequired = false;
         authError = null;
@@ -949,8 +965,6 @@ class AppStore extends ChangeNotifier {
       if (accessibleClubs.isEmpty) {
         await _loadAccessibleClubs();
       }
-      // Never show a club picker when the account has zero or one accessible
-      // club. This also protects against stale server flags after role changes.
       if (accessibleClubs.length <= 1) {
         clubSelectionRequired = false;
       }
