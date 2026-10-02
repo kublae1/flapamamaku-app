@@ -15,7 +15,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   bool _obscure = true;
-  bool _showServerOptions = false;
 
   @override
   void dispose() {
@@ -26,55 +25,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submit() async {
     final store = AppStoreScope.of(context);
-    if (!store.serverConfigured) {
-      await _changeServer();
-      return;
-    }
+    if (!store.serverConfigured) return;
     if (_username.text.trim().isEmpty || _password.text.isEmpty) return;
     await store.login(_username.text, _password.text);
-  }
-
-  Future<void> _changeServer() async {
-    final store = AppStoreScope.of(context);
-    final controller = TextEditingController(text: store.serverUrl);
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Vereinsserver'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: 'Serveradresse',
-            hintText: 'https://verein.example.ch',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Verbinden'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (value == null || value.trim().isEmpty) return;
-
-    final ok = await store.changeServerUrl(value);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            store.authError ?? 'Server konnte nicht übernommen werden.',
-          ),
-        ),
-      );
-    }
   }
 
   @override
@@ -230,60 +183,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           ),
                         ),
-                        if (store.canChangeServer) ...[
-                          const SizedBox(height: 14),
-                          TextButton.icon(
-                            onPressed: () => setState(
-                              () => _showServerOptions = !_showServerOptions,
-                            ),
-                            icon: Icon(
-                              _showServerOptions
-                                  ? Icons.expand_less_rounded
-                                  : Icons.dns_outlined,
-                            ),
-                            label: const Text('Vereinsserver'),
-                          ),
-                          if (_showServerOptions) ...[
-                            const SizedBox(height: 6),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF111315),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0x22FFFFFF),
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  if (store.serverConfigured)
-                                    Text(
-                                      store.serverUrl,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  if (store.serverConfigured)
-                                    const SizedBox(height: 8),
-                                  OutlinedButton.icon(
-                                    onPressed: _changeServer,
-                                    icon: const Icon(Icons.swap_horiz_rounded),
-                                    label: Text(
-                                      store.serverConfigured
-                                          ? 'Vereinsserver wechseln'
-                                          : 'Vereinsserver einrichten',
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ],
                         const SizedBox(height: 16),
                         const Row(
                           children: [
