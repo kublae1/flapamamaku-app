@@ -107,9 +107,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               fit: BoxFit.contain,
                             ),
                           )
-                        : Image.asset(
-                            'assets/FLAPAMAMAKU App-Icon.png',
-                            fit: BoxFit.contain,
+                        : const Icon(
+                            Icons.groups_rounded,
+                            size: 58,
+                            color: Color(0xFF6B7280),
                           ),
                   ),
                   const SizedBox(height: 18),
