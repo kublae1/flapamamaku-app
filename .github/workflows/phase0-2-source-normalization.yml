@@ -1,0 +1,76 @@
+name: Phase 0-2 Source Normalization
+
+on:
+  push:
+    branches:
+      - feature/masterplan-phase0-2-20261003
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/masterplan-phase0-2-20261003
+
+      - name: Apply targeted Phase-1 source cleanup
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          app_store = Path('lib/data/app_store.dart')
+          text = app_store.read_text(encoding='utf-8')
+          old = "localizedReason: 'Biometrische Anmeldung für FLAPAMAMAKU aktivieren',"
+          new = "localizedReason: 'Biometrische Anmeldung für $appName aktivieren',"
+          if old in text:
+              text = text.replace(old, new)
+              app_store.write_text(text, encoding='utf-8')
+
+          admin = Path('backend/static/admin.html')
+          html = admin.read_text(encoding='utf-8')
+          old_api_error = '  if (!response.ok) throw new Error(await response.text());'
+          new_api_error = '''  if (!response.ok) {
+            const raw = await response.text();
+            let detail = "";
+            try {
+              const parsed = JSON.parse(raw);
+              detail = String(parsed?.detail || "").trim();
+            } catch (_) {}
+            const defaults = {
+              400: "Die Eingabe konnte nicht verarbeitet werden.",
+              401: "Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.",
+              403: "Für diese Aktion fehlt die Berechtigung.",
+              404: "Der gewünschte Inhalt wurde nicht gefunden.",
+              409: "Die Änderung steht im Konflikt mit bereits vorhandenen Daten.",
+              413: "Die Datei ist zu gross.",
+              422: "Bitte die eingegebenen Daten prüfen.",
+              429: "Zu viele Anfragen. Bitte kurz warten und nochmals versuchen."
+            };
+            const message = detail || defaults[response.status] ||
+              (response.status >= 500
+                ? "Der Server hat momentan ein Problem. Bitte später nochmals versuchen."
+                : "Die Anfrage konnte nicht abgeschlossen werden.");
+            throw new Error(message);
+          }'''
+          if old_api_error in html:
+              html = html.replace(old_api_error, new_api_error)
+              admin.write_text(html, encoding='utf-8')
+          PY
+
+      - name: Commit normalization if needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No normalization changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/data/app_store.dart backend/static/admin.html
+          git commit -m "Normalize Phase 1 branding and admin error messages"
+          git push origin HEAD:feature/masterplan-phase0-2-20261003
