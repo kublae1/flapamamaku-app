@@ -37,6 +37,20 @@ def main() -> None:
     ):
         require(text, f'data-panel="{panel}"', f"navigation panel {label}")
 
+    # Binding media/content separation inside the CMS workspace.
+    for section, label in (
+        ("hero", "Startseite"),
+        ("sujet", "Sujet nächstes Jahr"),
+        ("archive", "Vergangene Sujet"),
+        ("gallery", "Galerie"),
+        ("photos", "Fotoalben"),
+        ("documents", "Dokumente"),
+        ("polls", "Umfragen"),
+        ("links", "Links"),
+        ("whatsapp", "WhatsApp"),
+    ):
+        require(text, f'data-section="{section}"', f"content section {label}")
+
     # Core editor forms.
     for form_id in (
         "news-form",
@@ -57,6 +71,7 @@ def main() -> None:
     require(text, "phone-preview", "phone/app preview")
     require(text, "existing-images", "existing image preview/management")
     require(text, 'id="status"', "central status area")
+    require(text, "image-order-controls", "image ordering controls")
 
     # Destructive actions must ask for confirmation.
     confirmations = text.count("confirm(")
