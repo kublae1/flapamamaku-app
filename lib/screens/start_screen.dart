@@ -29,6 +29,61 @@ class StartScreen extends StatelessWidget {
     return item.imageUrl.trim();
   }
 
+  Widget _heroPlaceholder(BuildContext context, AppStore store) {
+    if (store.appLogoUrl.trim().isNotEmpty) {
+      return ColoredBox(
+        color: const Color(0xFF061018),
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: OfflineNetworkImage(
+            store.appLogoUrl,
+            fit: BoxFit.contain,
+            headers: const {},
+            errorBuilder: (_, __, ___) => _neutralHero(store),
+          ),
+        ),
+      );
+    }
+    return _neutralHero(store);
+  }
+
+  Widget _neutralHero(AppStore store) {
+    return ColoredBox(
+      color: const Color(0xFF101317),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.image_outlined,
+                size: 66,
+                color: store.themeColor.withValues(alpha: 0.85),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                store.appName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Noch kein Hauptbild hinterlegt.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
@@ -37,7 +92,6 @@ class StartScreen extends StatelessWidget {
     final heroTitle = hero == null || hero.title.trim().isEmpty
         ? store.appName
         : hero.title.trim();
-    const fallbackHero = 'assets/images/hero_wasserturm_saurocker.png';
     final latestNews = store.news.take(3).toList();
 
     return Scaffold(
@@ -87,15 +141,16 @@ class StartScreen extends StatelessWidget {
               ),
             ),
             GestureDetector(
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => FlapImageViewerScreen(
-                    title: heroTitle,
-                    imageUrl: heroImage,
-                    imageAsset: fallbackHero,
-                  ),
-                ),
-              ),
+              onTap: heroImage.isEmpty
+                  ? null
+                  : () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => FlapImageViewerScreen(
+                            title: heroTitle,
+                            imageUrl: heroImage,
+                          ),
+                        ),
+                      ),
               child: Stack(
                 children: [
                   SizedBox(
@@ -107,34 +162,30 @@ class StartScreen extends StatelessWidget {
                             headers: store.api.authHeaders,
                             fit: BoxFit.contain,
                             alignment: Alignment.center,
-                            errorBuilder: (_, __, ___) => Image.asset(
-                              fallbackHero,
-                              fit: BoxFit.contain,
-                              alignment: Alignment.center,
-                            ),
+                            errorBuilder: (_, __, ___) =>
+                                _heroPlaceholder(context, store),
                           )
-                        : Image.asset(
-                            fallbackHero,
-                            fit: BoxFit.contain,
-                            alignment: Alignment.center,
-                          ),
+                        : _heroPlaceholder(context, store),
                   ),
-                  Positioned(
-                    right: 14,
-                    bottom: 14,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: const BoxDecoration(
-                        color: Color(0xB8000000),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.zoom_in_rounded,
-                        color: Colors.white,
-                        size: 22,
+                  if (heroImage.isNotEmpty)
+                    const Positioned(
+                      right: 14,
+                      bottom: 14,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Color(0xB8000000),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(
+                            Icons.zoom_in_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
