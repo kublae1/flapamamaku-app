@@ -620,7 +620,7 @@ class AppStore extends ChangeNotifier {
       }
 
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Biometrische Anmeldung für FLAPAMAMAKU aktivieren',
+        localizedReason: 'Biometrische Anmeldung für $appName aktivieren',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
