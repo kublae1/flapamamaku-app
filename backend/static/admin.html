@@ -1142,7 +1142,29 @@ async function api(path, options = {}) {
     : {"Content-Type": "application/json"};
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}});
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+  const raw = await response.text();
+  let detail = "";
+  try {
+    const parsed = JSON.parse(raw);
+    detail = String(parsed?.detail || "").trim();
+  } catch (_) {}
+  const defaults = {
+    400: "Die Eingabe konnte nicht verarbeitet werden.",
+    401: "Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.",
+    403: "Für diese Aktion fehlt die Berechtigung.",
+    404: "Der gewünschte Inhalt wurde nicht gefunden.",
+    409: "Die Änderung steht im Konflikt mit bereits vorhandenen Daten.",
+    413: "Die Datei ist zu gross.",
+    422: "Bitte die eingegebenen Daten prüfen.",
+    429: "Zu viele Anfragen. Bitte kurz warten und nochmals versuchen."
+  };
+  const message = detail || defaults[response.status] ||
+    (response.status >= 500
+      ? "Der Server hat momentan ein Problem. Bitte später nochmals versuchen."
+      : "Die Anfrage konnte nicht abgeschlossen werden.");
+  throw new Error(message);
+}
   if (response.status === 204) return null;
   return response.json();
 }
@@ -2395,7 +2417,29 @@ async function downloadSystemBackup(name) {
   const response = await fetch(`/api/system/backups/${encodeURIComponent(name)}`, {
     headers: token ? {Authorization: `Bearer ${token}`} : {},
   });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+  const raw = await response.text();
+  let detail = "";
+  try {
+    const parsed = JSON.parse(raw);
+    detail = String(parsed?.detail || "").trim();
+  } catch (_) {}
+  const defaults = {
+    400: "Die Eingabe konnte nicht verarbeitet werden.",
+    401: "Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.",
+    403: "Für diese Aktion fehlt die Berechtigung.",
+    404: "Der gewünschte Inhalt wurde nicht gefunden.",
+    409: "Die Änderung steht im Konflikt mit bereits vorhandenen Daten.",
+    413: "Die Datei ist zu gross.",
+    422: "Bitte die eingegebenen Daten prüfen.",
+    429: "Zu viele Anfragen. Bitte kurz warten und nochmals versuchen."
+  };
+  const message = detail || defaults[response.status] ||
+    (response.status >= 500
+      ? "Der Server hat momentan ein Problem. Bitte später nochmals versuchen."
+      : "Die Anfrage konnte nicht abgeschlossen werden.");
+  throw new Error(message);
+}
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

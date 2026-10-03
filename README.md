@@ -1,34 +1,55 @@
-# FLAPAMAMAKU App – Version 0.7
+# FLAPAMAMAKU Vereinsplattform
 
-FLAPAMAMAKU besteht jetzt aus zwei getrennten Teilen:
+Aktueller Entwicklungsstand: **Beta / Vor-1.0**  
+Mobile App laut `pubspec.yaml`: **0.8.33+35**.  
+Phase-0-Ausgangsversion am 03.10.2026: **0.8.32+34**.
 
-1. **Mobile Flutter-App** für Android, später auch iOS.
-2. **Backend + PC-Admin** als Docker-fähige Serverkomponente.
+Das Projekt besteht aus einer mobilen Flutter-App und einem zentralen Docker-Backend mit Browser-Administration. Der verbindliche Projektplan liegt unter [`docs/MASTERPLAN_2026.md`](docs/MASTERPLAN_2026.md).
 
-## Mobile App
+## Architektur
 
-Enthalten:
-- Startseite
-- News-Feed
-- Termine mit Wischaktionen
-- Mitglieder
-- Partnerin / Partner
-- Telefon, E-Mail und Google-Maps-Aufruf
-- Archiv und Sujet-Galerie
-- Android-App-Icon
-- lokaler Admin-Prototyp
+### Mobile App
 
-## Backend / PC-Admin
+- Flutter für Android; iOS-Buildpipeline ist vorbereitet.
+- Login und rollenbasierte Berechtigungen.
+- servergeführtes Vereins-Branding / White-Label-Konfiguration.
+- News, Termine, Mitglieder, Mitgliederfilter.
+- Hauptbild / Hero, Sujet, Archiv, Galerie, Fotoalben und Dokumente.
+- Umfragen und Links.
+- Offline-Cache für zuletzt erfolgreich synchronisierte Daten.
+- Biometrie und Push-Infrastruktur.
+- konfigurierbare Serveradresse je Build/Installation.
+
+### Backend / PC-Admin
 
 Im Ordner `backend`:
 
-- REST-API für News, Termine und Mitglieder
-- persistente SQLite-Datenbank
-- Web-Administration für PC/Notebook
-- Dockerfile
-- Docker Compose für Synology / Portainer
-- API-Dokumentation
-- GitHub-Actions-Test für Backend und Docker-Build
+- FastAPI REST-API.
+- persistente SQLite-Datenbank.
+- Browser-CMS unter `/admin`.
+- Benutzer, Rollen und Einzelberechtigungen.
+- Vereins-/App-Konfiguration.
+- Bild-/Datei-Uploads.
+- Dockerfile und Compose-Konfigurationen.
+- öffentliche Deployment-Dokumentation.
+
+## Datenfluss
+
+Für produktiv administrierbare Inhalte gilt verbindlich:
+
+```text
+PC-Admin / App-Admin
+        ↓
+       API
+        ↓
+    Datenbank
+        ↓
+   Mobile App
+```
+
+Feste App-Assets sind nur für technische/visuelle Grundbestandteile und neutrale Fallbacks vorgesehen. Produktive Vereinsinhalte dürfen nicht aus versteckten Testdaten stammen.
+
+## Backend starten
 
 Nach dem Docker-Start:
 
@@ -36,42 +57,51 @@ Nach dem Docker-Start:
 - API-Status: `http://SERVER-IP:8087/api/health`
 - API-Dokumentation: `http://SERVER-IP:8087/api/docs`
 
-Siehe `backend/README.md`.
-
-## Nächste Entwicklungsschritte
-
-- mobile App an die zentrale API anbinden
-- Login und Berechtigungen
-- echter Foto-/Datei-Upload
-- Termin-Anmeldungen zentral speichern
-- Dokumente und Fotoalben
-- Push-Mitteilungen
-- Backup-/Restore-Konzept für Synology
-
-Der aktuelle PC-Admin ist eine Entwicklungsgrundlage und noch nicht für eine öffentliche Internetfreigabe abgesichert.
-
+Weitere Hinweise: [`backend/README.md`](backend/README.md) und [`backend/PUBLIC_DEPLOYMENT.md`](backend/PUBLIC_DEPLOYMENT.md).
 
 ## Mobile App mit Backend verbinden
 
-Die App liest die Server-Adresse über den Build-Wert `API_BASE_URL`.
+Die Build-Adresse wird über `API_BASE_URL` gesetzt. In GitHub Actions wird dafür die Repository-Variable `FLAPAMAMAKU_API_BASE_URL` verwendet.
 
-In GitHub kann dafür später die Repository-Variable
-`FLAPAMAMAKU_API_BASE_URL` gesetzt werden, z. B.:
+Die App kann zusätzlich eine gespeicherte Serveradresse verwenden, sofern der Build `ALLOW_SERVER_CHANGE` zulässt. Vor dem Verbinden prüft die App die Server-Instanz über `/api/app-config` und die erwartete `CLUB_INSTANCE_ID`.
 
-```
-http://192.168.1.50:8087
-```
+## Synchronisation und Offline-Verhalten
 
-Der Android-Build übernimmt diesen Wert automatisch.
+- Nach erfolgreicher Anmeldung werden News, Termine, Mitglieder, Filter und Inhalte vom Server geladen.
+- Im laufenden Betrieb erfolgt periodische Synchronisation.
+- Die Oberflächen unterstützen manuelles Aktualisieren.
+- Nach erfolgreicher Synchronisation wird ein lokaler Offline-Cache gespeichert.
+- Bei vorübergehend fehlendem Server können zuletzt synchronisierte Daten weiter angezeigt werden.
+- Bei konfiguriertem Vereinsserver werden keine eingebauten Demo-Inhalte als Live-Daten angezeigt.
 
-Verhalten:
-- ohne Server-Adresse: App benutzt weiterhin die lokalen Testdaten
-- mit Server-Adresse: App synchronisiert News, Termine und Mitglieder beim Start
-- danach automatische Synchronisation alle 30 Sekunden
-- News können zusätzlich per Ziehen nach unten manuell aktualisiert werden
-- wenn der Server vorübergehend nicht erreichbar ist, bleibt die App mit den zuletzt vorhandenen Daten bedienbar
+## CI / Builds
 
+GitHub Actions enthält unter anderem Workflows für:
 
-## Release / Store-Vorbereitung
+- Android-Build.
+- iOS-Build.
+- Backend-Tests.
+- Backend-Docker-Image.
+- Public Smoke Tests.
+- White-Label-Profilvalidierung.
+- Release-Candidate-Gate.
+- verbindliches `Phase 0-2 Gate` mit API-/Persistenzvertrag, PC-CMS-Vertrag, Flutter-Analyse und Flutter-Tests.
 
-Die Android-Pipeline ist für eine dauerhafte Release-Signierung, APK und Google-Play-AAB vorbereitet. Die eigentlichen privaten Schlüssel bleiben ausserhalb des Repositories in GitHub Secrets. Details: `docs/RELEASE_SETUP.md`.
+Release-/Store-Konfiguration: [`docs/RELEASE_SETUP.md`](docs/RELEASE_SETUP.md).
+
+## Aktuelle verbindliche Entwicklungsphase
+
+Am 03.10.2026 wurden **Phase 0 bis einschließlich Phase 2** des Masterplans freigegeben und auf dem Arbeitsbranch technisch umgesetzt:
+
+1. Phase 0 – Ausgangspunkt sichern.
+2. Phase 1 – Datenfluss und Grundstabilität.
+3. Phase 2 – Adminbereich zum Vereins-CMS konsolidieren.
+
+Phase 3 und später bleiben gesperrt, bis der Auftraggeber sie ausdrücklich freigibt.
+
+Dokumentation:
+
+- [`docs/PHASE0_BASELINE.md`](docs/PHASE0_BASELINE.md)
+- [`docs/PHASE1_ACCEPTANCE.md`](docs/PHASE1_ACCEPTANCE.md)
+- [`docs/PHASE2_CMS_ACCEPTANCE.md`](docs/PHASE2_CMS_ACCEPTANCE.md)
+- [`docs/TASKS_PHASE0_2.md`](docs/TASKS_PHASE0_2.md)

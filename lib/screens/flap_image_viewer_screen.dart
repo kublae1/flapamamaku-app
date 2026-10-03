@@ -43,14 +43,14 @@ class _FlapImageViewerScreenState extends State<FlapImageViewerScreen> {
     final cleaned = value
         .replaceAll(RegExp(r'[^A-Za-z0-9ÄÖÜäöü_-]+'), '_')
         .replaceAll(RegExp(r'_+'), '_');
-    return cleaned.isEmpty ? 'FLAPAMAMAKU' : cleaned;
+    return cleaned.isEmpty ? 'Vereinsbild' : cleaned;
   }
 
   Future<void> _shareCurrent() async {
     if (sharing || widget.imageUrl.isEmpty) return;
     setState(() => sharing = true);
+    final store = AppStoreScope.of(context);
     try {
-      final store = AppStoreScope.of(context);
       final downloaded = await store.api.downloadImage(widget.imageUrl);
       final extension = _extension(downloaded.mimeType);
       final directory = await getTemporaryDirectory();
@@ -66,13 +66,30 @@ class _FlapImageViewerScreenState extends State<FlapImageViewerScreen> {
       );
     } catch (error) {
       if (mounted) {
+        final message = store.userMessageForError(
+          error,
+          fallback: 'Bild konnte nicht exportiert werden.',
+        );
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Bild konnte nicht exportiert werden: $error')),
+          SnackBar(content: Text(message)),
         );
       }
     } finally {
       if (mounted) setState(() => sharing = false);
     }
+  }
+
+  Widget _missingImage() {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(
+          'Kein Bild verfügbar.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70),
+        ),
+      ),
+    );
   }
 
   @override
@@ -115,22 +132,22 @@ class _FlapImageViewerScreenState extends State<FlapImageViewerScreen> {
                         headers: headers,
                         width: double.infinity,
                         fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => widget.imageAsset.isNotEmpty
-                            ? Image.asset(
-                                widget.imageAsset,
-                                width: double.infinity,
-                                fit: BoxFit.contain,
-                              )
-                            : const Text(
-                                'Bild konnte nicht geladen werden.',
-                                style: TextStyle(color: Colors.white70),
-                              ),
+                        errorBuilder: (_, __, ___) =>
+                            widget.imageAsset.isNotEmpty
+                                ? Image.asset(
+                                    widget.imageAsset,
+                                    width: double.infinity,
+                                    fit: BoxFit.contain,
+                                  )
+                                : _missingImage(),
                       )
-                    : Image.asset(
-                        widget.imageAsset,
-                        width: double.infinity,
-                        fit: BoxFit.contain,
-                      ),
+                    : widget.imageAsset.isNotEmpty
+                        ? Image.asset(
+                            widget.imageAsset,
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                          )
+                        : _missingImage(),
               ),
             ),
           ),
