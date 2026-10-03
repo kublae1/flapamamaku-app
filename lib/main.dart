@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'data/app_store.dart';
+import 'data/runtime_content_policy.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'screens/biometric_lock_screen.dart';
@@ -30,6 +31,10 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        // Phase-1 invariant: a configured club server is the source of truth.
+        // Bundled development fixtures must never be presented as live data.
+        store.enforceServerContentPolicy();
+
         return AppStoreScope(
           store: store,
           child: MaterialApp(
