@@ -1,0 +1,77 @@
+name: Phase 0-2 Gate
+
+on:
+  push:
+    branches:
+      - feature/masterplan-phase0-2-20261003
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Start isolated backend
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase1.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-phase1-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+          FLAPAMAMAKU_ENV: development
+          FLAPAMAMAKU_ALLOWED_ORIGINS: '*'
+          FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS: '86400'
+        run: |
+          rm -f /tmp/flapamamaku-phase1.db
+          mkdir -p /tmp/flapamamaku-phase1-backups
+          cd backend
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8087 >/tmp/phase1-backend.log 2>&1 &
+          echo $! >/tmp/phase1-backend.pid
+
+      - name: Verify Admin-API-Database-App contract
+        run: python backend/tests/phase1_contract_smoke.py
+
+      - name: Show backend log on failure
+        if: failure()
+        run: cat /tmp/phase1-backend.log || true
+
+  flutter-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform files if missing
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name flapamamaku_app .
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
