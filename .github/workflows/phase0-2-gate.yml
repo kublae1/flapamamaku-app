@@ -28,6 +28,9 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 
+      - name: Verify Phase-2 PC-admin CMS contract
+        run: python backend/tests/admin_cms_contract.py
+
       - name: Start isolated backend
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-phase1.db
