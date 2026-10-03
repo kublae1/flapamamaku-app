@@ -21,6 +21,34 @@ class AdminScreen extends StatelessWidget {
     return months[value.month - 1];
   }
 
+  void _message(BuildContext context, String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<bool> _confirmDelete(BuildContext context, String label) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Wirklich löschen?'),
+            content: Text('$label wird endgültig vom Server gelöscht.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Abbrechen'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Löschen'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   Future<void> _editNews(
     BuildContext context, {
     int? index,
@@ -34,80 +62,61 @@ class AdminScreen extends StatelessWidget {
     final date = TextEditingController(
       text: existing?.date ?? _dateLabel(now),
     );
-    String imageAsset = existing?.imageAsset ?? '';
 
     final save = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(index == null ? 'Neue News' : 'News bearbeiten'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: title,
-                  decoration: const InputDecoration(labelText: 'Titel'),
+      builder: (dialogContext) => AlertDialog(
+        title: Text(index == null ? 'Neue News' : 'News bearbeiten'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: title,
+                decoration: const InputDecoration(labelText: 'Titel'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: text,
+                minLines: 4,
+                maxLines: 8,
+                decoration: const InputDecoration(labelText: 'Text'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: date,
+                decoration: const InputDecoration(
+                  labelText: 'Datum',
+                  hintText: 'z. B. 03.10.2026',
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: text,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: const InputDecoration(labelText: 'Text'),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: date,
-                  decoration: const InputDecoration(labelText: 'Datum'),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: imageAsset,
-                  decoration: const InputDecoration(labelText: 'Foto optional'),
-                  items: const [
-                    DropdownMenuItem(value: '', child: Text('Kein Foto')),
-                    DropdownMenuItem(
-                      value: 'assets/images/year_motto_pig_rockers.jpg',
-                      child: Text('Schweine Rocker'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'assets/images/archive_top_hats_night.jpg',
-                      child: Text('Zylinder'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'assets/images/archive_vikings_bar.jpg',
-                      child: Text('Wikinger'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'assets/images/hero_fireworks.jpg',
-                      child: Text('Feuerwerk'),
-                    ),
-                  ],
-                  onChanged: (value) => setDialogState(
-                    () => imageAsset = value ?? '',
-                  ),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Newsbilder werden zentral im PC-Admin verwaltet. '
+                'Die App verwendet keine fest eingebauten Vereinsbilder mehr.',
+                style: TextStyle(color: Colors.white60, fontSize: 13),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Abbrechen'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Speichern'),
-            ),
-          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Speichern'),
+          ),
+        ],
       ),
     );
 
-    if (save != true ||
-        title.text.trim().isEmpty ||
-        text.text.trim().isEmpty) {
+    if (save != true) return;
+    if (title.text.trim().isEmpty || text.text.trim().isEmpty) {
+      if (context.mounted) {
+        _message(context, 'Bitte Titel und Text vollständig eingeben.');
+      }
       return;
     }
 
@@ -117,7 +126,6 @@ class AdminScreen extends StatelessWidget {
       text.text.trim(),
       id: existing?.id,
       createdAt: existing?.createdAt ?? now.toIso8601String(),
-      imageAsset: imageAsset,
       imageUrl: existing?.imageUrl ?? '',
     );
 
@@ -128,16 +136,19 @@ class AdminScreen extends StatelessWidget {
         await store.updateNews(index, item);
       }
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(index == null ? 'News gespeichert.' : 'News aktualisiert.'),
-          ),
+        _message(
+          context,
+          index == null ? 'News gespeichert.' : 'News aktualisiert.',
         );
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('News konnten nicht gespeichert werden: $error')),
+        _message(
+          context,
+          store.userMessageForError(
+            error,
+            fallback: 'News konnten nicht gespeichert werden.',
+          ),
         );
       }
     }
@@ -157,7 +168,7 @@ class AdminScreen extends StatelessWidget {
 
     final save = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(index == null ? 'Termin erfassen' : 'Termin bearbeiten'),
         content: SingleChildScrollView(
           child: Column(
@@ -188,19 +199,23 @@ class AdminScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Abbrechen'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('Speichern'),
           ),
         ],
       ),
     );
 
+    if (save != true) return;
     final parsedDate = DateTime.tryParse(eventDate.text.trim());
-    if (save != true || parsedDate == null || title.text.trim().isEmpty) {
+    if (parsedDate == null || title.text.trim().isEmpty) {
+      if (context.mounted) {
+        _message(context, 'Bitte ein gültiges Datum (YYYY-MM-DD) und einen Titel eingeben.');
+      }
       return;
     }
 
@@ -221,16 +236,19 @@ class AdminScreen extends StatelessWidget {
         await store.updateEvent(index, item);
       }
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(index == null ? 'Termin gespeichert.' : 'Termin aktualisiert.'),
-          ),
+        _message(
+          context,
+          index == null ? 'Termin gespeichert.' : 'Termin aktualisiert.',
         );
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Termin konnte nicht gespeichert werden: $error')),
+        _message(
+          context,
+          store.userMessageForError(
+            error,
+            fallback: 'Termin konnte nicht gespeichert werden.',
+          ),
         );
       }
     }
@@ -258,7 +276,7 @@ class AdminScreen extends StatelessWidget {
 
     final save = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(index == null ? 'Mitglied erfassen' : 'Mitglied bearbeiten'),
         content: SingleChildScrollView(
           child: Column(
@@ -329,18 +347,22 @@ class AdminScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Abbrechen'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('Speichern'),
           ),
         ],
       ),
     );
 
-    if (save != true || name.text.trim().isEmpty) return;
+    if (save != true) return;
+    if (name.text.trim().isEmpty) {
+      if (context.mounted) _message(context, 'Bitte einen Namen eingeben.');
+      return;
+    }
 
     final item = MemberItem(
       name.text.trim(),
@@ -366,17 +388,62 @@ class AdminScreen extends StatelessWidget {
         await store.updateMember(index, item);
       }
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(index == null ? 'Mitglied gespeichert.' : 'Mitglied aktualisiert.'),
-          ),
+        _message(
+          context,
+          index == null ? 'Mitglied gespeichert.' : 'Mitglied aktualisiert.',
         );
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Mitglied konnte nicht gespeichert werden: $error')),
+        _message(
+          context,
+          store.userMessageForError(
+            error,
+            fallback: 'Mitglied konnte nicht gespeichert werden.',
+          ),
         );
+      }
+    }
+  }
+
+  Future<void> _deleteNews(BuildContext context, int index) async {
+    final store = AppStoreScope.of(context);
+    final item = store.news[index];
+    if (!await _confirmDelete(context, 'News „${item.title}“')) return;
+    try {
+      await store.deleteNews(index);
+      if (context.mounted) _message(context, 'News gelöscht.');
+    } catch (error) {
+      if (context.mounted) {
+        _message(context, store.userMessageForError(error, fallback: 'News konnten nicht gelöscht werden.'));
+      }
+    }
+  }
+
+  Future<void> _deleteEvent(BuildContext context, int index) async {
+    final store = AppStoreScope.of(context);
+    final item = store.events[index];
+    if (!await _confirmDelete(context, 'Termin „${item.title}“')) return;
+    try {
+      await store.deleteEvent(index);
+      if (context.mounted) _message(context, 'Termin gelöscht.');
+    } catch (error) {
+      if (context.mounted) {
+        _message(context, store.userMessageForError(error, fallback: 'Termin konnte nicht gelöscht werden.'));
+      }
+    }
+  }
+
+  Future<void> _deleteMember(BuildContext context, int index) async {
+    final store = AppStoreScope.of(context);
+    final item = store.members[index];
+    if (!await _confirmDelete(context, 'Mitglied „${item.name}“')) return;
+    try {
+      await store.deleteMember(index);
+      if (context.mounted) _message(context, 'Mitglied gelöscht.');
+    } catch (error) {
+      if (context.mounted) {
+        _message(context, store.userMessageForError(error, fallback: 'Mitglied konnte nicht gelöscht werden.'));
       }
     }
   }
@@ -406,6 +473,7 @@ class AdminScreen extends StatelessWidget {
         _NewsAdminList(
           onAdd: () => _editNews(context),
           onEdit: (index) => _editNews(context, index: index),
+          onDelete: (index) => _deleteNews(context, index),
         ),
       );
     }
@@ -415,6 +483,7 @@ class AdminScreen extends StatelessWidget {
         _EventAdminList(
           onAdd: () => _editEvent(context),
           onEdit: (index) => _editEvent(context, index: index),
+          onDelete: (index) => _deleteEvent(context, index),
         ),
       );
     }
@@ -424,6 +493,7 @@ class AdminScreen extends StatelessWidget {
         _MemberAdminList(
           onAdd: () => _editMember(context),
           onEdit: (index) => _editMember(context, index: index),
+          onDelete: (index) => _deleteMember(context, index),
         ),
       );
     }
@@ -449,6 +519,19 @@ class AdminScreen extends StatelessWidget {
             'Administration',
             style: TextStyle(fontWeight: FontWeight.w900),
           ),
+          actions: [
+            IconButton(
+              tooltip: 'Aktualisieren',
+              onPressed: store.isSyncing ? null : store.refreshFromServer,
+              icon: store.isSyncing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh),
+            ),
+          ],
           bottom: TabBar(
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white60,
@@ -457,7 +540,21 @@ class AdminScreen extends StatelessWidget {
             tabs: tabs,
           ),
         ),
-        body: TabBarView(children: views),
+        body: Column(
+          children: [
+            if (store.syncError != null && store.syncError!.trim().isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                color: const Color(0xFF4A1D20),
+                child: Text(
+                  store.syncError!,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            Expanded(child: TabBarView(children: views)),
+          ],
+        ),
       ),
     );
   }
@@ -466,55 +563,62 @@ class AdminScreen extends StatelessWidget {
 class _NewsAdminList extends StatelessWidget {
   final VoidCallback onAdd;
   final ValueChanged<int> onEdit;
+  final ValueChanged<int> onDelete;
 
   const _NewsAdminList({
     required this.onAdd,
     required this.onEdit,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
 
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      children: [
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: FlapBrand.burgundy,
-            foregroundColor: Colors.white,
-            minimumSize: const Size.fromHeight(50),
+    return RefreshIndicator(
+      onRefresh: store.refreshFromServer,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: FlapBrand.burgundy,
+              foregroundColor: Colors.white,
+              minimumSize: const Size.fromHeight(50),
+            ),
+            onPressed: onAdd,
+            icon: const Icon(Icons.add),
+            label: const Text('Neue News'),
           ),
-          onPressed: onAdd,
-          icon: const Icon(Icons.add),
-          label: const Text('Neue News'),
-        ),
-        const SizedBox(height: 12),
-        for (var i = 0; i < store.news.length; i++)
-          Card(
-            color: const Color(0xFF191B1E),
-            child: ListTile(
-              title: Text(
-                store.news[i].title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+          const SizedBox(height: 12),
+          if (store.news.isEmpty)
+            const _AdminEmptyState('Noch keine News vorhanden.'),
+          for (var i = 0; i < store.news.length; i++)
+            Card(
+              color: const Color(0xFF191B1E),
+              child: ListTile(
+                title: Text(
+                  store.news[i].title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                subtitle: Text(
+                  store.news[i].date,
+                  style: const TextStyle(color: Colors.white60),
+                ),
+                onTap: () => onEdit(i),
+                trailing: IconButton(
+                  tooltip: 'Löschen',
+                  onPressed: () => onDelete(i),
+                  icon: const Icon(Icons.delete_outline, color: Colors.white54),
                 ),
               ),
-              subtitle: Text(
-                store.news[i].date,
-                style: const TextStyle(color: Colors.white60),
-              ),
-              onTap: () => onEdit(i),
-              trailing: IconButton(
-                tooltip: 'Löschen',
-                onPressed: () => store.deleteNews(i),
-                icon: const Icon(Icons.delete_outline, color: Colors.white54),
-              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -522,56 +626,62 @@ class _NewsAdminList extends StatelessWidget {
 class _EventAdminList extends StatelessWidget {
   final VoidCallback onAdd;
   final ValueChanged<int> onEdit;
+  final ValueChanged<int> onDelete;
 
   const _EventAdminList({
     required this.onAdd,
     required this.onEdit,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
 
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      children: [
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: FlapBrand.burgundy,
-            foregroundColor: Colors.white,
-            minimumSize: const Size.fromHeight(50),
+    return RefreshIndicator(
+      onRefresh: store.refreshFromServer,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: FlapBrand.burgundy,
+              foregroundColor: Colors.white,
+              minimumSize: const Size.fromHeight(50),
+            ),
+            onPressed: onAdd,
+            icon: const Icon(Icons.add),
+            label: const Text('Termin erfassen'),
           ),
-          onPressed: onAdd,
-          icon: const Icon(Icons.add),
-          label: const Text('Termin erfassen'),
-        ),
-        const SizedBox(height: 12),
-        for (var i = 0; i < store.events.length; i++)
-          Card(
-            color: const Color(0xFF191B1E),
-            child: ListTile(
-              title: Text(
-                store.events[i].title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+          const SizedBox(height: 12),
+          if (store.events.isEmpty)
+            const _AdminEmptyState('Noch keine Termine vorhanden.'),
+          for (var i = 0; i < store.events.length; i++)
+            Card(
+              color: const Color(0xFF191B1E),
+              child: ListTile(
+                title: Text(
+                  store.events[i].title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                subtitle: Text(
+                  '${store.events[i].displayDate} · ${store.events[i].time}',
+                  style: const TextStyle(color: Colors.white60),
+                ),
+                onTap: () => onEdit(i),
+                trailing: IconButton(
+                  tooltip: 'Löschen',
+                  onPressed: () => onDelete(i),
+                  icon: const Icon(Icons.delete_outline, color: Colors.white54),
                 ),
               ),
-              subtitle: Text(
-                '${store.events[i].displayDate} · '
-                '${store.events[i].time}',
-                style: const TextStyle(color: Colors.white60),
-              ),
-              onTap: () => onEdit(i),
-              trailing: IconButton(
-                tooltip: 'Löschen',
-                onPressed: () => store.deleteEvent(i),
-                icon: const Icon(Icons.delete_outline, color: Colors.white54),
-              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -579,57 +689,85 @@ class _EventAdminList extends StatelessWidget {
 class _MemberAdminList extends StatelessWidget {
   final VoidCallback onAdd;
   final ValueChanged<int> onEdit;
+  final ValueChanged<int> onDelete;
 
   const _MemberAdminList({
     required this.onAdd,
     required this.onEdit,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
 
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      children: [
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: FlapBrand.burgundy,
-            foregroundColor: Colors.white,
-            minimumSize: const Size.fromHeight(50),
+    return RefreshIndicator(
+      onRefresh: store.refreshFromServer,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: FlapBrand.burgundy,
+              foregroundColor: Colors.white,
+              minimumSize: const Size.fromHeight(50),
+            ),
+            onPressed: onAdd,
+            icon: const Icon(Icons.person_add_alt_1),
+            label: const Text('Mitglied erfassen'),
           ),
-          onPressed: onAdd,
-          icon: const Icon(Icons.person_add_alt_1),
-          label: const Text('Mitglied erfassen'),
-        ),
-        const SizedBox(height: 12),
-        for (var i = 0; i < store.members.length; i++)
-          Card(
-            color: const Color(0xFF191B1E),
-            child: ListTile(
-              title: Text(
-                store.members[i].name,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+          const SizedBox(height: 12),
+          if (store.members.isEmpty)
+            const _AdminEmptyState('Noch keine Mitglieder vorhanden.'),
+          for (var i = 0; i < store.members.length; i++)
+            Card(
+              color: const Color(0xFF191B1E),
+              child: ListTile(
+                title: Text(
+                  store.members[i].name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                subtitle: Text(
+                  store.members[i].occupation.isEmpty
+                      ? store.members[i].role
+                      : '${store.members[i].role} · ${store.members[i].occupation}',
+                  style: const TextStyle(color: Colors.white60),
+                ),
+                onTap: () => onEdit(i),
+                trailing: IconButton(
+                  tooltip: 'Löschen',
+                  onPressed: () => onDelete(i),
+                  icon: const Icon(Icons.delete_outline, color: Colors.white54),
                 ),
               ),
-              subtitle: Text(
-                store.members[i].occupation.isEmpty
-                    ? store.members[i].role
-                    : '${store.members[i].role} · ${store.members[i].occupation}',
-                style: const TextStyle(color: Colors.white60),
-              ),
-              onTap: () => onEdit(i),
-              trailing: IconButton(
-                tooltip: 'Löschen',
-                onPressed: () => store.deleteMember(i),
-                icon: const Icon(Icons.delete_outline, color: Colors.white54),
-              ),
             ),
-          ),
-      ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminEmptyState extends StatelessWidget {
+  final String text;
+
+  const _AdminEmptyState(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF191B1E),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x18FFFFFF)),
+      ),
+      child: Text(text, style: const TextStyle(color: Colors.white60)),
     );
   }
 }
