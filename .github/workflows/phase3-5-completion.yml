@@ -20,8 +20,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/masterplan-phase3-5-20261004
+
+      - name: Repair completion migration anchors
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tools/phase3_5_completion.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''# Extend existing installations safely in init_db by piggybacking on existing column migration block.
+          anchor = ''' + "'''        if \"sort_order\" not in _table_columns(db, \"news\"):\n            db.execute(\"ALTER TABLE news ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0\")\n'''" + '''
+          addition = anchor + ''' + "'''        event_columns = _table_columns(db, \"events\")\n        for column, definition in {\n            \"end_time\": \"TEXT NOT NULL DEFAULT ''\",\n            \"meeting_point\": \"TEXT NOT NULL DEFAULT ''\",\n            \"description\": \"TEXT NOT NULL DEFAULT ''\",\n            \"responsible\": \"TEXT NOT NULL DEFAULT ''\",\n            \"registration_deadline\": \"TEXT NOT NULL DEFAULT ''\",\n            \"registration_enabled\": \"INTEGER NOT NULL DEFAULT 1\",\n            \"document_url\": \"TEXT NOT NULL DEFAULT ''\",\n        }.items():\n            if column not in event_columns:\n                db.execute(f\"ALTER TABLE events ADD COLUMN {column} {definition}\")\n'''" + '''
+          text = replace_once(text, anchor, addition, "event additive migration")'''
+          new = '''# Extend existing installations safely in init_db next to the existing event migration.
+          anchor = ''' + "'''        _ensure_column(db, \"events\", \"event_date\", \"TEXT NOT NULL DEFAULT ''\")\n'''" + '''
+          addition = anchor + ''' + "'''        for column, definition in {\n            \"end_time\": \"TEXT NOT NULL DEFAULT ''\",\n            \"meeting_point\": \"TEXT NOT NULL DEFAULT ''\",\n            \"description\": \"TEXT NOT NULL DEFAULT ''\",\n            \"responsible\": \"TEXT NOT NULL DEFAULT ''\",\n            \"registration_deadline\": \"TEXT NOT NULL DEFAULT ''\",\n            \"registration_enabled\": \"INTEGER NOT NULL DEFAULT 1\",\n            \"document_url\": \"TEXT NOT NULL DEFAULT ''\",\n        }.items():\n            _ensure_column(db, \"events\", column, definition)\n'''" + '''
+          text = replace_once(text, anchor, addition, "event additive migration")'''
+          if old not in text:
+              raise SystemExit('Could not locate obsolete event migration anchor in completion script')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply Phase 3-5 completion migration
         run: python3 tools/phase3_5_completion.py
+
       - name: Commit completed sources
         shell: bash
         run: |
@@ -31,6 +54,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/app/main.py backend/app/phase45.py backend/static/admin.html lib/models/app_data.dart lib/data/api_service.dart lib/screens/admin_screen.dart lib/screens/content_detail_screens.dart lib/screens/year_motto_screen.dart pubspec.yaml
+          git add tools/phase3_5_completion.py backend/app/main.py backend/app/phase45.py backend/static/admin.html lib/models/app_data.dart lib/data/api_service.dart lib/screens/admin_screen.dart lib/screens/content_detail_screens.dart lib/screens/year_motto_screen.dart pubspec.yaml
           git commit -m "Complete Phase 3-5 functionality and tenant hardening"
           git push origin HEAD:feature/masterplan-phase3-5-20261004
