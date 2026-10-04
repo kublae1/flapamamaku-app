@@ -1,0 +1,36 @@
+name: Phase 3-5 Completion
+
+on:
+  push:
+    branches:
+      - feature/masterplan-phase3-5-20261004
+    paths:
+      - tools/phase3_5_completion.py
+      - .github/workflows/phase3-5-completion.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  complete:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/masterplan-phase3-5-20261004
+      - name: Apply Phase 3-5 completion migration
+        run: python3 tools/phase3_5_completion.py
+      - name: Commit completed sources
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No completion changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/main.py backend/app/phase45.py backend/static/admin.html lib/models/app_data.dart lib/data/api_service.dart lib/screens/admin_screen.dart lib/screens/content_detail_screens.dart lib/screens/year_motto_screen.dart pubspec.yaml
+          git commit -m "Complete Phase 3-5 functionality and tenant hardening"
+          git push origin HEAD:feature/masterplan-phase3-5-20261004
