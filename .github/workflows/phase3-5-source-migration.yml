@@ -1,34 +1,17 @@
 name: Phase 3-5 Source Migration
 
 on:
-  push:
-    branches:
-      - feature/masterplan-phase3-5-20261004
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  migrate:
-    if: github.actor != 'github-actions[bot]'
+  historical-migration-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feature/masterplan-phase3-5-20261004
-
-      - name: Apply Phase 3-5 source migration
-        run: python3 tools/phase3_5_source_migration.py
-
-      - name: Commit migrated sources
-        shell: bash
+      - name: Migration status
         run: |
-          if git diff --quiet; then
-            echo "No source migration changes required."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/app/main.py backend/app/phase45.py backend/static/admin.html lib/data/api_service.dart lib/models/app_data.dart pubspec.yaml
-          git commit -m "Apply Phase 3-5 canonical data and tenant hardening"
-          git push origin HEAD:feature/masterplan-phase3-5-20261004
+          echo "The canonical Phase 3-5 source migration has already been applied."
+          echo "This workflow is retained only as a historical/manual verification point."
