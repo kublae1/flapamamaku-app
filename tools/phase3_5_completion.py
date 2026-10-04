@@ -60,12 +60,10 @@ text = replace_once(
     "event schema fields",
 )
 
-# Extend existing installations safely in init_db by piggybacking on existing column migration block.
-anchor = '''        if "sort_order" not in _table_columns(db, "news"):
-            db.execute("ALTER TABLE news ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+# Extend existing installations safely in init_db next to the existing event migration.
+anchor = '''        _ensure_column(db, "events", "event_date", "TEXT NOT NULL DEFAULT ''")
 '''
-addition = anchor + '''        event_columns = _table_columns(db, "events")
-        for column, definition in {
+addition = anchor + '''        for column, definition in {
             "end_time": "TEXT NOT NULL DEFAULT ''",
             "meeting_point": "TEXT NOT NULL DEFAULT ''",
             "description": "TEXT NOT NULL DEFAULT ''",
@@ -74,8 +72,7 @@ addition = anchor + '''        event_columns = _table_columns(db, "events")
             "registration_enabled": "INTEGER NOT NULL DEFAULT 1",
             "document_url": "TEXT NOT NULL DEFAULT ''",
         }.items():
-            if column not in event_columns:
-                db.execute(f"ALTER TABLE events ADD COLUMN {column} {definition}")
+            _ensure_column(db, "events", column, definition)
 '''
 text = replace_once(text, anchor, addition, "event additive migration")
 
@@ -850,12 +847,19 @@ text = replace_once(
 # edit function checkbox restoration anchor around generic edit
 text = replace_once(
     text,
-    '''    resources[resource].forEach(key => form.elements[key].value = item[key] || "");
+    '''    form.elements[key].value = item[key] || "";
+  });
+
+  if (resource === "members") {
 ''',
-    '''    resources[resource].forEach(key => form.elements[key].value = item[key] || "");
-    if (resource === "events") {
-      form.elements.registration_enabled.checked = item.registration_enabled !== false && item.registration_enabled !== 0;
-    }
+    '''    form.elements[key].value = item[key] || "";
+  });
+
+  if (resource === "events") {
+    form.elements.registration_enabled.checked = item.registration_enabled !== false && item.registration_enabled !== 0;
+  }
+
+  if (resource === "members") {
 ''',
     "pc edit event checkbox",
 )

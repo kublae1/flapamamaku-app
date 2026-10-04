@@ -174,6 +174,15 @@ class _YearMottoScreenState extends State<YearMottoScreen> {
                     padding: const EdgeInsets.fromLTRB(22, 22, 22, 30),
                     child: Column(
                       children: [
+                        if (images[_page].item.logoUrl.trim().isNotEmpty) ...[
+                          OfflineNetworkImage(
+                            images[_page].item.logoUrl,
+                            headers: store.api.authHeaders,
+                            height: 110,
+                            fit: BoxFit.contain,
+                          ),
+                          const SizedBox(height: 14),
+                        ],
                         if (images[_page].item.title.trim().isNotEmpty)
                           Text(
                             images[_page].item.title.trim(),
@@ -184,6 +193,18 @@ class _YearMottoScreenState extends State<YearMottoScreen> {
                               fontWeight: FontWeight.w900,
                             ),
                           ),
+                        if (images[_page].item.motto.trim().isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            images[_page].item.motto.trim(),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: FlapBrand.gold,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
                         if (images[_page].item.text.trim().isNotEmpty) ...[
                           const SizedBox(height: 10),
                           Text(

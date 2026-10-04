@@ -265,6 +265,13 @@ class EventPayload(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     location: str = ""
     time: str = ""
+    end_time: str = ""
+    meeting_point: str = ""
+    description: str = ""
+    responsible: str = ""
+    registration_deadline: str = ""
+    registration_enabled: bool = True
+    document_url: str = ""
 
 
 class MemberPayload(BaseModel):
@@ -433,6 +440,13 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             title TEXT NOT NULL,
             location TEXT NOT NULL DEFAULT '',
             time TEXT NOT NULL DEFAULT '',
+            end_time TEXT NOT NULL DEFAULT '',
+            meeting_point TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            responsible TEXT NOT NULL DEFAULT '',
+            registration_deadline TEXT NOT NULL DEFAULT '',
+            registration_enabled INTEGER NOT NULL DEFAULT 1,
+            document_url TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )
         """,
@@ -1074,6 +1088,16 @@ def init_db() -> None:
                     (position, row["id"]),
                 )
         _ensure_column(db, "events", "event_date", "TEXT NOT NULL DEFAULT ''")
+        for column, definition in {
+            "end_time": "TEXT NOT NULL DEFAULT ''",
+            "meeting_point": "TEXT NOT NULL DEFAULT ''",
+            "description": "TEXT NOT NULL DEFAULT ''",
+            "responsible": "TEXT NOT NULL DEFAULT ''",
+            "registration_deadline": "TEXT NOT NULL DEFAULT ''",
+            "registration_enabled": "INTEGER NOT NULL DEFAULT 1",
+            "document_url": "TEXT NOT NULL DEFAULT ''",
+        }.items():
+            _ensure_column(db, "events", column, definition)
         _ensure_column(db, "members", "phone_mobile", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_private", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_work", "TEXT NOT NULL DEFAULT ''")
@@ -4410,9 +4434,24 @@ def register_for_event(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        event = db.execute("SELECT id FROM events WHERE id = ?", (row_id,)).fetchone()
+        event = db.execute(
+            "SELECT id, registration_enabled, registration_deadline FROM events WHERE id = ?",
+            (row_id,),
+        ).fetchone()
         if event is None:
             raise HTTPException(status_code=404, detail="Termin nicht gefunden")
+        if not bool(event["registration_enabled"]):
+            raise HTTPException(status_code=409, detail="Für diesen Termin ist keine Anmeldung möglich")
+        deadline = str(event["registration_deadline"] or "").strip()
+        if deadline:
+            try:
+                deadline_value = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+                if deadline_value.tzinfo is None:
+                    deadline_value = deadline_value.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > deadline_value.astimezone(timezone.utc):
+                    raise HTTPException(status_code=409, detail="Der Anmeldeschluss ist abgelaufen")
+            except ValueError:
+                pass
         db.execute(
             """
             INSERT OR IGNORE INTO event_registrations (event_id, user_id, created_at)

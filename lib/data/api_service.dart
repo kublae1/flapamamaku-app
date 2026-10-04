@@ -130,6 +130,9 @@ class ApiService {
     final imageUrl = json['image_url']?.toString() ?? '';
     json['image_url'] = absolute(imageUrl);
 
+    final logoUrl = json['logo_url']?.toString() ?? '';
+    json['logo_url'] = absolute(logoUrl);
+
     final documentUrl = json['document_url']?.toString() ?? '';
     json['document_url'] = absolute(documentUrl);
     return json;
@@ -538,6 +541,13 @@ class ApiService {
       'title': item.title,
       'location': item.location,
       'time': item.time,
+      'end_time': item.endTime,
+      'meeting_point': item.meetingPoint,
+      'description': item.description,
+      'responsible': item.responsible,
+      'registration_deadline': item.registrationDeadline,
+      'registration_enabled': item.registrationEnabled,
+      'document_url': item.documentUrl,
     });
     final response = item.id == null
         ? await http
