@@ -57,7 +57,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.8.56"
+API_VERSION = "0.9.0"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +68,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 10
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -769,6 +769,9 @@ def _restore_database_backup(source: Path) -> dict[str, Any]:
         _validate_restore_database(replacement)
         os.replace(replacement, DB_PATH)
         init_db()
+        phase45_initializer = getattr(app.state, "phase45_initializer", None)
+        if callable(phase45_initializer):
+            phase45_initializer()
         with connect() as db:
             db.execute("DELETE FROM sessions")
             db.commit()
@@ -1658,9 +1661,12 @@ def current_user(
             SELECT u.*
             FROM sessions s
             JOIN users u ON u.id = s.user_id
-            WHERE s.token_hash = ? AND s.expires_at > ? AND u.active = 1
+            WHERE s.token_hash = ?
+              AND s.instance_id = ?
+              AND s.expires_at > ?
+              AND u.active = 1
             """,
-            (_token_hash(token), now),
+            (_token_hash(token), INSTANCE_ID, now),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
@@ -2753,7 +2759,7 @@ def logout(
 ) -> None:
     token = _extract_token(authorization)
     with connect() as db:
-        db.execute("DELETE FROM sessions WHERE token_hash = ?", (_token_hash(token),))
+        db.execute("DELETE FROM sessions WHERE token_hash = ? AND instance_id = ?", (_token_hash(token), INSTANCE_ID))
         db.commit()
 
 
@@ -3404,11 +3410,13 @@ def get_content(
     section: str | None = None,
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM content_items"
+    if section in {"sujet", "archive"}:
+        return []
+    sql = "SELECT * FROM content_items WHERE section NOT IN ('sujet', 'archive')"
     values: list[Any] = []
     if section:
         _content_permission(section)
-        sql += " WHERE section = ?"
+        sql += " AND section = ?"
         values.append(section)
     sql += " ORDER BY sort_order ASC, id ASC"
 
@@ -3510,6 +3518,11 @@ def post_content(
     payload: ContentPayload,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
+    if payload.section in {"sujet", "archive"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Sujet und Archiv werden über das Jahres-Sujet-Modell verwaltet",
+        )
     _require_content_permission(payload.section, user)
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
@@ -3567,6 +3580,11 @@ def put_content(
     payload: ContentPayload,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
+    if payload.section in {"sujet", "archive"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Sujet und Archiv werden über das Jahres-Sujet-Modell verwaltet",
+        )
     _require_content_permission(payload.section, user)
     with connect() as db:
         current = db.execute(
@@ -4650,69 +4668,6 @@ def reorder_members(
 
     with connect() as db:
         rows = db.execute(
-            f"""
-            SELECT id
-            FROM members
-            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
-            """,
-            payload.item_ids,
-        ).fetchall()
-
-        if len(rows) != len(set(payload.item_ids)):
-            raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
-
-        current_ids = {
-            row["id"] for row in db.execute("SELECT id FROM members").fetchall()
-        }
-        if set(payload.item_ids) != current_ids:
-            raise HTTPException(
-                status_code=422,
-                detail="Mitgliederreihenfolge ist unvollständig",
-            )
-
-        for position, member_id in enumerate(payload.item_ids, start=1):
-            db.execute(
-                "UPDATE members SET sort_order = ? WHERE id = ?",
-                (position, member_id),
-            )
-        db.commit()
-
-    return list_rows("members")
-
-
-@app.post("/api/members")
-def post_members(
-    payload: MemberPayload,
-    _: dict[str, Any] = Depends(require("can_members")),
-) -> dict[str, Any]:
-    item = create_row("members", payload)
-    with connect() as db:
-        max_order = db.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM members WHERE id != ?",
-            (item["id"],),
-        ).fetchone()[0]
-        db.execute(
-            "UPDATE members SET sort_order = ? WHERE id = ?",
-            (int(max_order or 0) + 1, item["id"]),
-        )
-        db.commit()
-        row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (item["id"],),
-        ).fetchone()
-    return _serialize_member(row)
-
-
-@app.put("/api/members/order")
-def reorder_members(
-    payload: ContentOrderPayload,
-    _: dict[str, Any] = Depends(require("can_members")),
-) -> list[dict[str, Any]]:
-    if not payload.item_ids:
-        return []
-
-    with connect() as db:
-        rows = db.execute(
             f"SELECT id FROM members WHERE id IN ({','.join('?' for _ in payload.item_ids)})",
             payload.item_ids,
         ).fetchall()
@@ -4829,3 +4784,17 @@ def delete_members(
         db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
         db.commit()
     delete_row("members", row_id)
+
+# Phase 4/5 extensions.
+from .phase45 import install_phase45
+
+install_phase45(
+    app,
+    connect=connect,
+    current_user=current_user,
+    require=require,
+    optimize_image=_optimize_image,
+    instance_id=INSTANCE_ID,
+    is_production=IS_PRODUCTION,
+)
+

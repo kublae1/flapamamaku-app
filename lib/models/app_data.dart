@@ -77,6 +77,9 @@ class PollSuggestion {
 class ContentItem {
   final int? id;
   final String section;
+  final bool annualSujet;
+  final int? year;
+  final bool isCurrent;
   final String title;
   final String text;
   final String linkUrl;
@@ -108,6 +111,9 @@ class ContentItem {
   const ContentItem({
     this.id,
     required this.section,
+    this.annualSujet = false,
+    this.year,
+    this.isCurrent = false,
     required this.title,
     this.text = '',
     this.linkUrl = '',
@@ -165,6 +171,11 @@ class ContentItem {
     return ContentItem(
       id: json['id'] as int?,
       section: json['section']?.toString() ?? '',
+      annualSujet: json['annual_sujet'] == true,
+      year: json['year'] is int
+          ? json['year'] as int
+          : int.tryParse(json['year']?.toString() ?? ''),
+      isCurrent: json['is_current'] == true,
       title: json['title']?.toString() ?? '',
       text: json['text']?.toString() ?? '',
       linkUrl: json['link_url']?.toString() ?? '',
@@ -496,6 +507,9 @@ extension ContentItemOfflineCacheJson on ContentItem {
   Map<String, dynamic> toJson() => {
         'id': id,
         'section': section,
+        'annual_sujet': annualSujet,
+        'year': year,
+        'is_current': isCurrent,
         'title': title,
         'text': text,
         'link_url': linkUrl,

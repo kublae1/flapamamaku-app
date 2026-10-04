@@ -240,6 +240,8 @@ def install_phase45(
             )
             db.commit()
 
+    app.state.phase45_initializer = init_phase45
+
     @app.on_event("startup")
     async def phase45_startup() -> None:
         init_phase45()
