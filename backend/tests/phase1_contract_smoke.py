@@ -2,7 +2,9 @@
 
 This test deliberately uses the public HTTP API instead of importing FastAPI
 internals. It verifies the binding data flow Admin/API -> database -> App-facing
-GET endpoints for the core Phase-1 resources.
+GET endpoints for the core Phase-1 resources. Annual Sujet/archive content is
+owned by the canonical Phase-4 Sujet domain and is therefore explicitly
+excluded from legacy /api/content CRUD.
 """
 
 from __future__ import annotations
@@ -188,7 +190,7 @@ def exercise_members(token: str) -> None:
 
 
 def exercise_content(token: str) -> None:
-    for section in ("hero", "sujet", "archive", "photos", "gallery", "documents", "links"):
+    for section in ("hero", "photos", "gallery", "documents", "links"):
         title = f"Phase 1 {section}"
         created = request(
             "POST",
@@ -208,9 +210,26 @@ def exercise_content(token: str) -> None:
         assert_in_collection(items, row_id, "title", title)
         request("DELETE", f"/api/content/{row_id}", token=token, expected=(200, 204))
 
+    # Phase 4 deliberately removes Sujet/archive writes from generic content CRUD.
+    # A 409 proves callers cannot create a second hidden source of truth.
+    for section in ("sujet", "archive"):
+        request(
+            "POST",
+            "/api/content",
+            token=token,
+            expected=(409,),
+            json={
+                "section": section,
+                "title": f"Legacy {section}",
+                "text": "must be rejected",
+                "link_url": "",
+                "poll_options": [],
+                "poll_allow_suggestions": False,
+            },
+        )
+
 
 def exercise_auth_guards(token: str) -> None:
-    # App content is private by design: authenticated club members read it.
     response = requests.get(f"{BASE_URL}/api/news", timeout=10)
     if response.status_code != 401:
         fail(f"unauthenticated news read should be 401, got {response.status_code}")
