@@ -1,8 +1,10 @@
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from fastapi import Request
+from fastapi import Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import main as main_app
@@ -231,9 +233,8 @@ def _install_member_mapping(db: sqlite3.Connection) -> None:
         """
     )
 
-    # Existing application code still reads users.member_id. Keep that legacy
-    # field synchronized from the per-club mapping whenever a session is created
-    # or its active club changes.
+    # Keep the legacy column usable for old code paths, but the authoritative
+    # identity exposed to clients is resolved below from user_club_members.
     if _table_exists(db, "sessions") and "active_club_id" in _columns(db, "sessions"):
         db.execute("DROP TRIGGER IF EXISTS sessions_member_context_insert")
         db.execute("DROP TRIGGER IF EXISTS sessions_member_context_update")
@@ -271,6 +272,137 @@ def _install_member_mapping(db: sqlite3.Connection) -> None:
             END
             """
         )
+
+
+def _scoped_member_id(
+    db: sqlite3.Connection,
+    user_id: int,
+    club_id: int,
+) -> int | None:
+    if _table_exists(db, "user_club_members"):
+        row = db.execute(
+            """
+            SELECT ucm.member_id
+            FROM user_club_members ucm
+            LEFT JOIN members m
+              ON m.id = ucm.member_id AND m.club_id = ucm.club_id
+            WHERE ucm.user_id = ? AND ucm.club_id = ?
+              AND (ucm.member_id IS NULL OR m.id IS NOT NULL)
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if row is not None:
+            return int(row["member_id"]) if row["member_id"] is not None else None
+
+    # Safe legacy fallback: accept users.member_id only if that member belongs
+    # to the active club. A foreign member ID is treated as no mapping.
+    row = db.execute(
+        """
+        SELECT u.member_id
+        FROM users u
+        JOIN members m ON m.id = u.member_id AND m.club_id = ?
+        WHERE u.id = ?
+        """,
+        (club_id, user_id),
+    ).fetchone()
+    return int(row["member_id"]) if row is not None and row["member_id"] is not None else None
+
+
+def _scoped_user_payload(
+    db: sqlite3.Connection,
+    row: sqlite3.Row,
+    club_id: int,
+) -> dict[str, Any]:
+    user_id = int(row["id"])
+    member_id = _scoped_member_id(db, user_id, club_id)
+    member_name = ""
+    if member_id is not None:
+        member = db.execute(
+            "SELECT name FROM members WHERE id = ? AND club_id = ?",
+            (member_id, club_id),
+        ).fetchone()
+        if member is not None:
+            member_name = str(member["name"] or "")
+
+    club_role = main_app._user_club_access(db, user_id, club_id)
+    if club_role is None:
+        raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+
+    club = db.execute(
+        """
+        SELECT id, billing_status, billing_suspension_reason
+        FROM clubs
+        WHERE id = ? AND active = 1
+        """,
+        (club_id,),
+    ).fetchone()
+    if club is None:
+        raise HTTPException(status_code=401, detail="Verein nicht gefunden")
+    if str(club["billing_status"] or "active") != "active" and club_role != "super_admin":
+        reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
+        raise HTTPException(status_code=403, detail=f"Verein gesperrt: {reason}")
+
+    item = dict(row)
+    item["member_id"] = member_id
+    item["member_name"] = member_name
+    item["club_role"] = club_role
+    item["current_club_id"] = club_id
+    item["is_super_admin"] = club_role == "super_admin"
+    return main_app._serialize_user(item)
+
+
+_legacy_current_user = main_app.current_user
+_legacy_user_profile = main_app._user_profile
+
+
+def scoped_current_user(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    token = main_app._extract_token(authorization)
+    now = datetime.now(timezone.utc).isoformat()
+    with main_app.connect() as db:
+        row = db.execute(
+            """
+            SELECT u.*, s.active_club_id
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+              AND s.expires_at > ?
+              AND u.active = 1
+            """,
+            (main_app._token_hash(token), now),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
+        club_id = int(row["active_club_id"] or main_app._instance_club_id(db))
+        return _scoped_user_payload(db, row, club_id)
+
+
+def scoped_user_profile(user_id: int) -> dict[str, Any]:
+    with main_app.connect() as db:
+        club_id = main_app._active_club_id(db)
+        row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
+        return _scoped_user_payload(db, row, club_id)
+
+
+def _rebind_current_user_dependency(dependant: Any) -> None:
+    if getattr(dependant, "call", None) is _legacy_current_user:
+        dependant.call = scoped_current_user
+    for child in getattr(dependant, "dependencies", ()) or ():
+        _rebind_current_user_dependency(child)
+
+
+# Functions such as login() resolve these names dynamically, while FastAPI
+# Depends objects captured the original callable during route registration. Fix
+# both so every production path uses the same club-scoped identity resolver.
+main_app.current_user = scoped_current_user
+main_app._user_profile = scoped_user_profile
+for _route in app.routes:
+    _dependant = getattr(_route, "dependant", None)
+    if _dependant is not None:
+        _rebind_current_user_dependency(_dependant)
 
 
 def recover_multiclub_state() -> None:
