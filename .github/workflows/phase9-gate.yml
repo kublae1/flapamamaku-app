@@ -23,10 +23,12 @@ jobs:
       - name: Compile Phase 9 backend
         working-directory: backend
         run: |
-          python -m py_compile app/platform_store.py app/platform.py app/platform_runtime.py app/runtime.py tests/phase9_platform_contract.py
+          python -m py_compile app/platform_store.py app/platform.py app/platform_runtime.py app/runtime.py tests/phase9_platform_contract.py tests/platform_club_selector_contract.py
       - name: Verify Phase 9 platform end-to-end contract
         working-directory: backend
-        run: python tests/phase9_platform_contract.py
+        run: |
+          python tests/phase9_platform_contract.py
+          python tests/platform_club_selector_contract.py
       - name: Validate production compose
         working-directory: backend
         env:
@@ -39,7 +41,7 @@ jobs:
           python tests/phase8_pilot_matrix.py
       - name: Verify Phase 9 files do not introduce Phase 10 functionality
         run: |
-          ! grep -R -E "Phase 10|phase10|ten clubs|10 Vereine" backend/app/platform*.py backend/static/platform.* backend/tests/phase9_platform_contract.py
+          ! grep -R -E "Phase 10|phase10|ten clubs|10 Vereine" backend/app/platform*.py backend/static/platform.* backend/tests/phase9_platform_contract.py backend/tests/platform_club_selector_contract.py
 
   flutter-regression:
     runs-on: ubuntu-latest

@@ -17,6 +17,15 @@
 <p class="muted">Die Ersteinrichtung ist nur möglich, solange noch kein Plattform-Superuser existiert.</p>
 </section>
 <section id="app" hidden>
+<div class="card">
+<h3>Vereinsverwaltung öffnen</h3>
+<p class="muted">Verein auswählen und direkt dessen Docker-Administration öffnen.</p>
+<div class="form">
+<label>Verein<select id="clubSelector"><option value="">Verein auswählen …</option></select></label>
+</div>
+<div class="actions"><button id="openClubAdmin" disabled>Vereins-Admin öffnen</button></div>
+<div id="clubSelectorInfo" class="muted"></div>
+</div>
 <div id="metrics" class="metrics"></div>
 <nav><button data-tab="clubs" class="active">Vereine</button><button data-tab="invoices">Rechnungen</button><button data-tab="audit">Protokoll</button></nav>
 <div id="msg"></div>
