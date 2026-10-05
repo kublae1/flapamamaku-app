@@ -1,9 +1,9 @@
-"""End-to-end acceptance contract for Masterplan phases 3-5.
+"""End-to-end acceptance contract for Masterplan phases 3-5 after tenant recovery.
 
-Runs against the isolated backend started by CI and verifies the canonical annual
-Sujet lifecycle plus the instance/club isolation boundary at HTTP and SQLite
-levels. It intentionally reuses the bootstrap administrator created by the
-Phase-1 smoke test when present.
+The production target is again the proven integrated multi-club backend: several
+clubs may coexist in one database, while every tenant-owned row is scoped by the
+active numeric club_id. The external X-Club-Instance header still protects a
+managed app from accidentally talking to another server instance.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def verify_tenant_http_boundary(token: str) -> None:
     )
     payload = wrong.json()
     if payload.get("expected_instance_id") != INSTANCE_ID:
-        fail("wrong-instance response did not identify the configured club")
+        fail("wrong-instance response did not identify the configured server instance")
 
     correct = call(
         "GET",
@@ -147,7 +147,6 @@ def verify_annual_sujet_lifecycle(token: str) -> None:
     if updated.get("motto") != "Neues Motto" or updated.get("title") != "Sujet 2027 aktualisiert":
         fail("annual Sujet update was not persisted")
 
-    # Generic content CRUD must remain blocked for Sujet/archive after Phase 4.
     for section in ("sujet", "archive"):
         call(
             "POST",
@@ -168,7 +167,7 @@ def verify_annual_sujet_lifecycle(token: str) -> None:
     call("DELETE", f"/api/sujets/{second_id}", token=token, expected=(200, 204))
 
 
-def verify_sqlite_club_guards() -> None:
+def verify_integrated_multiclub_schema() -> None:
     if not DB_PATH.exists():
         fail(f"isolated database not found at {DB_PATH}")
 
@@ -192,6 +191,15 @@ def verify_sqlite_club_guards() -> None:
             str(row["name"])
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
+        if "clubs" not in tables or "user_clubs" not in tables:
+            fail("integrated multi-club tables are missing")
+
+        default_club = db.execute(
+            "SELECT id, slug FROM clubs WHERE id = 1"
+        ).fetchone()
+        if default_club is None or str(default_club["slug"]) != "flapamamaku":
+            fail("default FLAPAMAMAKU club was not preserved")
+
         for table in tenant_tables:
             if table not in tables:
                 fail(f"tenant table missing: {table}")
@@ -201,38 +209,54 @@ def verify_sqlite_club_guards() -> None:
             }
             if "club_id" not in columns:
                 fail(f"{table} is missing club_id")
-            wrong_count = int(
+
+            orphan_count = int(
                 db.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE club_id <> ? OR club_id IS NULL",
-                    (INSTANCE_ID,),
+                    f"""
+                    SELECT COUNT(*)
+                    FROM {table} t
+                    LEFT JOIN clubs c ON c.id = CAST(t.club_id AS INTEGER)
+                    WHERE t.club_id IS NULL OR c.id IS NULL
+                    """
                 ).fetchone()[0]
             )
-            if wrong_count:
-                fail(f"{table} contains rows outside configured club instance")
+            if orphan_count:
+                fail(f"{table} contains rows without a valid club")
 
-        # Prove the DB itself blocks cross-club reassignment even if application
-        # code accidentally attempts it.
-        user = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
-        if user is None:
-            fail("no user available for tenant trigger test")
-        try:
-            db.execute(
-                "UPDATE users SET club_id = ? WHERE id = ?",
-                ("another-club", int(user["id"])),
-            )
-            db.commit()
-        except sqlite3.IntegrityError:
-            db.rollback()
-        else:
-            fail("database tenant trigger allowed a user to cross club boundary")
+        # Multi-club means more than one club ID must be legal. Add a second club
+        # and prove a tenant row can be assigned to it without one-instance guards.
+        now = "2026-10-05T00:00:00+00:00"
+        cursor = db.execute(
+            """
+            INSERT INTO clubs(slug,name,short_name,active,created_at,updated_at)
+            VALUES ('phase35-second','Phase35 Second','P35',1,?,?)
+            """,
+            (now, now),
+        )
+        second_club = int(cursor.lastrowid)
+        news = db.execute(
+            """
+            INSERT INTO news(title,text,date,created_at,club_id)
+            VALUES ('Second club row','isolated','05.10.2026',?,?,?)
+            """.replace(",?,?,?)", ",?,?,?)"),
+            (now, second_club),
+        )
+        # Above INSERT must have succeeded; validate ownership explicitly.
+        row = db.execute(
+            "SELECT club_id FROM news WHERE id = ?",
+            (news.lastrowid,),
+        ).fetchone()
+        if row is None or int(row["club_id"]) != second_club:
+            fail("second club tenant row was not stored with its numeric club_id")
+        db.rollback()
 
 
 def main() -> None:
     token = login_admin()
     verify_tenant_http_boundary(token)
     verify_annual_sujet_lifecycle(token)
-    verify_sqlite_club_guards()
-    print("PHASE3-5 CONTRACT OK")
+    verify_integrated_multiclub_schema()
+    print("PHASE3-5 CONTRACT OK: integrated multi-club isolation")
 
 
 if __name__ == "__main__":
