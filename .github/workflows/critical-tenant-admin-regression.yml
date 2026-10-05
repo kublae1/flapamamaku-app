@@ -30,7 +30,7 @@ jobs:
 
       - name: Compile backend regression code
         working-directory: backend
-        run: python -m py_compile app/main.py app/phase45.py tests/critical_tenant_admin_regression.py
+        run: python -m py_compile app/main.py app/phase45.py app/runtime.py tests/critical_tenant_admin_regression.py
 
       - name: Verify production tenant and admin repair
         run: python backend/tests/critical_tenant_admin_regression.py
@@ -49,7 +49,7 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
-      - name: Verify managed FLAPAMAMAKU profile is locked
+      - name: Verify FLAPAMAMAKU supports selectable club servers
         shell: bash
         run: |
           python3 - <<'PY'
@@ -59,8 +59,11 @@ jobs:
           assert profile['id'] == 'flapamamaku'
           assert profile['instance_id'] == 'flapamamaku'
           assert profile['api_base_url'] == 'https://flapamamaku.kublaecloud.synology.me'
-          assert profile['allow_server_change'] is False
-          source = Path('lib/main.dart').read_text()
-          assert "prefs.remove('flapamamaku_server_url')" in source
-          print('Managed FLAPAMAMAKU server lock verified')
+          assert profile['allow_server_change'] is True
+          api = Path('lib/data/api_service.dart').read_text()
+          assert 'if (!allowServerChange && expectedInstanceId.trim().isNotEmpty)' in api
+          assert 'if (!allowServerChange && expected.isNotEmpty && serverInstanceId != expected)' in api
+          runtime = Path('backend/app/runtime.py').read_text()
+          assert 'register_platform_club' in runtime
+          print('Selectable club-server mode and platform self-registration verified')
           PY

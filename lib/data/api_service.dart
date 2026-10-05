@@ -30,6 +30,10 @@ class ApiService {
     'CLUB_INSTANCE_ID',
     defaultValue: 'flapamamaku',
   );
+  static const allowServerChange = bool.fromEnvironment(
+    'ALLOW_SERVER_CHANGE',
+    defaultValue: true,
+  );
 
   String _baseUrl;
   String get baseUrl => _baseUrl;
@@ -56,7 +60,7 @@ class ApiService {
   }
 
   Map<String, String> get authHeaders => {
-        if (expectedInstanceId.trim().isNotEmpty)
+        if (!allowServerChange && expectedInstanceId.trim().isNotEmpty)
           'X-Club-Instance': expectedInstanceId.trim().toLowerCase(),
         if (hasToken) 'Authorization': 'Bearer $_token',
       };
@@ -153,7 +157,7 @@ class ApiService {
         statusCode: 409,
       );
     }
-    if (expected.isNotEmpty && serverInstanceId != expected) {
+    if (!allowServerChange && expected.isNotEmpty && serverInstanceId != expected) {
       throw ApiException(
         'Dieser Server gehört zu einem anderen Verein '
         '(erwartet: $expected, gefunden: $serverInstanceId).',
