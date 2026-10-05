@@ -1068,11 +1068,18 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS sessions (
                 token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
+                instance_id TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
+        )
+
+        _ensure_column(db, "sessions", "instance_id", "TEXT NOT NULL DEFAULT ''")
+        db.execute(
+            "UPDATE sessions SET instance_id = ? WHERE instance_id = '' OR instance_id IS NULL",
+            (INSTANCE_ID,),
         )
 
         _ensure_column(db, "news", "image_data", "BLOB")
@@ -2759,12 +2766,13 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
         )
         db.execute(
             """
-            INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO sessions (token_hash, user_id, instance_id, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 _token_hash(token),
                 row["id"],
+                INSTANCE_ID,
                 expires,
                 now_dt.isoformat(),
             ),
