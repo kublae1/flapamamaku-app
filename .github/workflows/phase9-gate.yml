@@ -50,19 +50,42 @@ jobs:
           channel: stable
       - name: Generate Android platform files if missing
         run: |
-          if [ ! -d android ]; then flutter create --platforms=android .; fi
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name flapamamaku_app .
+          fi
       - name: Enable Android core library desugaring
+        shell: bash
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
-          p=Path('android/app/build.gradle.kts')
-          if p.exists():
-              s=p.read_text()
-              if 'isCoreLibraryDesugaringEnabled = true' not in s:
-                  s=s.replace('compileOptions {','compileOptions {\n        isCoreLibraryDesugaringEnabled = true',1)
-              if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")' not in s:
-                  s=s.replace('dependencies {','dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")',1)
-              p.write_text(s)
+          import re
+
+          kts = Path('android/app/build.gradle.kts')
+          groovy = Path('android/app/build.gradle')
+          if kts.exists():
+              text = kts.read_text()
+              if 'isCoreLibraryDesugaringEnabled = true' not in text:
+                  text = re.sub(r'(compileOptions\s*\{)', r'\1\n        isCoreLibraryDesugaringEnabled = true', text, count=1)
+              dependency = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+              if dependency not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(r'(?m)^dependencies\s*\{', 'dependencies {\n    ' + dependency, text, count=1)
+                  else:
+                      text += '\n\ndependencies {\n    ' + dependency + '\n}\n'
+              kts.write_text(text)
+          elif groovy.exists():
+              text = groovy.read_text()
+              if 'coreLibraryDesugaringEnabled true' not in text:
+                  text = re.sub(r'(compileOptions\s*\{)', r'\1\n        coreLibraryDesugaringEnabled true', text, count=1)
+              dependency = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+              if dependency not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(r'(?m)^dependencies\s*\{', 'dependencies {\n    ' + dependency, text, count=1)
+                  else:
+                      text += '\n\ndependencies {\n    ' + dependency + '\n}\n'
+              groovy.write_text(text)
+          else:
+              raise SystemExit('Android Gradle file not found')
           PY
       - run: flutter pub get
       - run: flutter analyze
