@@ -39,6 +39,7 @@ jobs:
           tests/test_multiclub_app_behavior.py
           tests/test_club_billing_suspension.py
           tests/test_white_label_onboarding.py
+          tests/tenant_member_identity_regression.py
 
       - name: Verify production tenant and admin repair
         run: python backend/tests/critical_tenant_admin_regression.py
@@ -51,6 +52,17 @@ jobs:
           rm -f "$FLAPAMAMAKU_DB"
           rm -rf "$FLAPAMAMAKU_BACKUP_DIR"
           python backend/tests/test_multitenant_isolation.py
+
+      - name: Verify exact per-club member identity
+        env:
+          FLAPAMAMAKU_DB: /tmp/recovery-member-identity.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/recovery-member-identity-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+          FLAPAMAMAKU_ENV: development
+        run: |
+          rm -f "$FLAPAMAMAKU_DB"
+          rm -rf "$FLAPAMAMAKU_BACKUP_DIR"
+          python backend/tests/tenant_member_identity_regression.py
 
       - name: Verify multi-club app behavior
         env:
@@ -111,6 +123,7 @@ jobs:
 
           runtime = Path('backend/app/runtime.py').read_text()
           assert 'user_club_members' in runtime
+          assert 'scoped_current_user' in runtime
           assert '_drop_single_instance_guards' in runtime
           assert '_normalize_club_ids' in runtime
           assert '_admin_selector_injection' not in runtime
