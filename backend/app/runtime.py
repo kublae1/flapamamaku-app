@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import main as main_app
@@ -70,7 +70,6 @@ def register_platform_club() -> bool:
                     (INSTANCE_ID, _club_name(), PUBLIC_URL, now, now),
                 )
             else:
-                # Only fill discovery metadata when it is still empty/generic.
                 name = str(existing["name"] or "").strip()
                 url = str(existing["api_base_url"] or "").strip()
                 db.execute(
@@ -95,8 +94,6 @@ def register_platform_club() -> bool:
 
 
 async def _platform_registration_loop() -> None:
-    # The platform service and the club backend can start in parallel. Retry
-    # until the shared platform schema is ready instead of requiring manual club creation.
     for _ in range(120):
         if await asyncio.to_thread(register_platform_club):
             return
@@ -128,6 +125,107 @@ def platform_access_state():
     return str(row["status"]), str(row["suspension_reason"] or "")
 
 
+@app.get("/api/system/platform-clubs")
+def platform_clubs_for_admin(
+    _user: dict = Depends(main_app.require("can_manage_users")),
+):
+    """Return the Phase-9 club registry to an authenticated club administrator."""
+    if not PLATFORM_DB.exists():
+        return []
+    try:
+        db = sqlite3.connect(f"file:{PLATFORM_DB}?mode=ro", uri=True, timeout=2)
+        db.row_factory = sqlite3.Row
+        try:
+            table = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_clubs'"
+            ).fetchone()
+            if not table:
+                return []
+            rows = db.execute(
+                """
+                SELECT id, instance_id, name, api_base_url, status
+                FROM platform_clubs
+                ORDER BY name COLLATE NOCASE ASC, instance_id ASC
+                """
+            ).fetchall()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return []
+    return [dict(row) for row in rows]
+
+
+def _admin_selector_injection() -> str:
+    return r'''
+<style>
+#platform-club-switcher{display:none;margin:0 auto 18px;max-width:1480px;background:#191b1e;border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+#platform-club-switcher .row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}#platform-club-switcher label{margin:0;min-width:260px;flex:1}#platform-club-switcher select{margin-top:6px}#platform-club-switcher button{border:0;border-radius:10px;padding:11px 16px;background:#8a101b;color:white;font-weight:800;cursor:pointer}#platform-club-switcher .meta{margin-top:8px}
+</style>
+<script>
+(() => {
+  let lastToken = '';
+  let loading = false;
+  const box = document.createElement('section');
+  box.id = 'platform-club-switcher';
+  box.innerHTML = '<div class="row"><label>Verein auswählen<select id="platform-club-select"><option value="">Verein auswählen …</option></select></label><button type="button" id="platform-club-open">Vereins-Admin öffnen</button></div><div class="meta" id="platform-club-info">Vereine werden geladen …</div>';
+  const main = document.querySelector('main');
+  if (main) main.insertBefore(box, main.firstChild);
+
+  async function refreshClubSelector() {
+    const currentToken = sessionStorage.getItem('flapamamaku_token') || '';
+    if (!currentToken) {
+      lastToken = '';
+      box.style.display = 'none';
+      return;
+    }
+    if (loading || currentToken === lastToken) return;
+    loading = true;
+    try {
+      const response = await fetch('/api/system/platform-clubs', {
+        headers: {Authorization: 'Bearer ' + currentToken},
+        cache: 'no-store'
+      });
+      if (!response.ok) {
+        box.style.display = 'none';
+        return;
+      }
+      const clubs = await response.json();
+      const select = document.getElementById('platform-club-select');
+      select.innerHTML = '<option value="">Verein auswählen …</option>';
+      for (const club of clubs) {
+        const option = document.createElement('option');
+        option.value = club.api_base_url || '';
+        option.textContent = `${club.name || club.instance_id} (${club.instance_id})${club.status === 'suspended' ? ' – gesperrt' : ''}`;
+        option.dataset.instanceId = club.instance_id || '';
+        select.appendChild(option);
+      }
+      document.getElementById('platform-club-info').textContent = clubs.length
+        ? `${clubs.length} Verein(e) verfügbar.`
+        : 'Noch keine Vereine in der Plattform registriert.';
+      box.style.display = 'block';
+      lastToken = currentToken;
+    } catch (_) {
+      box.style.display = 'none';
+    } finally {
+      loading = false;
+    }
+  }
+
+  document.getElementById('platform-club-open').addEventListener('click', () => {
+    const select = document.getElementById('platform-club-select');
+    const option = select.options[select.selectedIndex];
+    if (!option || !select.value) return;
+    const base = select.value.replace(/\/$/, '');
+    window.location.href = base + '/admin';
+  });
+
+  refreshClubSelector();
+  setInterval(refreshClubSelector, 1000);
+})();
+</script>
+'''
+
+
 @app.middleware("http")
 async def platform_access_control(request: Request, call_next):
     path = request.url.path
@@ -135,6 +233,13 @@ async def platform_access_control(request: Request, call_next):
         return await call_next(request)
     status, reason = platform_access_state()
     if status != "suspended":
+        if path in {"/admin", "/admin/"}:
+            try:
+                html = (main_app.STATIC_DIR / "admin.html").read_text(encoding="utf-8")
+                html = html.replace("</body>", _admin_selector_injection() + "</body>")
+                return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+            except OSError:
+                return await call_next(request)
         return await call_next(request)
     message = reason or "Dieser Verein ist durch die Plattformverwaltung vorübergehend gesperrt."
     if path.startswith("/api/"):
