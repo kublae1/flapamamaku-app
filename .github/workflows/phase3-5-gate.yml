@@ -1,0 +1,138 @@
+name: Phase 3-5 Gate
+
+on:
+  push:
+    branches:
+      - feature/masterplan-phase3-5-20261004
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-and-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Compile backend
+        working-directory: backend
+        run: python -m py_compile app/main.py app/phase45.py
+
+      - name: Verify Phase 2 CMS contract still passes
+        run: python backend/tests/admin_cms_contract.py
+
+      - name: Start isolated backend
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase35.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-phase35-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+          FLAPAMAMAKU_ENV: development
+          FLAPAMAMAKU_ALLOWED_ORIGINS: '*'
+          FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS: '86400'
+        run: |
+          rm -f /tmp/flapamamaku-phase35.db
+          rm -rf /tmp/flapamamaku-phase35-backups
+          mkdir -p /tmp/flapamamaku-phase35-backups
+          cd backend
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8087 >/tmp/phase35-backend.log 2>&1 &
+          echo $! >/tmp/phase35-backend.pid
+
+      - name: Verify Admin-API-Database-App baseline contract
+        run: python backend/tests/phase1_contract_smoke.py
+
+      - name: Verify Phase 3-5 implementation contract
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main = Path('backend/app/main.py').read_text(encoding='utf-8')
+          phase45 = Path('backend/app/phase45.py').read_text(encoding='utf-8')
+          admin = Path('backend/static/admin.html').read_text(encoding='utf-8')
+          model = Path('lib/models/app_data.dart').read_text(encoding='utf-8')
+          api = Path('lib/data/api_service.dart').read_text(encoding='utf-8')
+          event_ui = Path('lib/screens/content_detail_screens.dart').read_text(encoding='utf-8')
+          motto_ui = Path('lib/screens/year_motto_screen.dart').read_text(encoding='utf-8')
+
+          required_main = [
+              'end_time', 'meeting_point', 'description', 'responsible',
+              'registration_deadline', 'registration_enabled', 'document_url',
+              'Der Anmeldeschluss ist abgelaufen',
+          ]
+          for token in required_main:
+              assert token in main, f'missing event implementation: {token}'
+
+          required_sujet = [
+              'class SujetPayload', 'motto:', 'logo_data', 'logo_mime',
+              '/api/sujets/{sujet_id}/logo', 'club_id', 'wrong club_id',
+          ]
+          for token in required_sujet:
+              assert token in phase45, f'missing sujet/tenant implementation: {token}'
+
+          required_admin = [
+              'name="end_time"', 'name="meeting_point"', 'name="responsible"',
+              'name="registration_deadline"', 'name="registration_enabled"',
+              'name="sujet_motto"', 'name="sujet_logo_file"',
+          ]
+          for token in required_admin:
+              assert token in admin, f'missing admin field: {token}'
+
+          for token in ['endTime', 'meetingPoint', 'registrationDeadline', 'registrationEnabled', 'motto', 'logoUrl']:
+              assert token in model, f'missing Flutter model field: {token}'
+          for token in ["'end_time': item.endTime", "'registration_enabled': item.registrationEnabled"]:
+              assert token in api, f'missing Flutter API field: {token}'
+          assert 'https://wa.me/' in event_ui, 'WhatsApp member action missing'
+          assert 'event.registrationEnabled ? _register : null' in event_ui, 'event registration guard missing in UI'
+          assert 'item.logoUrl' in motto_ui and 'item.motto' in motto_ui, 'annual sujet presentation incomplete'
+
+          print('Phase 3-5 implementation contract passed')
+          PY
+
+      - name: Show backend log on failure
+        if: failure()
+        run: cat /tmp/phase35-backend.log || true
+
+  flutter-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform files if missing
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name flapamamaku_app .
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build Android release APK
+        env:
+          API_BASE_URL: https://app.flapamamaku.ch
+        run: flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
