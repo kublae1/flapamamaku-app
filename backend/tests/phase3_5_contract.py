@@ -237,11 +237,10 @@ def verify_integrated_multiclub_schema() -> None:
         news = db.execute(
             """
             INSERT INTO news(title,text,date,created_at,club_id)
-            VALUES ('Second club row','isolated','05.10.2026',?,?,?)
-            """.replace(",?,?,?)", ",?,?,?)"),
+            VALUES ('Second club row','isolated','05.10.2026',?,?)
+            """,
             (now, second_club),
         )
-        # Above INSERT must have succeeded; validate ownership explicitly.
         row = db.execute(
             "SELECT club_id FROM news WHERE id = ?",
             (news.lastrowid,),
