@@ -673,7 +673,7 @@ def install_phase45(
             headers={"Cache-Control": "private, max-age=3600"},
         )
 
-    @app.delete("/api/sujets/{sujet_id}/images/{image_id}", status_code=204)
+    @app.delete("/api/sujets/{sujet_id}/images/{image_id}")
     def delete_sujet_image(
         sujet_id: int,
         image_id: int,
