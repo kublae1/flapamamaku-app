@@ -1,0 +1,222 @@
+name: Phase 6-8 Gate
+
+on:
+  push:
+    branches:
+      - feature/masterplan-phase6-8-20261005
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-operations-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Compile backend and Phase 6-8 tests
+        working-directory: backend
+        run: |
+          python -m py_compile app/main.py app/phase45.py \
+            tests/phase6_8_operations.py tests/phase7_praxis_smoke.py tests/phase8_pilot_matrix.py
+
+      - name: Verify Phase 6 backup and restore operations
+        run: python backend/tests/phase6_8_operations.py
+
+      - name: Verify Phase 8 three-club isolation matrix
+        run: python backend/tests/phase8_pilot_matrix.py
+
+      - name: Validate Phase 8 white-label pilot profiles
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          root = Path('config/white-label')
+          files = sorted(root.glob('*.json'))
+          seen_ids = set()
+          seen_instances = set()
+          seen_urls = set()
+          required = {
+              'id', 'instance_id', 'app_name', 'app_subtitle',
+              'api_base_url', 'app_icon_url', 'allow_server_change',
+          }
+          for path in files:
+              data = json.loads(path.read_text(encoding='utf-8'))
+              missing = required - set(data)
+              assert not missing, f'{path}: missing {sorted(missing)}'
+              profile_id = str(data['id']).strip()
+              instance_id = str(data['instance_id']).strip().lower()
+              api_url = str(data['api_base_url']).strip().rstrip('/')
+              assert profile_id == path.stem
+              assert re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', profile_id)
+              assert re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', instance_id)
+              parsed = urlparse(api_url)
+              assert parsed.scheme == 'https' and parsed.netloc
+              assert parsed.path in ('', '/') and not parsed.query and not parsed.fragment
+              assert isinstance(data['allow_server_change'], bool)
+              assert profile_id not in seen_ids
+              assert instance_id not in seen_instances
+              assert api_url.lower() not in seen_urls
+              seen_ids.add(profile_id)
+              seen_instances.add(instance_id)
+              seen_urls.add(api_url.lower())
+
+          pilots = [f'pilot-verein-{letter}' for letter in 'abc']
+          for pilot in pilots:
+              profile = json.loads((root / f'{pilot}.json').read_text(encoding='utf-8'))
+              assert profile['instance_id'] == pilot
+              assert profile['allow_server_change'] is False
+          print(f'Validated {len(files)} profiles including 3 Phase-8 pilots')
+          PY
+
+      - name: Validate production compose operations contract
+        env:
+          FLAPAMAMAKU_ALLOWED_ORIGINS: https://app.example.invalid
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: docker compose -f backend/docker-compose.production.yml config >/tmp/phase68-compose.yml
+
+      - name: Start isolated Phase 7 praxis backend
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase7.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-phase7-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+          FLAPAMAMAKU_ENV: development
+          FLAPAMAMAKU_ALLOWED_ORIGINS: '*'
+          FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS: '86400'
+        run: |
+          rm -f /tmp/flapamamaku-phase7.db
+          rm -rf /tmp/flapamamaku-phase7-backups
+          mkdir -p /tmp/flapamamaku-phase7-backups
+          cd backend
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8090 >/tmp/phase7-backend.log 2>&1 &
+          echo $! >/tmp/phase7-backend.pid
+
+      - name: Run Phase 7 FLAPAMAMAKU praxis test
+        env:
+          PHASE7_BASE_URL: http://127.0.0.1:8090
+        run: python backend/tests/phase7_praxis_smoke.py
+
+      - name: Stop Phase 7 backend
+        if: always()
+        run: |
+          if [ -f /tmp/phase7-backend.pid ]; then kill "$(cat /tmp/phase7-backend.pid)" || true; fi
+
+      - name: Start regression backend
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase68-regression.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-phase68-regression-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+          FLAPAMAMAKU_ENV: development
+          FLAPAMAMAKU_ALLOWED_ORIGINS: '*'
+        run: |
+          rm -f /tmp/flapamamaku-phase68-regression.db
+          rm -rf /tmp/flapamamaku-phase68-regression-backups
+          mkdir -p /tmp/flapamamaku-phase68-regression-backups
+          cd backend
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8087 >/tmp/phase68-regression.log 2>&1 &
+          echo $! >/tmp/phase68-regression.pid
+
+      - name: Verify Phase 1 data-flow regression
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase68-regression.db
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: python backend/tests/phase1_contract_smoke.py
+
+      - name: Verify Phase 2 CMS regression
+        run: python backend/tests/admin_cms_contract.py
+
+      - name: Verify Phase 3-5 regression
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase68-regression.db
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: python backend/tests/phase3_5_contract.py
+
+      - name: Show backend logs on failure
+        if: failure()
+        run: |
+          cat /tmp/phase7-backend.log || true
+          cat /tmp/phase68-regression.log || true
+
+  flutter-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform files if missing
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name flapamamaku_app .
+          fi
+
+      - name: Enable Android core library desugaring
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          kts = Path('android/app/build.gradle.kts')
+          groovy = Path('android/app/build.gradle')
+          if kts.exists():
+              text = kts.read_text()
+              if 'isCoreLibraryDesugaringEnabled = true' not in text:
+                  text = re.sub(r'(compileOptions\s*\{)', r'\1\n        isCoreLibraryDesugaringEnabled = true', text, count=1)
+              dependency = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+              if dependency not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(r'(?m)^dependencies\s*\{', 'dependencies {\n    ' + dependency, text, count=1)
+                  else:
+                      text += '\n\ndependencies {\n    ' + dependency + '\n}\n'
+              kts.write_text(text)
+          elif groovy.exists():
+              text = groovy.read_text()
+              if 'coreLibraryDesugaringEnabled true' not in text:
+                  text = re.sub(r'(compileOptions\s*\{)', r'\1\n        coreLibraryDesugaringEnabled true', text, count=1)
+              dependency = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+              if dependency not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(r'(?m)^dependencies\s*\{', 'dependencies {\n    ' + dependency, text, count=1)
+                  else:
+                      text += '\n\ndependencies {\n    ' + dependency + '\n}\n'
+              groovy.write_text(text)
+          else:
+              raise SystemExit('Android Gradle file not found')
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build Android release APK
+        env:
+          API_BASE_URL: https://app.flapamamaku.ch
+        run: flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
