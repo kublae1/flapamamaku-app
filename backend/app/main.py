@@ -4697,6 +4697,14 @@ def get_members(
     return list_rows("members")
 
 
+@app.post("/api/members")
+def post_members(
+    payload: MemberPayload,
+    _: dict[str, object] = Depends(require("can_members")),
+) -> dict[str, object]:
+    return create_row("members", payload)
+
+
 @app.put("/api/members/order")
 def reorder_members(
     payload: ContentOrderPayload,
