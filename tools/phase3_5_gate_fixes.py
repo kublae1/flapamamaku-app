@@ -1,15 +1,24 @@
 from pathlib import Path
-import re
 
-path = Path("backend/app/phase45.py")
+path = Path("backend/app/main.py")
 text = path.read_text(encoding="utf-8")
-updated, count = re.subn(
-    r'(@app\.delete\([^\n]+),\s*status_code=204\)',
-    r'\1)',
-    text,
-)
-if count:
-    path.write_text(updated, encoding="utf-8")
-    print(f"Removed invalid status_code=204 from {count} Phase 3-5 delete routes")
+route = '''@app.post("/api/members")
+def post_members(
+    payload: MemberPayload,
+    _: dict[str, object] = Depends(require("can_members")),
+) -> dict[str, object]:
+    return create_row("members", payload)
+
+
+'''
+anchor = '''@app.put("/api/members/order")
+def reorder_members(
+'''
+if '@app.post("/api/members")' not in text:
+    if anchor not in text:
+        raise SystemExit("missing source anchor: members order route")
+    text = text.replace(anchor, route + anchor, 1)
+    path.write_text(text, encoding="utf-8")
+    print("Restored POST /api/members endpoint")
 else:
-    print("No invalid Phase 3-5 delete decorators remain")
+    print("POST /api/members endpoint already present")
