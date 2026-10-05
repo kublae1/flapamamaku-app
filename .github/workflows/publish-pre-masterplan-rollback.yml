@@ -1,4 +1,4 @@
-name: Publish Pre-Masterplan Rollback Image
+name: Publish Stable Final V1 Rollback Image
 
 on:
   push:
@@ -13,13 +13,13 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kublae1/flapamamaku-backend
-  SOURCE_SHA: 7581f3d8319a8f17220e5e4b11de1e94c7afcab0
+  SOURCE_SHA: 3cca02ce3dc32efecaefac1f3c6b7a2731cc95bb
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout last pre-masterplan working source
+      - name: Checkout stable final v1 source
         uses: actions/checkout@v4
         with:
           ref: ${{ env.SOURCE_SHA }}
@@ -37,13 +37,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push fixed rollback tag
+      - name: Build and push stable rollback tag
         uses: docker/build-push-action@v6
         with:
           context: ./backend
           file: ./backend/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/kublae1/flapamamaku-backend:rollback-pre-masterplan
+          tags: ghcr.io/kublae1/flapamamaku-backend:rollback-stable-final-v1
           build-args: |
             FLAPAMAMAKU_BUILD_SHA=${{ env.SOURCE_SHA }}
