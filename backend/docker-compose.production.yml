@@ -2,18 +2,38 @@ services:
   flapamamaku-backend:
     image: ghcr.io/kublae1/flapamamaku-backend:latest
     pull_policy: always
-    container_name: flapamamaku-backend
+    container_name: ${FLAPAMAMAKU_CONTAINER_NAME:-flapamamaku-backend}
     restart: unless-stopped
     ports:
       # Nur lokal auf dem Docker-/Synology-Host erreichbar.
       # Der öffentliche Zugriff erfolgt ausschliesslich über den HTTPS-Reverse-Proxy.
-      - "127.0.0.1:8087:8000"
+      - "127.0.0.1:${FLAPAMAMAKU_HOST_PORT:-8087}:8000"
     environment:
       FLAPAMAMAKU_DB: /data/flapamamaku.db
+      FLAPAMAMAKU_BACKUP_DIR: /data/backups
+      FLAPAMAMAKU_BACKUP_RETENTION: ${FLAPAMAMAKU_BACKUP_RETENTION:-14}
+      FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS: ${FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS:-86400}
+      FLAPAMAMAKU_INSTANCE_ID: ${FLAPAMAMAKU_INSTANCE_ID:-flapamamaku}
       FLAPAMAMAKU_ENV: production
       FLAPAMAMAKU_ALLOWED_ORIGINS: ${FLAPAMAMAKU_ALLOWED_ORIGINS}
+      FLAPAMAMAKU_BUILD_SHA: ${FLAPAMAMAKU_BUILD_SHA:-unknown}
     volumes:
       - flapamamaku-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)); assert d.get('status') == 'ok'"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   flapamamaku-data:
