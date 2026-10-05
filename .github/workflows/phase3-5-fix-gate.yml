@@ -1,0 +1,37 @@
+name: Phase 3-5 Gate Fixes
+
+on:
+  push:
+    branches:
+      - feature/masterplan-phase3-5-20261004
+    paths:
+      - tools/phase3_5_gate_fixes.py
+      - .github/workflows/phase3-5-fix-gate.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/masterplan-phase3-5-20261004
+
+      - name: Apply gate fixes
+        run: python3 tools/phase3_5_gate_fixes.py
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No gate fixes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/content_detail_screens.dart backend/app/phase45.py
+          git commit -m "Fix Phase 3-5 final gate failures"
+          git push origin HEAD:feature/masterplan-phase3-5-20261004
