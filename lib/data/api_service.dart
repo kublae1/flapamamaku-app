@@ -56,6 +56,8 @@ class ApiService {
   }
 
   Map<String, String> get authHeaders => {
+        if (expectedInstanceId.trim().isNotEmpty)
+          'X-Club-Instance': expectedInstanceId.trim().toLowerCase(),
         if (hasToken) 'Authorization': 'Bearer $_token',
       };
 
@@ -71,7 +73,7 @@ class ApiService {
     final response = await http
         .post(
           _uri('/api/auth/login'),
-          headers: const {'Content-Type': 'application/json'},
+          headers: _jsonHeaders,
           body: jsonEncode({
             'username': username,
             'password': password,
@@ -128,6 +130,9 @@ class ApiService {
     final imageUrl = json['image_url']?.toString() ?? '';
     json['image_url'] = absolute(imageUrl);
 
+    final logoUrl = json['logo_url']?.toString() ?? '';
+    json['logo_url'] = absolute(logoUrl);
+
     final documentUrl = json['document_url']?.toString() ?? '';
     json['document_url'] = absolute(documentUrl);
     return json;
@@ -135,7 +140,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> fetchAppConfig() async {
     final response = await http
-        .get(_uri('/api/app-config'))
+        .get(_uri('/api/app-config'), headers: authHeaders)
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -279,10 +284,28 @@ class ApiService {
     _ensureSuccess(response);
   }
 
+  Future<List<ContentItem>> fetchSujets({String scope = 'all'}) async {
+    final response = await http
+        .get(
+          _uri('/api/sujets?scope=${Uri.encodeQueryComponent(scope)}'),
+          headers: authHeaders,
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final values = jsonDecode(response.body) as List<dynamic>;
+    return values.map((value) {
+      final json = _prepareContentJson(
+        Map<String, dynamic>.from(value as Map<String, dynamic>),
+      );
+      return ContentItem.fromJson(json);
+    }).toList();
+  }
+
   Future<List<ContentItem>> fetchContent({String? section}) async {
-    if (section == 'polls') {
-      return fetchPolls();
-    }
+    if (section == 'polls') return fetchPolls();
+    if (section == 'sujet') return fetchSujets(scope: 'current');
+    if (section == 'archive') return fetchSujets(scope: 'archive');
+
     final suffix = section == null || section.isEmpty
         ? ''
         : '?section=${Uri.encodeQueryComponent(section)}';
@@ -291,15 +314,19 @@ class ApiService {
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final values = jsonDecode(response.body) as List<dynamic>;
-    return values
+    final generic = values
         .map((value) {
           final json = _prepareContentJson(
             Map<String, dynamic>.from(value as Map<String, dynamic>),
           );
           return ContentItem.fromJson(json);
         })
-        .where((item) => section != null || item.section != 'polls')
+        .where((item) => item.section != 'polls' &&
+            item.section != 'sujet' && item.section != 'archive')
         .toList();
+    if (section != null) return generic;
+    final sujets = await fetchSujets();
+    return [...generic, ...sujets];
   }
 
   Future<ContentItem> saveContent(ContentItem item) async {
@@ -514,6 +541,13 @@ class ApiService {
       'title': item.title,
       'location': item.location,
       'time': item.time,
+      'end_time': item.endTime,
+      'meeting_point': item.meetingPoint,
+      'description': item.description,
+      'responsible': item.responsible,
+      'registration_deadline': item.registrationDeadline,
+      'registration_enabled': item.registrationEnabled,
+      'document_url': item.documentUrl,
     });
     final response = item.id == null
         ? await http

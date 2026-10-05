@@ -1,0 +1,17 @@
+name: Phase 3-5 Source Migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-migration-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Migration status
+        run: |
+          echo "The canonical Phase 3-5 source migration has already been applied."
+          echo "This workflow is retained only as a historical/manual verification point."

@@ -8,11 +8,11 @@ class SettingsScreen extends StatelessWidget {
 
   static const String appVersion = String.fromEnvironment(
     'APP_VERSION',
-    defaultValue: '0.8.19',
+    defaultValue: '0.8.33',
   );
   static const String buildNumber = String.fromEnvironment(
     'APP_BUILD_NUMBER',
-    defaultValue: '34',
+    defaultValue: '35',
   );
 
   @override
@@ -59,6 +59,49 @@ class SettingsScreen extends StatelessWidget {
                 'Die Anmeldung bleibt auf diesem Gerät aktiv, bis du dich bewusst abmeldest oder ein Administrator die Sitzung beendet.',
                 style: TextStyle(color: Colors.white60),
               ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _SettingsCard(
+            child: SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 4,
+              ),
+              secondary: const Icon(
+                Icons.fingerprint_rounded,
+                color: FlapBrand.gold,
+                size: 29,
+              ),
+              title: const Text(
+                'Biometrische Anmeldung',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: Text(
+                store.biometricAvailable
+                    ? 'App nach dem Start mit Fingerabdruck oder Gerätebiometrie entsperren'
+                    : 'Wird beim Aktivieren auf diesem Gerät geprüft',
+                style: const TextStyle(color: Colors.white60),
+              ),
+              value: store.biometricEnabled,
+              activeThumbColor: Colors.white,
+              activeTrackColor: store.themeColor,
+              onChanged: (value) async {
+                final ok = await store.setBiometricEnabled(value);
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        store.authError ??
+                            'Biometrische Anmeldung konnte nicht geändert werden.',
+                      ),
+                    ),
+                  );
+                }
+              },
             ),
           ),
           const SizedBox(height: 22),
