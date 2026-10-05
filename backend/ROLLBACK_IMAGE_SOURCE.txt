@@ -1,0 +1,2 @@
+Pre-masterplan rollback image source: 7581f3d8319a8f17220e5e4b11de1e94c7afcab0
+This file exists only to trigger the rollback image publication workflow.
