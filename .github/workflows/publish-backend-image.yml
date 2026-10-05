@@ -3,7 +3,8 @@ name: Publish Backend Image
 on:
   workflow_dispatch:
   push:
-    branches: [ main, feature/docker-integration-v2, feature/app-gallery-push-poll-fixes, feature/backend-foundation-hardening-v1, feature/admin-cms-refresh-v1, feature/white-label-foundation-v1, feature/white-label-logo-v1, feature/white-label-content-v1, feature/white-label-modules-v1, feature/media-unification-v1, feature/polls-domain-v1, feature/push-module-v1, feature/system-status-v1, feature/roles-overrides-v1, feature/backup-restore-v1, feature/security-hardening-v1, feature/public-readiness-v1, feature/club-instance-identity-v1, feature/neutral-admin-ui-v1, feature/autonomous-onboarding-v1, feature/club-setup-status-v1, feature/backup-instance-protection-v1, feature/instance-isolation-visibility-v1, feature/settings-permission-v1, feature/settings-permission-ui-v1, feature/settings-permission-summary-v1, feature/club-manager-role-v1 ]
+    branches:
+      - rollback/pre-masterplan-docker-20261005
     paths:
       - "backend/**"
       - ".github/workflows/publish-backend-image.yml"
@@ -42,8 +43,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=sha,prefix=sha-
+            type=raw,value=rollback-pre-masterplan
+            type=sha,prefix=rollback-sha-
 
       - name: Build and push backend image
         uses: docker/build-push-action@v6
@@ -55,6 +56,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            FLAPAMAMAKU_BUILD_SHA=${{ github.sha }}
+            FLAPAMAMAKU_BUILD_SHA=7581f3d8319a8f17220e5e4b11de1e94c7afcab0
           cache-from: type=gha
           cache-to: type=gha,mode=max
