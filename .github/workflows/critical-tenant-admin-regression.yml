@@ -1,0 +1,66 @@
+name: Critical Tenant Admin Regression
+
+on:
+  push:
+    branches:
+      - fix/critical-tenant-admin-regression-20261005
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Compile backend regression code
+        working-directory: backend
+        run: python -m py_compile app/main.py app/phase45.py tests/critical_tenant_admin_regression.py
+
+      - name: Verify production tenant and admin repair
+        run: python backend/tests/critical_tenant_admin_regression.py
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter app
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Verify managed FLAPAMAMAKU profile is locked
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          profile = json.loads(Path('config/white-label/flapamamaku.json').read_text())
+          assert profile['id'] == 'flapamamaku'
+          assert profile['instance_id'] == 'flapamamaku'
+          assert profile['api_base_url'] == 'https://flapamamaku.kublaecloud.synology.me'
+          assert profile['allow_server_change'] is False
+          source = Path('lib/main.dart').read_text()
+          assert "prefs.remove('flapamamaku_server_url')" in source
+          print('Managed FLAPAMAMAKU server lock verified')
+          PY
