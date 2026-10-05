@@ -1283,6 +1283,11 @@ def init_db() -> None:
         _apply_schema_migrations(db)
         db.commit()
 
+    # Keep direct init_db() callers at the same current schema as normal app startup.
+    phase45_initializer = getattr(app.state, "phase45_initializer", None)
+    if callable(phase45_initializer):
+        phase45_initializer()
+
 
 async def _snapshot_cleanup_loop() -> None:
     while True:
