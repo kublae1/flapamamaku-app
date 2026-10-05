@@ -1,4 +1,4 @@
-# Final gate for the approved Phase 3-5 work package after all backend route corrections.
+# Final gate for the approved Phase 3-5 work package after member endpoint restoration.
 name: Phase 3-5 Gate
 
 on:
@@ -70,12 +70,13 @@ jobs:
           motto_ui = Path('lib/screens/year_motto_screen.dart').read_text(encoding='utf-8')
 
           required_main = [
+              '@app.post("/api/members")',
               'end_time', 'meeting_point', 'description', 'responsible',
               'registration_deadline', 'registration_enabled', 'document_url',
               'Der Anmeldeschluss ist abgelaufen',
           ]
           for token in required_main:
-              assert token in main, f'missing event implementation: {token}'
+              assert token in main, f'missing event/member implementation: {token}'
 
           required_sujet = [
               'class SujetPayload', 'motto:', 'logo_data', 'logo_mime',
