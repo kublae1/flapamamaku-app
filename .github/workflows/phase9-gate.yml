@@ -1,0 +1,94 @@
+name: Phase 9 Gate
+
+on:
+  push:
+    branches:
+      - feature/masterplan-phase9-20261005
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  platform-superuser-billing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Compile Phase 9 backend
+        working-directory: backend
+        run: |
+          python -m py_compile app/platform_store.py app/platform.py app/platform_runtime.py app/runtime.py tests/phase9_platform_contract.py
+      - name: Verify Phase 9 platform end-to-end contract
+        working-directory: backend
+        run: python tests/phase9_platform_contract.py
+      - name: Validate production compose
+        working-directory: backend
+        env:
+          FLAPAMAMAKU_ALLOWED_ORIGINS: https://flapamamaku.example.invalid
+        run: docker compose -f docker-compose.production.yml config
+      - name: Verify Phase 6-8 regressions remain green
+        working-directory: backend
+        run: |
+          python tests/phase6_8_operations.py
+          python tests/phase8_pilot_matrix.py
+      - name: Verify Phase 9 files do not introduce Phase 10 functionality
+        run: |
+          ! grep -R -E "Phase 10|phase10|ten clubs|10 Vereine" backend/app/platform*.py backend/static/platform.* backend/tests/phase9_platform_contract.py
+
+  flutter-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Generate Android platform files if missing
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name flapamamaku_app .
+          fi
+      - name: Enable Android core library desugaring
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          kts = Path('android/app/build.gradle.kts')
+          groovy = Path('android/app/build.gradle')
+          if kts.exists():
+              text = kts.read_text()
+              if 'isCoreLibraryDesugaringEnabled = true' not in text:
+                  text = re.sub(r'(compileOptions\s*\{)', r'\1\n        isCoreLibraryDesugaringEnabled = true', text, count=1)
+              dependency = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+              if dependency not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(r'(?m)^dependencies\s*\{', 'dependencies {\n    ' + dependency, text, count=1)
+                  else:
+                      text += '\n\ndependencies {\n    ' + dependency + '\n}\n'
+              kts.write_text(text)
+          elif groovy.exists():
+              text = groovy.read_text()
+              if 'coreLibraryDesugaringEnabled true' not in text:
+                  text = re.sub(r'(compileOptions\s*\{)', r'\1\n        coreLibraryDesugaringEnabled true', text, count=1)
+              dependency = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+              if dependency not in text:
+                  if re.search(r'(?m)^dependencies\s*\{', text):
+                      text = re.sub(r'(?m)^dependencies\s*\{', 'dependencies {\n    ' + dependency, text, count=1)
+                  else:
+                      text += '\n\ndependencies {\n    ' + dependency + '\n}\n'
+              groovy.write_text(text)
+          else:
+              raise SystemExit('Android Gradle file not found')
+          PY
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build FLAPAMAMAKU release APK
+        run: flutter build apk --release --dart-define=API_BASE_URL=https://flapamamaku.kublaecloud.synology.me
