@@ -7,6 +7,7 @@ import '../theme/flap_brand.dart';
 import 'flap_image_viewer_screen.dart';
 import 'members_screen.dart';
 import 'more_screen.dart';
+import 'remote_content_screen.dart';
 import 'content_detail_screens.dart';
 
 class StartScreen extends StatelessWidget {
@@ -93,6 +94,8 @@ class StartScreen extends StatelessWidget {
         ? store.appName
         : hero.title.trim();
     final latestNews = store.news.take(3).toList();
+    final sujetItems = List<ContentItem>.from(store.contentFor('sujet'))
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
@@ -189,6 +192,78 @@ class StartScreen extends StatelessWidget {
                 ],
               ),
             ),
+            if (store.showSujet)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: FlapBrand.gold,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            store.labelSujet,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => RemoteContentScreen.archiveStyle(
+                                section: 'sujet',
+                                title: store.labelSujet,
+                                emptyText: 'Noch keine Inhalte hinterlegt.',
+                                icon: Icons.auto_awesome_rounded,
+                              ),
+                            ),
+                          ),
+                          child: const Text('Alle'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (sujetItems.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF191B1E),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0x18FFFFFF)),
+                        ),
+                        child: const Text(
+                          'Noch keine Sujet-Bilder hinterlegt.',
+                          style: TextStyle(color: Colors.white60),
+                        ),
+                      )
+                    else
+                      _SujetPreviewSlider(
+                        items: sujetItems,
+                        headers: store.api.authHeaders,
+                        title: store.labelSujet,
+                        onOpenAll: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => RemoteContentScreen.archiveStyle(
+                              section: 'sujet',
+                              title: store.labelSujet,
+                              emptyText: 'Noch keine Inhalte hinterlegt.',
+                              icon: Icons.auto_awesome_rounded,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               child: Column(
@@ -240,7 +315,8 @@ class StartScreen extends StatelessWidget {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (item.imageUrl.isNotEmpty || item.imageAsset.isNotEmpty)
+                                if (item.imageUrl.isNotEmpty ||
+                                    item.imageAsset.isNotEmpty)
                                   SizedBox(
                                     width: 108,
                                     height: 108,
@@ -261,9 +337,15 @@ class StartScreen extends StatelessWidget {
                                   ),
                                 Expanded(
                                   child: Padding(
-                                    padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                                    padding: const EdgeInsets.fromLTRB(
+                                      14,
+                                      12,
+                                      10,
+                                      12,
+                                    ),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           item.date,
@@ -313,6 +395,198 @@ class StartScreen extends StatelessWidget {
                         ),
                       ),
                     ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SujetPreviewEntry {
+  final String imageUrl;
+  final String title;
+
+  const _SujetPreviewEntry({
+    required this.imageUrl,
+    required this.title,
+  });
+}
+
+class _SujetPreviewSlider extends StatefulWidget {
+  final List<ContentItem> items;
+  final Map<String, String> headers;
+  final String title;
+  final VoidCallback onOpenAll;
+
+  const _SujetPreviewSlider({
+    required this.items,
+    required this.headers,
+    required this.title,
+    required this.onOpenAll,
+  });
+
+  @override
+  State<_SujetPreviewSlider> createState() => _SujetPreviewSliderState();
+}
+
+class _SujetPreviewSliderState extends State<_SujetPreviewSlider> {
+  late final PageController _controller;
+  int _page = 0;
+
+  List<_SujetPreviewEntry> get _entries {
+    final result = <_SujetPreviewEntry>[];
+    for (final item in widget.items) {
+      final urls = item.imageUrls.isNotEmpty
+          ? item.imageUrls
+          : item.imageUrl.trim().isNotEmpty
+              ? <String>[item.imageUrl]
+              : const <String>[];
+      for (final rawUrl in urls) {
+        final url = rawUrl.trim();
+        if (url.isEmpty) continue;
+        result.add(
+          _SujetPreviewEntry(
+            imageUrl: url,
+            title: item.title.trim().isEmpty ? widget.title : item.title.trim(),
+          ),
+        );
+      }
+    }
+    return result;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = _entries;
+    if (entries.isEmpty) {
+      return Material(
+        color: const Color(0xFF191B1E),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: widget.onOpenAll,
+          child: const Padding(
+            padding: EdgeInsets.all(18),
+            child: Text(
+              'Noch keine Sujet-Bilder hinterlegt.',
+              style: TextStyle(color: Colors.white60),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_page >= entries.length) {
+      _page = 0;
+    }
+
+    return Material(
+      color: const Color(0xFF191B1E),
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: widget.onOpenAll,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 10,
+              child: Stack(
+                alignment: Alignment.bottomCenter,
+                children: [
+                  PageView.builder(
+                    controller: _controller,
+                    itemCount: entries.length,
+                    onPageChanged: (value) => setState(() => _page = value),
+                    itemBuilder: (_, index) => OfflineNetworkImage(
+                      entries[index].imageUrl,
+                      headers: widget.headers,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const ColoredBox(
+                        color: Color(0xFF24272B),
+                        child: Center(
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            color: Colors.white38,
+                            size: 48,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (entries.length > 1)
+                    Positioned(
+                      bottom: 10,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0x88000000),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              entries.length,
+                              (index) => AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 3),
+                                width: index == _page ? 18 : 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: index == _page
+                                      ? Colors.white
+                                      : Colors.white54,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      entries[_page].title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white54,
+                  ),
                 ],
               ),
             ),
