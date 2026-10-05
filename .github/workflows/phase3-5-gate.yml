@@ -1,4 +1,4 @@
-# Final gate for the approved Phase 3-5 work package after member endpoint restoration.
+# Final gate for the approved Phase 3-5 work package.
 name: Phase 3-5 Gate
 
 on:
@@ -53,9 +53,18 @@ jobs:
           echo $! >/tmp/phase35-backend.pid
 
       - name: Verify Admin-API-Database-App baseline contract
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase35.db
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
         run: python backend/tests/phase1_contract_smoke.py
 
-      - name: Verify Phase 3-5 implementation contract
+      - name: Verify Phase 3-5 HTTP and tenant isolation contract
+        env:
+          FLAPAMAMAKU_DB: /tmp/flapamamaku-phase35.db
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+        run: python backend/tests/phase3_5_contract.py
+
+      - name: Verify Phase 3-5 implementation surface
         shell: bash
         run: |
           python3 - <<'PY'
@@ -101,7 +110,7 @@ jobs:
           assert 'event.registrationEnabled ? _register : null' in event_ui, 'event registration guard missing in UI'
           assert 'item.logoUrl' in motto_ui and 'item.motto' in motto_ui, 'annual sujet presentation incomplete'
 
-          print('Phase 3-5 implementation contract passed')
+          print('Phase 3-5 implementation surface passed')
           PY
 
       - name: Show backend log on failure
