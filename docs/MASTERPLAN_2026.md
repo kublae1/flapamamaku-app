@@ -94,8 +94,6 @@ Bedienregeln:
 
 ## Phasen 3–11
 
-Die folgenden Phasen bleiben bis zur ausdrücklichen Freigabe gesperrt:
-
 - Phase 3: bestehende App-Funktionen fertigstellen
 - Phase 4: Jahresmotto und Archiv als eigenes Datenmodell
 - Phase 5: Multi-Tenant-Härtung
@@ -121,4 +119,7 @@ Die folgenden Phasen bleiben bis zur ausdrücklichen Freigabe gesperrt:
 
 ## Aktuelle Freigabe
 
-Am 3. Oktober 2026 wurde die selbstständige Bearbeitung von **Phase 0 bis einschließlich Phase 2** ausdrücklich freigegeben. Alle späteren Phasen bleiben gesperrt, bis eine neue ausdrückliche Freigabe erfolgt.
+- Phase 0 bis einschließlich Phase 8 wurden umgesetzt, getestet und nach `main` übernommen.
+- Am 5. Oktober 2026 wurde **Phase 9 – Plattformverwaltung / Abrechnung** ausdrücklich zur selbstständigen vollständigen Umsetzung freigegeben.
+- Die Freigabe umfasst notwendige Datenbank-Migrationen, Superuser-/Plattformverwaltung, Abrechnung, softwareseitige Vereinssperren, Tests, Builds, Pull Request und Merge nach `main`.
+- **Phase 10 und Phase 11 bleiben gesperrt**, bis eine neue ausdrückliche Freigabe erfolgt.
