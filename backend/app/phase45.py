@@ -277,6 +277,23 @@ def install_phase45(
             db.execute(
                 "CREATE INDEX IF NOT EXISTS push_tokens_instance_idx ON push_tokens(instance_id, enabled)"
             )
+
+            # Regression repair: legacy full administrators were migrated before
+            # can_gallery_upload existed. That new default-false field caused the
+            # old "all permissions are true" heuristic to downgrade them to a
+            # member role with overrides. can_manage_users was the historic
+            # administrator marker, so promote those accounts back to the real
+            # admin role and let the role definition provide all current rights.
+            user_columns = columns(db, "users")
+            if {"role_key", "permission_overrides", "can_manage_users"}.issubset(user_columns):
+                db.execute(
+                    """
+                    UPDATE users
+                    SET role_key = 'admin', permission_overrides = '{}'
+                    WHERE can_manage_users = 1 AND role_key <> 'admin'
+                    """
+                )
+
             migrate_legacy_sujets(db)
             now = datetime.now(timezone.utc).isoformat()
             db.execute(
@@ -301,15 +318,8 @@ def install_phase45(
     async def phase45_startup() -> None:
         init_phase45()
 
-    public_without_tenant = {
-        "/api/health",
-        "/api/app-config",
-        "/api/app-config/logo",
-    }
-
     @app.middleware("http")
     async def tenant_guard(request: Request, call_next: Callable[..., Any]) -> Response:
-        path = request.url.path
         supplied = request.headers.get("x-club-instance", "").strip().lower()
         if supplied and supplied != instance_id:
             return JSONResponse(
@@ -321,21 +331,11 @@ def install_phase45(
                 headers={"X-Club-Instance": instance_id},
             )
 
-        requires_tenant = (
-            is_production
-            and path.startswith("/api/")
-            and path not in public_without_tenant
-        )
-        if requires_tenant and not supplied:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "detail": "Vereinsinstanz fehlt in der Anfrage.",
-                    "expected_instance_id": instance_id,
-                },
-                headers={"X-Club-Instance": instance_id},
-            )
-
+        # A supplied club ID must always match. A missing header is intentionally
+        # accepted for the same-origin PC admin: browser admin requests are still
+        # authenticated by instance-bound sessions and every database process is
+        # bound to exactly one instance_id. Mobile/white-label clients continue to
+        # send the header, so an app pointed at another club is rejected with 409.
         response = await call_next(request)
         response.headers["X-Club-Instance"] = instance_id
         return response
