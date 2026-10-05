@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import base64
 import hashlib
 import hmac
@@ -12,6 +13,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -22,7 +24,7 @@ from fastapi.responses import FileResponse, Response
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 from pydantic import BaseModel, Field
-from PIL import Image, ImageOps, ImageSequence
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageSequence
 
 
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/data/flapamamaku.db"))
@@ -57,7 +59,7 @@ _LOGIN_RATE_LOCK = threading.Lock()
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _LOGIN_LOCKED_UNTIL: dict[str, float] = {}
 
-API_VERSION = "0.9.0"
+API_VERSION = "0.8.69"
 # Stable identifier for one autonomous club instance. It is public metadata and
 # lets a white-label app reject an accidentally configured server of another club.
 INSTANCE_ID = (
@@ -68,7 +70,7 @@ if not all(char.isalnum() or char == "-" for char in INSTANCE_ID):
     raise RuntimeError("FLAPAMAMAKU_INSTANCE_ID may only contain a-z, 0-9 and '-'")
 # Exposed via /api/health to verify which backend image is actually deployed.
 BUILD_SHA = os.getenv("FLAPAMAMAKU_BUILD_SHA", "development").strip() or "development"
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 17
 APP_ENV = os.getenv("FLAPAMAMAKU_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 logger = logging.getLogger("flapamamaku.push")
@@ -80,6 +82,19 @@ PUSH_ICON_URL = os.getenv(
     "FLAPAMAMAKU_PUSH_ICON_URL",
     "https://flapamamaku.kublaecloud.synology.me/flapamamaku-icon.png",
 ).strip()
+BILLING_ISSUER_NAME = (
+    os.getenv("FLAPAMAMAKU_BILLING_ISSUER_NAME", "Vereinsplattform").strip()
+    or "Vereinsplattform"
+)
+BILLING_ISSUER_ADDRESS = os.getenv(
+    "FLAPAMAMAKU_BILLING_ISSUER_ADDRESS",
+    "",
+).strip()
+BILLING_PAYMENT_INFO = os.getenv(
+    "FLAPAMAMAKU_BILLING_PAYMENT_INFO",
+    "",
+).strip()
+
 if not FIREBASE_SERVICE_ACCOUNT_JSON:
     firebase_b64 = os.getenv(
         "FLAPAMAMAKU_FIREBASE_SERVICE_ACCOUNT_B64",
@@ -99,6 +114,11 @@ app = FastAPI(
     docs_url=None if IS_PRODUCTION else "/api/docs",
     openapi_url=None if IS_PRODUCTION else "/openapi.json",
     redoc_url=None,
+)
+
+_REQUEST_CLUB_ID: ContextVar[int | None] = ContextVar(
+    "flapamamaku_request_club_id",
+    default=None,
 )
 
 ALLOWED_ORIGINS = [
@@ -158,7 +178,35 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    response = await call_next(request)
+    context_token = None
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Bearer "):
+        raw_token = authorization[7:].strip()
+        if raw_token:
+            try:
+                with connect() as db:
+                    session = db.execute(
+                        """
+                        SELECT active_club_id
+                        FROM sessions
+                        WHERE token_hash = ? AND expires_at > ?
+                        """,
+                        (
+                            _token_hash(raw_token),
+                            datetime.now(timezone.utc).isoformat(),
+                        ),
+                    ).fetchone()
+                    if session is not None and session["active_club_id"]:
+                        context_token = _REQUEST_CLUB_ID.set(
+                            int(session["active_club_id"])
+                        )
+            except sqlite3.Error:
+                context_token = None
+    try:
+        response = await call_next(request)
+    finally:
+        if context_token is not None:
+            _REQUEST_CLUB_ID.reset(context_token)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -225,6 +273,23 @@ ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
 }
 
 
+CLUB_FEATURE_DEFAULTS: dict[str, tuple[str, bool]] = {
+    "news": ("News", True),
+    "events": ("Termine", True),
+    "members": ("Mitglieder", True),
+    "documents": ("Dokumente", True),
+    "gallery": ("Galerie", True),
+    "photos": ("Fotoalben", True),
+    "sujet_next": ("Sujet nächstes Jahr", True),
+    "sujet_archive": ("Vergangene Sujet", True),
+    "polls": ("Umfragen", True),
+    "links": ("Links", True),
+    "push_notifications": ("Push-Nachrichten", True),
+    "calendar": ("Kalender", True),
+    "participant_lists": ("Teilnehmerlisten", True),
+}
+
+
 def _normalize_role_key(value: str) -> str:
     role_key = str(value or "member").strip().lower()
     if role_key not in ROLE_DEFINITIONS:
@@ -265,13 +330,6 @@ class EventPayload(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     location: str = ""
     time: str = ""
-    end_time: str = ""
-    meeting_point: str = ""
-    description: str = ""
-    responsible: str = ""
-    registration_deadline: str = ""
-    registration_enabled: bool = True
-    document_url: str = ""
 
 
 class MemberPayload(BaseModel):
@@ -330,13 +388,19 @@ class PollPayload(BaseModel):
 
 class AppConfigPayload(BaseModel):
     app_name: str = Field(default="FLAPAMAMAKU", min_length=1, max_length=80)
+    short_name: str = Field(default="", max_length=80)
     app_subtitle: str = Field(default="Fasnachtsgruppe Luzern", max_length=120)
     primary_color: str = Field(default="#8A101B", pattern=r"^#[0-9A-Fa-f]{6}$")
+    secondary_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
     club_description: str = Field(default="", max_length=4000)
     website_url: str = Field(default="", max_length=500)
     contact_email: str = Field(default="", max_length=320)
     contact_phone: str = Field(default="", max_length=80)
     club_address: str = Field(default="", max_length=500)
+    city: str = Field(default="", max_length=160)
+    country: str = Field(default="", max_length=120)
+    app_title: str = Field(default="", max_length=120)
+    welcome_text: str = Field(default="", max_length=2000)
     show_sujet: bool = True
     label_sujet: str = Field(default="Sujet nächstes Jahr", min_length=1, max_length=80)
     show_archive: bool = True
@@ -349,6 +413,47 @@ class AppConfigPayload(BaseModel):
     label_polls: str = Field(default="Umfragen", min_length=1, max_length=80)
     show_links: bool = True
     label_links: str = Field(default="Links", min_length=1, max_length=80)
+
+
+class ClubFeaturesPayload(BaseModel):
+    features: dict[str, bool]
+    labels: dict[str, str] = Field(default_factory=dict)
+
+
+class ClubSwitchPayload(BaseModel):
+    club_id: int = Field(gt=0)
+
+
+class ClubCreatePayload(BaseModel):
+    slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    name: str = Field(min_length=1, max_length=120)
+    short_name: str = Field(default="", max_length=80)
+    subtitle: str = Field(default="", max_length=120)
+    primary_color: str = Field(default="#8A101B", pattern=r"^#[0-9A-Fa-f]{6}$")
+    secondary_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    description: str = Field(default="", max_length=4000)
+    website: str = Field(default="", max_length=500)
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=80)
+    address: str = Field(default="", max_length=500)
+    city: str = Field(default="", max_length=160)
+    country: str = Field(default="", max_length=120)
+    app_title: str = Field(default="", max_length=120)
+    welcome_text: str = Field(default="", max_length=2000)
+
+
+class ClubBillingSettingsPayload(BaseModel):
+    billing_email: str = Field(default="", max_length=320)
+    amount_rappen: int = Field(default=0, ge=0, le=100000000)
+    interval_months: int = Field(default=12, ge=1, le=24)
+    due_days: int = Field(default=30, ge=1, le=90)
+    grace_days: int = Field(default=0, ge=0, le=365)
+    next_invoice_date: str = Field(default="", max_length=10)
+    auto_suspend: bool = True
+
+
+class ClubBillingSuspendPayload(BaseModel):
+    reason: str = Field(default="Ausstehende Zahlung", min_length=1, max_length=500)
 
 
 class PollVotePayload(BaseModel):
@@ -440,13 +545,6 @@ TABLES: dict[str, tuple[str, type[BaseModel]]] = {
             title TEXT NOT NULL,
             location TEXT NOT NULL DEFAULT '',
             time TEXT NOT NULL DEFAULT '',
-            end_time TEXT NOT NULL DEFAULT '',
-            meeting_point TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
-            responsible TEXT NOT NULL DEFAULT '',
-            registration_deadline TEXT NOT NULL DEFAULT '',
-            registration_enabled INTEGER NOT NULL DEFAULT 1,
-            document_url TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )
         """,
@@ -580,6 +678,17 @@ def _ensure_column(
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _ensure_club_column(db: sqlite3.Connection, table: str) -> None:
+    """Add the first tenant ownership column without changing legacy record IDs."""
+    _ensure_column(db, table, "club_id", "INTEGER NOT NULL DEFAULT 1")
+    db.execute(
+        f"UPDATE {table} SET club_id = 1 WHERE club_id IS NULL OR club_id = 0"
+    )
+    db.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{table}_club_id ON {table}(club_id)"
+    )
+
+
 def _apply_schema_migrations(db: sqlite3.Connection) -> None:
     """Record ordered schema migrations after the legacy bootstrap is reconciled."""
     db.execute(
@@ -600,6 +709,15 @@ def _apply_schema_migrations(db: sqlite3.Connection) -> None:
         (6, "user-roles-and-permission-overrides"),
         (7, "club-instance-binding"),
         (8, "club-settings-permission"),
+        (9, "multi-tenant-clubs-foundation"),
+        (10, "flapamamaku-club-data-migration"),
+        (11, "user-club-memberships"),
+        (12, "club-features"),
+        (13, "session-active-club"),
+        (14, "club-provisioning"),
+        (15, "push-tenant-isolation"),
+        (16, "club-billing-and-suspension"),
+        (17, "club-billing-pdf-and-grace"),
     ]
     applied = {
         int(row["version"])
@@ -783,9 +901,6 @@ def _restore_database_backup(source: Path) -> dict[str, Any]:
         _validate_restore_database(replacement)
         os.replace(replacement, DB_PATH)
         init_db()
-        phase45_initializer = getattr(app.state, "phase45_initializer", None)
-        if callable(phase45_initializer):
-            phase45_initializer()
         with connect() as db:
             db.execute("DELETE FROM sessions")
             db.commit()
@@ -815,6 +930,66 @@ def init_db() -> None:
     with connect() as db:
         for ddl, _ in TABLES.values():
             db.execute(ddl)
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS clubs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                name TEXT NOT NULL,
+                short_name TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                logo BLOB,
+                logo_mime TEXT NOT NULL DEFAULT '',
+                primary_color TEXT NOT NULL DEFAULT '#8A101B',
+                secondary_color TEXT NOT NULL DEFAULT '#FFFFFF',
+                description TEXT NOT NULL DEFAULT '',
+                website TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                phone TEXT NOT NULL DEFAULT '',
+                address TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT '',
+                country TEXT NOT NULL DEFAULT '',
+                app_title TEXT NOT NULL DEFAULT '',
+                welcome_text TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        club_now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT OR IGNORE INTO clubs (
+                slug, name, short_name, active,
+                primary_color, secondary_color,
+                created_at, updated_at
+            ) VALUES (
+                'flapamamaku', 'FLAPAMAMAKU', 'FLAPAMAMAKU', 1,
+                '#8A101B', '#FFFFFF',
+                ?, ?
+            )
+            """,
+            (club_now, club_now),
+        )
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS club_features (
+                club_id INTEGER NOT NULL,
+                feature_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+                label TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (club_id, feature_key),
+                FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_club_features_club_id ON club_features(club_id)"
+        )
 
         db.execute(
             """
@@ -855,6 +1030,88 @@ def init_db() -> None:
                 (INSTANCE_ID,),
             )
 
+        # Compatibility bridge for existing single-club deployments:
+        # before shared multi-tenancy, club 1 represented the configured
+        # FLAPAMAMAKU_INSTANCE_ID even when its slug had not yet existed in
+        # the new clubs registry. Keep the same row/id and bind it to that
+        # instance instead of creating or moving club-owned data.
+        if INSTANCE_ID != "flapamamaku":
+            mapped_club = db.execute(
+                "SELECT id FROM clubs WHERE slug = ?",
+                (INSTANCE_ID,),
+            ).fetchone()
+            club_count = int(
+                db.execute("SELECT COUNT(*) FROM clubs").fetchone()[0]
+            )
+            reference_club = db.execute(
+                "SELECT id FROM clubs WHERE id = 1 AND slug = 'flapamamaku'"
+            ).fetchone()
+            if mapped_club is None and club_count == 1 and reference_club is not None:
+                db.execute(
+                    """
+                    UPDATE clubs
+                    SET slug = ?, updated_at = ?
+                    WHERE id = 1
+                    """,
+                    (
+                        INSTANCE_ID,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+
+        _ensure_column(db, "clubs", "subtitle", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "clubs", "billing_status", "TEXT NOT NULL DEFAULT 'active'")
+        _ensure_column(db, "clubs", "billing_email", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "clubs", "billing_amount_rappen", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(db, "clubs", "billing_interval_months", "INTEGER NOT NULL DEFAULT 12")
+        _ensure_column(db, "clubs", "billing_due_days", "INTEGER NOT NULL DEFAULT 30")
+        _ensure_column(db, "clubs", "billing_grace_days", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(db, "clubs", "billing_next_invoice_date", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "clubs", "billing_auto_suspend", "INTEGER NOT NULL DEFAULT 1")
+        _ensure_column(db, "clubs", "billing_suspension_reason", "TEXT NOT NULL DEFAULT ''")
+
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS club_invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                club_id INTEGER NOT NULL,
+                invoice_number TEXT NOT NULL UNIQUE,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                issue_date TEXT NOT NULL,
+                due_date TEXT NOT NULL,
+                amount_rappen INTEGER NOT NULL CHECK (amount_rappen >= 0),
+                currency TEXT NOT NULL DEFAULT 'CHF',
+                status TEXT NOT NULL DEFAULT 'open',
+                paid_at TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(club_id, period_start),
+                FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_club_invoices_club_id "
+            "ON club_invoices(club_id)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_club_invoices_due_status "
+            "ON club_invoices(due_date, status)"
+        )
+        legacy_subtitle = db.execute(
+            "SELECT app_subtitle FROM app_config WHERE id = 1"
+        ).fetchone()
+        if legacy_subtitle is not None:
+            db.execute(
+                """
+                UPDATE clubs
+                SET subtitle = ?
+                WHERE id = 1 AND subtitle = ''
+                """,
+                (str(legacy_subtitle["app_subtitle"] or ""),),
+            )
+
         _ensure_column(db, "app_config", "logo_data", "BLOB")
         _ensure_column(db, "app_config", "logo_mime", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "app_config", "club_description", "TEXT NOT NULL DEFAULT ''")
@@ -874,6 +1131,54 @@ def init_db() -> None:
         _ensure_column(db, "app_config", "label_polls", "TEXT NOT NULL DEFAULT 'Umfragen'")
         _ensure_column(db, "app_config", "show_links", "INTEGER NOT NULL DEFAULT 1")
         _ensure_column(db, "app_config", "label_links", "TEXT NOT NULL DEFAULT 'Links'")
+
+        feature_now = datetime.now(timezone.utc).isoformat()
+        legacy_features = db.execute(
+            """
+            SELECT
+                show_sujet, label_sujet,
+                show_archive, label_archive,
+                show_photos, label_photos,
+                show_documents, label_documents,
+                show_polls, label_polls,
+                show_links, label_links
+            FROM app_config
+            WHERE id = 1
+            """
+        ).fetchone()
+        for club in db.execute("SELECT id FROM clubs").fetchall():
+            club_id = int(club["id"])
+            for feature_key, (default_label, default_enabled) in CLUB_FEATURE_DEFAULTS.items():
+                enabled = default_enabled
+                label = default_label
+                if club_id == 1 and legacy_features is not None:
+                    legacy_map = {
+                        "sujet_next": ("show_sujet", "label_sujet"),
+                        "sujet_archive": ("show_archive", "label_archive"),
+                        "photos": ("show_photos", "label_photos"),
+                        "documents": ("show_documents", "label_documents"),
+                        "polls": ("show_polls", "label_polls"),
+                        "links": ("show_links", "label_links"),
+                    }
+                    if feature_key in legacy_map:
+                        show_key, label_key = legacy_map[feature_key]
+                        enabled = bool(legacy_features[show_key])
+                        label = str(legacy_features[label_key] or default_label)
+                db.execute(
+                    """
+                    INSERT OR IGNORE INTO club_features (
+                        club_id, feature_key, enabled, label, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        club_id,
+                        feature_key,
+                        int(enabled),
+                        label,
+                        feature_now,
+                        feature_now,
+                    ),
+                )
 
         db.execute(
             """
@@ -1053,6 +1358,25 @@ def init_db() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS user_clubs (
+                user_id INTEGER NOT NULL,
+                club_id INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'member'
+                    CHECK (role IN ('super_admin', 'club_admin', 'member')),
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, club_id),
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_clubs_club_id ON user_clubs(club_id)"
+        )
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS event_registrations (
                 event_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -1068,18 +1392,19 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS sessions (
                 token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
-                instance_id TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
         )
-
-        _ensure_column(db, "sessions", "instance_id", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(db, "sessions", "active_club_id", "INTEGER")
         db.execute(
-            "UPDATE sessions SET instance_id = ? WHERE instance_id = '' OR instance_id IS NULL",
-            (INSTANCE_ID,),
+            """
+            UPDATE sessions
+            SET active_club_id = 1
+            WHERE active_club_id IS NULL OR active_club_id = 0
+            """
         )
 
         _ensure_column(db, "news", "image_data", "BLOB")
@@ -1095,16 +1420,6 @@ def init_db() -> None:
                     (position, row["id"]),
                 )
         _ensure_column(db, "events", "event_date", "TEXT NOT NULL DEFAULT ''")
-        for column, definition in {
-            "end_time": "TEXT NOT NULL DEFAULT ''",
-            "meeting_point": "TEXT NOT NULL DEFAULT ''",
-            "description": "TEXT NOT NULL DEFAULT ''",
-            "responsible": "TEXT NOT NULL DEFAULT ''",
-            "registration_deadline": "TEXT NOT NULL DEFAULT ''",
-            "registration_enabled": "INTEGER NOT NULL DEFAULT 1",
-            "document_url": "TEXT NOT NULL DEFAULT ''",
-        }.items():
-            _ensure_column(db, "events", column, definition)
         _ensure_column(db, "members", "phone_mobile", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_private", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(db, "members", "phone_work", "TEXT NOT NULL DEFAULT ''")
@@ -1191,6 +1506,59 @@ def init_db() -> None:
                     legacy_user["id"],
                 ),
             )
+
+        membership_now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """
+            INSERT OR IGNORE INTO user_clubs (
+                user_id, club_id, role, active, created_at, updated_at
+            )
+            SELECT
+                u.id,
+                1,
+                CASE
+                    WHEN u.role_key = 'admin' OR u.can_manage_users = 1
+                    THEN 'club_admin'
+                    ELSE 'member'
+                END,
+                u.active,
+                ?,
+                ?
+            FROM users u
+            """,
+            (membership_now, membership_now),
+        )
+
+        super_admin_exists = db.execute(
+            """
+            SELECT 1 FROM user_clubs
+            WHERE role = 'super_admin' AND active = 1
+            LIMIT 1
+            """
+        ).fetchone()
+        if super_admin_exists is None:
+            platform_admin = db.execute(
+                """
+                SELECT uc.user_id
+                FROM user_clubs uc
+                JOIN users u ON u.id = uc.user_id
+                WHERE uc.club_id = 1
+                  AND uc.active = 1
+                  AND u.active = 1
+                  AND u.can_manage_users = 1
+                ORDER BY u.id ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if platform_admin is not None:
+                db.execute(
+                    """
+                    UPDATE user_clubs
+                    SET role = 'super_admin', updated_at = ?
+                    WHERE user_id = ? AND club_id = 1
+                    """,
+                    (membership_now, platform_admin["user_id"]),
+                )
 
         _ensure_column(
             db,
@@ -1280,13 +1648,72 @@ def init_db() -> None:
                 """
             )
 
+        # Package 2: assign all existing FLAPAMAMAKU-owned records to club 1.
+        # API filtering and multi-club user membership are intentionally deferred
+        # to the following controlled packages.
+        direct_club_tables = (
+            "news",
+            "events",
+            "members",
+            "app_config",
+            "member_filters",
+            "content_items",
+            "content_images",
+            "gallery_snapshots",
+            "push_tokens",
+            "push_notifications",
+        )
+        relation_club_tables = (
+            "member_filter_links",
+            "poll_votes",
+            "poll_suggestions",
+            "push_deliveries",
+            "event_registrations",
+        )
+        for table in (*direct_club_tables, *relation_club_tables):
+            _ensure_club_column(db, table)
+
+        # Keep current FLAPAMAMAKU appearance/configuration as the source of truth
+        # while introducing the central clubs row. Nothing in the app reads these
+        # copied fields yet, so existing runtime behaviour remains unchanged.
+        config = db.execute("SELECT * FROM app_config WHERE id = 1").fetchone()
+        if config is not None:
+            db.execute(
+                """
+                UPDATE clubs
+                SET
+                    name = ?,
+                    short_name = ?,
+                    logo = ?,
+                    logo_mime = ?,
+                    primary_color = ?,
+                    description = ?,
+                    website = ?,
+                    email = ?,
+                    phone = ?,
+                    address = ?,
+                    app_title = ?,
+                    updated_at = ?
+                WHERE id = 1 AND slug = 'flapamamaku'
+                """,
+                (
+                    str(config["app_name"] or "FLAPAMAMAKU"),
+                    str(config["app_name"] or "FLAPAMAMAKU"),
+                    config["logo_data"],
+                    str(config["logo_mime"] or ""),
+                    str(config["primary_color"] or "#8A101B"),
+                    str(config["club_description"] or ""),
+                    str(config["website_url"] or ""),
+                    str(config["contact_email"] or ""),
+                    str(config["contact_phone"] or ""),
+                    str(config["club_address"] or ""),
+                    str(config["app_name"] or "FLAPAMAMAKU"),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
         _apply_schema_migrations(db)
         db.commit()
-
-    # Keep direct init_db() callers at the same current schema as normal app startup.
-    phase45_initializer = getattr(app.state, "phase45_initializer", None)
-    if callable(phase45_initializer):
-        phase45_initializer()
 
 
 async def _snapshot_cleanup_loop() -> None:
@@ -1447,9 +1874,10 @@ def _deliver_pending_push() -> None:
                 """
                 SELECT *
                 FROM push_tokens
-                WHERE enabled = 1
+                WHERE enabled = 1 AND club_id = ?
                 ORDER BY id ASC
-                """
+                """,
+                (notification["club_id"],),
             ).fetchall()
             if not tokens:
                 continue
@@ -1460,9 +1888,9 @@ def _deliver_pending_push() -> None:
                     """
                     SELECT sent_at
                     FROM push_deliveries
-                    WHERE notification_id = ? AND token_id = ?
+                    WHERE notification_id = ? AND token_id = ? AND club_id = ?
                     """,
-                    (notification["id"], token["id"]),
+                    (notification["id"], token["id"], notification["club_id"]),
                 ).fetchone()
                 if delivered is not None and delivered["sent_at"]:
                     continue
@@ -1482,26 +1910,28 @@ def _deliver_pending_push() -> None:
                     db.execute(
                         """
                         DELETE FROM push_deliveries
-                        WHERE notification_id = ? AND token_id = ?
+                        WHERE notification_id = ? AND token_id = ? AND club_id = ?
                         """,
-                        (notification["id"], token["id"]),
+                        (notification["id"], token["id"], notification["club_id"]),
                     )
                     continue
 
                 db.execute(
                     """
                     INSERT INTO push_deliveries (
-                        notification_id, token_id, sent_at, last_error
-                    ) VALUES (?, ?, ?, ?)
+                        notification_id, token_id, sent_at, last_error, club_id
+                    ) VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(notification_id, token_id) DO UPDATE SET
                         sent_at = excluded.sent_at,
-                        last_error = excluded.last_error
+                        last_error = excluded.last_error,
+                        club_id = excluded.club_id
                     """,
                     (
                         notification["id"],
                         token["id"],
                         now if ok else None,
                         error,
+                        notification["club_id"],
                     ),
                 )
                 if not ok:
@@ -1518,15 +1948,21 @@ def _deliver_pending_push() -> None:
                 SELECT COUNT(*)
                 FROM push_tokens pt
                 WHERE pt.enabled = 1
+                  AND pt.club_id = ?
                   AND NOT EXISTS (
                       SELECT 1
                       FROM push_deliveries pd
                       WHERE pd.notification_id = ?
                         AND pd.token_id = pt.id
+                        AND pd.club_id = ?
                         AND pd.sent_at IS NOT NULL
                   )
                 """,
-                (notification["id"],),
+                (
+                    notification["club_id"],
+                    notification["id"],
+                    notification["club_id"],
+                ),
             ).fetchone()[0]
 
             if remaining == 0 and not had_transient_error:
@@ -1550,6 +1986,297 @@ def _deliver_pending_push() -> None:
         db.commit()
 
 
+
+
+def _require_super_admin(user: dict[str, Any]) -> None:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur Super-Admins dürfen die Vereinsabrechnung verwalten",
+        )
+
+
+def _parse_billing_date(value: str) -> datetime:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Datum muss im Format JJJJ-MM-TT angegeben werden",
+        ) from exc
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _invoice_row(item: sqlite3.Row) -> dict[str, Any]:
+    result = dict(item)
+    result["amount_chf"] = round(int(result["amount_rappen"]) / 100, 2)
+    return result
+
+
+def _display_invoice_date(value: str) -> str:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except ValueError:
+        return value
+
+
+def _invoice_pdf_bytes(
+    invoice: dict[str, Any],
+    club: dict[str, Any],
+) -> bytes:
+    canvas = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(canvas)
+    title_font = ImageFont.load_default(size=48)
+    heading_font = ImageFont.load_default(size=30)
+    body_font = ImageFont.load_default(size=24)
+    small_font = ImageFont.load_default(size=20)
+
+    margin_x = 90
+    y = 80
+    draw.text((margin_x, y), "Vereinsrechnung", fill="black", font=title_font)
+    y += 88
+
+    issuer_lines = [BILLING_ISSUER_NAME]
+    if BILLING_ISSUER_ADDRESS:
+        issuer_lines.extend(
+            line.strip()
+            for line in BILLING_ISSUER_ADDRESS.splitlines()
+            if line.strip()
+        )
+    draw.multiline_text(
+        (margin_x, y),
+        "\n".join(issuer_lines),
+        fill="black",
+        font=body_font,
+        spacing=8,
+    )
+
+    recipient_lines = [str(club.get("name") or club.get("slug") or "Verein")]
+    address = str(club.get("address") or "").strip()
+    city = str(club.get("city") or "").strip()
+    country = str(club.get("country") or "").strip()
+    billing_email = str(club.get("billing_email") or "").strip()
+    for value in (address, city, country, billing_email):
+        if value:
+            recipient_lines.extend(
+                line.strip()
+                for line in value.splitlines()
+                if line.strip()
+            )
+    draw.multiline_text(
+        (700, y),
+        "\n".join(recipient_lines),
+        fill="black",
+        font=body_font,
+        spacing=8,
+    )
+
+    y = 420
+    draw.text(
+        (margin_x, y),
+        f"Rechnung Nr. {invoice['invoice_number']}",
+        fill="black",
+        font=heading_font,
+    )
+    y += 56
+    details = [
+        ("Rechnungsdatum", _display_invoice_date(str(invoice["issue_date"]))),
+        ("Zahlungsziel", _display_invoice_date(str(invoice["due_date"]))),
+        (
+            "Leistungsperiode",
+            f"{_display_invoice_date(str(invoice['period_start']))} bis "
+            f"{_display_invoice_date(str(invoice['period_end']))}",
+        ),
+    ]
+    for label, value in details:
+        draw.text((margin_x, y), f"{label}: {value}", fill="black", font=body_font)
+        y += 42
+
+    y += 48
+    draw.text((margin_x, y), "Leistung", fill="black", font=heading_font)
+    draw.text((900, y), "Betrag", fill="black", font=heading_font)
+    y += 54
+    draw.line((margin_x, y, 1150, y), fill="black", width=2)
+    y += 28
+
+    description = (
+        "Nutzung der Vereinsplattform für die Leistungsperiode "
+        f"{_display_invoice_date(str(invoice['period_start']))} bis "
+        f"{_display_invoice_date(str(invoice['period_end']))}"
+    )
+    draw.text((margin_x, y), description, fill="black", font=body_font)
+    amount = f"CHF {int(invoice['amount_rappen']) / 100:.2f}"
+    draw.text((900, y), amount, fill="black", font=body_font)
+    y += 84
+    draw.line((margin_x, y, 1150, y), fill="black", width=2)
+    y += 28
+    draw.text((760, y), "Gesamtbetrag", fill="black", font=heading_font)
+    draw.text((900, y + 48), amount, fill="black", font=heading_font)
+
+    y += 180
+    draw.text((margin_x, y), "Zahlungsinformationen", fill="black", font=heading_font)
+    y += 48
+    payment_text = BILLING_PAYMENT_INFO or (
+        "Bitte den Rechnungsbetrag gemäss vereinbarter Zahlungsart begleichen "
+        "und die Rechnungsnummer als Referenz angeben."
+    )
+    payment_lines = []
+    for raw_line in payment_text.splitlines() or [payment_text]:
+        words = raw_line.split()
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if len(candidate) > 78 and current:
+                payment_lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            payment_lines.append(current)
+    draw.multiline_text(
+        (margin_x, y),
+        "\n".join(payment_lines),
+        fill="black",
+        font=body_font,
+        spacing=8,
+    )
+
+    footer = (
+        f"Rechnung {invoice['invoice_number']} · "
+        f"Status: {'bezahlt' if invoice.get('status') == 'paid' else 'offen'}"
+    )
+    draw.text((margin_x, 1640), footer, fill="black", font=small_font)
+
+    buffer = io.BytesIO()
+    canvas.save(buffer, format="PDF", resolution=150.0)
+    return buffer.getvalue()
+
+
+def _run_billing_cycle() -> dict[str, int]:
+    today_dt = datetime.now(timezone.utc)
+    today = today_dt.date().isoformat()
+    created = 0
+    suspended = 0
+
+    with connect() as db:
+        clubs = db.execute(
+            """
+            SELECT
+                id, billing_amount_rappen, billing_interval_months,
+                billing_due_days, billing_grace_days, billing_next_invoice_date,
+                billing_auto_suspend
+            FROM clubs
+            WHERE active = 1
+              AND billing_amount_rappen > 0
+              AND billing_next_invoice_date != ''
+            """
+        ).fetchall()
+
+        for club in clubs:
+            club_id = int(club["id"])
+            next_date = _parse_billing_date(
+                str(club["billing_next_invoice_date"])
+            )
+            interval = max(1, int(club["billing_interval_months"] or 12))
+            generated_for_club = 0
+            while next_date.date().isoformat() <= today and generated_for_club < 120:
+                period_start = next_date.date().isoformat()
+                next_period = _add_months(next_date, interval)
+                period_end = (next_period - timedelta(days=1)).date().isoformat()
+                issue_date = today
+                due_date = (
+                    today_dt + timedelta(days=max(1, int(club["billing_due_days"] or 30)))
+                ).date().isoformat()
+                invoice_number = (
+                    f"{today_dt.year:04d}-{club_id:04d}-"
+                    f"{period_start.replace('-', '')}"
+                )
+                cursor = db.execute(
+                    """
+                    INSERT OR IGNORE INTO club_invoices (
+                        club_id, invoice_number, period_start, period_end,
+                        issue_date, due_date, amount_rappen, currency,
+                        status, paid_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CHF', 'open', '', ?, ?)
+                    """,
+                    (
+                        club_id,
+                        invoice_number,
+                        period_start,
+                        period_end,
+                        issue_date,
+                        due_date,
+                        int(club["billing_amount_rappen"]),
+                        today_dt.isoformat(),
+                        today_dt.isoformat(),
+                    ),
+                )
+                if cursor.rowcount:
+                    created += 1
+                next_date = next_period
+                generated_for_club += 1
+
+            db.execute(
+                """
+                UPDATE clubs
+                SET billing_next_invoice_date = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (next_date.date().isoformat(), today_dt.isoformat(), club_id),
+            )
+
+        overdue = db.execute(
+            """
+            SELECT DISTINCT c.id
+            FROM clubs c
+            JOIN club_invoices i ON i.club_id = c.id
+            WHERE c.active = 1
+              AND c.billing_auto_suspend = 1
+              AND i.status = 'open'
+              AND date(
+                    i.due_date,
+                    '+' || MAX(0, c.billing_grace_days) || ' days'
+                  ) < ?
+            """,
+            (today,),
+        ).fetchall()
+        for row in overdue:
+            cursor = db.execute(
+                """
+                UPDATE clubs
+                SET
+                    billing_status = 'suspended',
+                    billing_suspension_reason = 'Offene Rechnung überfällig',
+                    updated_at = ?
+                WHERE id = ?
+                  AND billing_status != 'suspended'
+                """,
+                (today_dt.isoformat(), int(row["id"])),
+            )
+            suspended += cursor.rowcount
+
+        db.commit()
+
+    return {"created_invoices": created, "suspended_clubs": suspended}
+
+
+async def _billing_loop() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await asyncio.to_thread(_run_billing_cycle)
+        except Exception:
+            logger.exception("Automatic club billing cycle failed")
+
+
 async def _push_delivery_loop() -> None:
     while True:
         await asyncio.sleep(15)
@@ -1564,9 +2291,14 @@ async def startup() -> None:
         await asyncio.to_thread(_ensure_automatic_backup)
     except Exception:
         logger.exception("Initial automatic database backup failed")
+    try:
+        await asyncio.to_thread(_run_billing_cycle)
+    except Exception:
+        logger.exception("Initial club billing cycle failed")
     asyncio.create_task(_snapshot_cleanup_loop())
     asyncio.create_task(_backup_loop())
     asyncio.create_task(_push_delivery_loop())
+    asyncio.create_task(_billing_loop())
 
 
 def _hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
@@ -1663,18 +2395,30 @@ def _serialize_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
 
 def _user_profile(user_id: int) -> dict[str, Any]:
     with connect() as db:
+        club_id = _active_club_id(db)
         row = db.execute(
             """
-            SELECT u.*, m.name AS member_name
+            SELECT
+                u.*,
+                m.name AS member_name
             FROM users u
-            LEFT JOIN members m ON m.id = u.member_id
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = ?
             WHERE u.id = ?
             """,
-            (user_id,),
+            (club_id, user_id),
         ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
-    return _serialize_user(row)
+        if row is None:
+            raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
+        club_role = _user_club_access(db, user_id, club_id)
+        if club_role is None:
+            raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+        item = dict(row)
+        item["club_role"] = club_role
+        item["current_club_id"] = club_id
+        item["is_super_admin"] = club_role == "super_admin"
+    return _serialize_user(item)
 
 
 def _extract_token(authorization: str | None) -> str:
@@ -1686,6 +2430,70 @@ def _extract_token(authorization: str | None) -> str:
     return token
 
 
+def _is_super_admin(db: sqlite3.Connection, user_id: int) -> bool:
+    return bool(
+        db.execute(
+            """
+            SELECT 1
+            FROM user_clubs
+            WHERE user_id = ? AND active = 1 AND role = 'super_admin'
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+    )
+
+
+def _user_club_access(
+    db: sqlite3.Connection,
+    user_id: int,
+    club_id: int,
+) -> str | None:
+    if _is_super_admin(db, user_id):
+        return "super_admin"
+    row = db.execute(
+        """
+        SELECT role
+        FROM user_clubs
+        WHERE user_id = ? AND club_id = ? AND active = 1
+        """,
+        (user_id, club_id),
+    ).fetchone()
+    return str(row["role"]) if row is not None else None
+
+
+def _accessible_club_rows(
+    db: sqlite3.Connection,
+    user_id: int,
+) -> list[sqlite3.Row]:
+    if _is_super_admin(db, user_id):
+        return db.execute(
+            """
+            SELECT
+                id, slug, name, short_name, active, primary_color,
+                billing_status
+            FROM clubs
+            WHERE active = 1
+            ORDER BY name COLLATE NOCASE, id
+            """
+        ).fetchall()
+    return db.execute(
+        """
+        SELECT
+            c.id, c.slug, c.name, c.short_name, c.active, c.primary_color,
+            c.billing_status
+        FROM clubs c
+        JOIN user_clubs uc ON uc.club_id = c.id
+        WHERE uc.user_id = ?
+          AND uc.active = 1
+          AND c.active = 1
+          AND c.billing_status = 'active'
+        ORDER BY c.name COLLATE NOCASE, c.id
+        """,
+        (user_id,),
+    ).fetchall()
+
+
 def current_user(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
@@ -1694,19 +2502,45 @@ def current_user(
     with connect() as db:
         row = db.execute(
             """
-            SELECT u.*
+            SELECT u.*, s.active_club_id, m.name AS member_name
             FROM sessions s
             JOIN users u ON u.id = s.user_id
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = s.active_club_id
             WHERE s.token_hash = ?
-              AND s.instance_id = ?
               AND s.expires_at > ?
               AND u.active = 1
             """,
-            (_token_hash(token), INSTANCE_ID, now),
+            (_token_hash(token), now),
         ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
-    return _serialize_user(row)
+        if row is None:
+            raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
+
+        club_id = int(row["active_club_id"] or _instance_club_id(db))
+        club = db.execute(
+            """
+            SELECT id, billing_status, billing_suspension_reason
+            FROM clubs
+            WHERE id = ? AND active = 1
+            """,
+            (club_id,),
+        ).fetchone()
+        club_role = _user_club_access(db, int(row["id"]), club_id)
+        if club is None or club_role is None:
+            raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+        if str(club["billing_status"] or "active") != "active" and club_role != "super_admin":
+            reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
+            raise HTTPException(
+                status_code=403,
+                detail=f"Verein gesperrt: {reason}",
+            )
+
+        item = dict(row)
+        item["club_role"] = club_role
+        item["current_club_id"] = club_id
+        item["is_super_admin"] = club_role == "super_admin"
+    return _serialize_user(item)
 
 
 def require(permission: str):
@@ -1722,6 +2556,176 @@ def table_or_404(name: str) -> tuple[str, type[BaseModel]]:
     if table is None:
         raise HTTPException(status_code=404, detail="Unknown resource")
     return table
+
+
+def _instance_club_id(db: sqlite3.Connection) -> int:
+    row = db.execute(
+        "SELECT id FROM clubs WHERE slug = ? AND active = 1",
+        (INSTANCE_ID,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"Active club not found for instance '{INSTANCE_ID}'")
+    return int(row["id"])
+
+
+def _active_club_id(db: sqlite3.Connection) -> int:
+    """Resolve the current request club, falling back to the instance club."""
+    request_club_id = _REQUEST_CLUB_ID.get()
+    if request_club_id is not None:
+        row = db.execute(
+            "SELECT id FROM clubs WHERE id = ? AND active = 1",
+            (request_club_id,),
+        ).fetchone()
+        if row is not None:
+            return int(row["id"])
+    return _instance_club_id(db)
+
+
+def _club_features(
+    db: sqlite3.Connection,
+    club_id: int | None = None,
+) -> dict[str, dict[str, Any]]:
+    resolved_club_id = club_id if club_id is not None else _active_club_id(db)
+    rows = db.execute(
+        """
+        SELECT feature_key, enabled, label
+        FROM club_features
+        WHERE club_id = ?
+        ORDER BY feature_key
+        """,
+        (resolved_club_id,),
+    ).fetchall()
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        result[str(row["feature_key"])] = {
+            "enabled": bool(row["enabled"]),
+            "label": str(row["label"] or ""),
+        }
+    return result
+
+
+def _club_feature_enabled(
+    db: sqlite3.Connection,
+    feature_key: str,
+    club_id: int | None = None,
+) -> bool:
+    feature = _club_features(db, club_id).get(feature_key)
+    if feature is not None:
+        return bool(feature["enabled"])
+    default = CLUB_FEATURE_DEFAULTS.get(feature_key)
+    return bool(default[1]) if default is not None else False
+
+
+def _set_club_features(
+    db: sqlite3.Connection,
+    club_id: int,
+    features: dict[str, bool],
+    labels: dict[str, str] | None = None,
+) -> None:
+    labels = labels or {}
+    unknown = sorted(set(features) - set(CLUB_FEATURE_DEFAULTS))
+    unknown_labels = sorted(set(labels) - set(CLUB_FEATURE_DEFAULTS))
+    if unknown or unknown_labels:
+        invalid = ", ".join(unknown + unknown_labels)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unbekanntes Modul: {invalid}",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    for feature_key, enabled in features.items():
+        default_label = CLUB_FEATURE_DEFAULTS[feature_key][0]
+        label = str(labels.get(feature_key) or default_label).strip()[:80]
+        db.execute(
+            """
+            INSERT INTO club_features (
+                club_id, feature_key, enabled, label, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(club_id, feature_key) DO UPDATE SET
+                enabled = excluded.enabled,
+                label = CASE
+                    WHEN excluded.label <> '' THEN excluded.label
+                    ELSE club_features.label
+                END,
+                updated_at = excluded.updated_at
+            """,
+            (club_id, feature_key, int(bool(enabled)), label, now, now),
+        )
+
+
+RESOURCE_FEATURES: dict[str, str] = {
+    "news": "news",
+    "events": "events",
+    "members": "members",
+}
+
+SECTION_FEATURES: dict[str, str] = {
+    "documents": "documents",
+    "gallery": "gallery",
+    "photos": "photos",
+    "sujet": "sujet_next",
+    "archive": "sujet_archive",
+    "polls": "polls",
+    "links": "links",
+    "whatsapp": "links",
+}
+
+
+def _require_club_feature(
+    db: sqlite3.Connection,
+    feature_key: str,
+) -> None:
+    if not _club_feature_enabled(db, feature_key):
+        raise HTTPException(status_code=404, detail="Modul nicht aktiviert")
+
+
+def _require_resource_feature(
+    db: sqlite3.Connection,
+    resource: str,
+) -> None:
+    feature_key = RESOURCE_FEATURES.get(resource)
+    if feature_key is not None:
+        _require_club_feature(db, feature_key)
+
+
+def _require_section_feature(
+    db: sqlite3.Connection,
+    section: str,
+) -> None:
+    feature_key = SECTION_FEATURES.get(section)
+    if feature_key is not None:
+        _require_club_feature(db, feature_key)
+
+
+def _active_club_membership(
+    db: sqlite3.Connection,
+    user_id: int,
+) -> sqlite3.Row | None:
+    return db.execute(
+        """
+        SELECT uc.user_id, uc.club_id, uc.role, uc.active
+        FROM user_clubs uc
+        WHERE uc.user_id = ?
+          AND uc.club_id = ?
+          AND uc.active = 1
+        """,
+        (user_id, _active_club_id(db)),
+    ).fetchone()
+
+
+def _require_active_club_row(
+    db: sqlite3.Connection,
+    table: str,
+    row_id: int,
+) -> sqlite3.Row:
+    club_id = _active_club_id(db)
+    row = db.execute(
+        f"SELECT * FROM {table} WHERE id = ? AND club_id = ?",
+        (row_id, club_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return row
 
 
 def _serialize_news(row: sqlite3.Row) -> dict[str, Any]:
@@ -1747,10 +2751,10 @@ def _serialize_member(row: sqlite3.Row) -> dict[str, Any]:
                 """
                 SELECT filter_id
                 FROM member_filter_links
-                WHERE member_id = ?
+                WHERE member_id = ? AND club_id = ?
                 ORDER BY filter_id ASC
                 """,
-                (item["id"],),
+                (item["id"], _active_club_id(db)),
             ).fetchall()
         ]
     return item
@@ -1777,8 +2781,8 @@ def _queue_push_notification(
     db.execute(
         """
         INSERT INTO push_notifications (
-            kind, title, body, route, created_at
-        ) VALUES (?, ?, ?, ?, ?)
+            kind, title, body, route, created_at, club_id
+        ) VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             kind,
@@ -1786,6 +2790,7 @@ def _queue_push_notification(
             body[:500],
             route,
             datetime.now(timezone.utc).isoformat(),
+            _active_club_id(db),
         ),
     )
 
@@ -1805,8 +2810,11 @@ def list_rows(resource: str) -> list[dict[str, Any]]:
         order = "name COLLATE NOCASE ASC, id ASC"
 
     with connect() as db:
+        _require_resource_feature(db, resource)
+        club_id = _active_club_id(db)
         rows = db.execute(
-            f"SELECT * FROM {resource} ORDER BY {order}"
+            f"SELECT * FROM {resource} WHERE club_id = ? ORDER BY {order}",
+            (club_id,),
         ).fetchall()
 
     if resource == "news":
@@ -1821,10 +2829,13 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
     data = payload.model_dump()
     member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     data["created_at"] = datetime.now(timezone.utc).isoformat()
-    if resource in {"members", "news"}:
-        with connect() as db:
+    with connect() as db:
+        _require_resource_feature(db, resource)
+        data["club_id"] = _active_club_id(db)
+        if resource in {"members", "news"}:
             data["sort_order"] = db.execute(
-                f"SELECT COALESCE(MAX(sort_order), 0) + 1 FROM {resource}"
+                f"SELECT COALESCE(MAX(sort_order), 0) + 1 FROM {resource} WHERE club_id = ?",
+                (data["club_id"],),
             ).fetchone()[0]
     columns = list(data.keys())
     placeholders = ", ".join("?" for _ in columns)
@@ -1837,8 +2848,8 @@ def create_row(resource: str, payload: BaseModel) -> dict[str, Any]:
         if resource == "members":
             for filter_id in sorted(set(member_filter_ids)):
                 db.execute(
-                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
-                    (cursor.lastrowid, filter_id),
+                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id, club_id) VALUES (?, ?, ?)",
+                    (cursor.lastrowid, filter_id, _active_club_id(db)),
                 )
         db.commit()
         row = db.execute(
@@ -1858,23 +2869,31 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
     member_filter_ids = data.pop("filter_ids", []) if resource == "members" else []
     assignments = ", ".join(f"{column} = ?" for column in data)
     with connect() as db:
+        _require_resource_feature(db, resource)
         cursor = db.execute(
-            f"UPDATE {resource} SET {assignments} WHERE id = ?",
-            [*data.values(), row_id],
+            f"UPDATE {resource} SET {assignments} WHERE id = ? AND club_id = ?",
+            [*data.values(), row_id, _active_club_id(db)],
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
         if resource == "members":
-            db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+            db.execute(
+                "DELETE FROM member_filter_links WHERE member_id = ? AND club_id = ?",
+                (row_id, _active_club_id(db)),
+            )
             for filter_id in sorted(set(member_filter_ids)):
                 db.execute(
-                    "INSERT OR IGNORE INTO member_filter_links (member_id, filter_id) VALUES (?, ?)",
-                    (row_id, filter_id),
+                    """
+                    INSERT OR IGNORE INTO member_filter_links
+                        (member_id, filter_id, club_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    (row_id, filter_id, _active_club_id(db)),
                 )
         db.commit()
         row = db.execute(
-            f"SELECT * FROM {resource} WHERE id = ?",
-            (row_id,),
+            f"SELECT * FROM {resource} WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if resource == "news":
         return _serialize_news(row)
@@ -1886,9 +2905,10 @@ def update_row(resource: str, row_id: int, payload: BaseModel) -> dict[str, Any]
 def delete_row(resource: str, row_id: int) -> None:
     table_or_404(resource)
     with connect() as db:
+        _require_resource_feature(db, resource)
         cursor = db.execute(
-            f"DELETE FROM {resource} WHERE id = ?",
-            (row_id,),
+            f"DELETE FROM {resource} WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
@@ -2119,84 +3139,77 @@ def _require_content_permission(
 
 def _app_config() -> dict[str, Any]:
     with connect() as db:
-        row = db.execute(
+        club_id = _active_club_id(db)
+        club = db.execute(
+            "SELECT * FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        app_row = db.execute(
             """
-            SELECT
-                app_name,
-                app_subtitle,
-                primary_color,
-                logo_data,
-                club_description,
-                website_url,
-                contact_email,
-                contact_phone,
-                club_address,
-                show_sujet,
-                label_sujet,
-                show_archive,
-                label_archive,
-                show_photos,
-                label_photos,
-                show_documents,
-                label_documents,
-                show_polls,
-                label_polls,
-                show_links,
-                label_links
+            SELECT app_subtitle
             FROM app_config
             WHERE id = 1
             """
         ).fetchone()
-    if row is None:
-        return {
-            "instance_id": INSTANCE_ID,
-            "app_name": "FLAPAMAMAKU",
-            "app_subtitle": "Fasnachtsgruppe Luzern",
-            "primary_color": "#8A101B",
-            "logo_url": "",
-            "club_description": "",
-            "website_url": "",
-            "contact_email": "",
-            "contact_phone": "",
-            "club_address": "",
-            "show_sujet": True,
-            "label_sujet": "Sujet nächstes Jahr",
-            "show_archive": True,
-            "label_archive": "Vergangene Sujet",
-            "show_photos": True,
-            "label_photos": "Fotoalben",
-            "show_documents": True,
-            "label_documents": "Dokumente",
-            "show_polls": True,
-            "label_polls": "Umfragen",
-            "show_links": True,
-            "label_links": "Links",
-        }
+        features = _club_features(db, club_id)
+
+    if club is None:
+        raise RuntimeError("Active club configuration is missing")
+
+    def enabled(key: str) -> bool:
+        value = features.get(key)
+        if value is not None:
+            return bool(value["enabled"])
+        default = CLUB_FEATURE_DEFAULTS.get(key)
+        return bool(default[1]) if default is not None else False
+
+    def label(key: str) -> str:
+        value = features.get(key)
+        if value is not None and str(value["label"] or "").strip():
+            return str(value["label"]).strip()
+        default = CLUB_FEATURE_DEFAULTS.get(key)
+        return default[0] if default is not None else key
+
     return {
         "instance_id": INSTANCE_ID,
-        "app_name": str(row["app_name"] or "FLAPAMAMAKU"),
-        "app_subtitle": str(row["app_subtitle"] or ""),
-        "primary_color": str(row["primary_color"] or "#8A101B"),
-        "logo_url": "/api/app-config/logo" if row["logo_data"] else "",
-        "club_description": str(row["club_description"] or ""),
-        "website_url": str(row["website_url"] or ""),
-        "contact_email": str(row["contact_email"] or ""),
-        "contact_phone": str(row["contact_phone"] or ""),
-        "club_address": str(row["club_address"] or ""),
-        "show_sujet": bool(row["show_sujet"]),
-        "label_sujet": str(row["label_sujet"] or "Sujet nächstes Jahr"),
-        "show_archive": bool(row["show_archive"]),
-        "label_archive": str(row["label_archive"] or "Vergangene Sujet"),
-        "show_photos": bool(row["show_photos"]),
-        "label_photos": str(row["label_photos"] or "Fotoalben"),
-        "show_documents": bool(row["show_documents"]),
-        "label_documents": str(row["label_documents"] or "Dokumente"),
-        "show_polls": bool(row["show_polls"]),
-        "label_polls": str(row["label_polls"] or "Umfragen"),
-        "show_links": bool(row["show_links"]),
-        "label_links": str(row["label_links"] or "Links"),
+        "club_id": int(club["id"]),
+        "slug": str(club["slug"] or ""),
+        "app_name": str(club["name"] or "FLAPAMAMAKU"),
+        "short_name": str(club["short_name"] or club["name"] or ""),
+        "app_subtitle": str(club["subtitle"] or ""),
+        "primary_color": str(club["primary_color"] or "#8A101B"),
+        "secondary_color": str(club["secondary_color"] or "#FFFFFF"),
+        "logo_url": "/api/app-config/logo" if club["logo"] else "",
+        "club_description": str(club["description"] or ""),
+        "website_url": str(club["website"] or ""),
+        "contact_email": str(club["email"] or ""),
+        "contact_phone": str(club["phone"] or ""),
+        "club_address": str(club["address"] or ""),
+        "city": str(club["city"] or ""),
+        "country": str(club["country"] or ""),
+        "app_title": str(club["app_title"] or ""),
+        "welcome_text": str(club["welcome_text"] or ""),
+        "features": features,
+        "show_news": enabled("news"),
+        "show_events": enabled("events"),
+        "show_members": enabled("members"),
+        "show_gallery": enabled("gallery"),
+        "show_sujet": enabled("sujet_next"),
+        "label_sujet": label("sujet_next"),
+        "show_archive": enabled("sujet_archive"),
+        "label_archive": label("sujet_archive"),
+        "show_photos": enabled("photos"),
+        "label_photos": label("photos"),
+        "show_documents": enabled("documents"),
+        "label_documents": label("documents"),
+        "show_polls": enabled("polls"),
+        "label_polls": label("polls"),
+        "show_links": enabled("links"),
+        "label_links": label("links"),
+        "show_push_notifications": enabled("push_notifications"),
+        "show_calendar": enabled("calendar"),
+        "show_participant_lists": enabled("participant_lists"),
     }
-
 
 def _club_setup_status() -> dict[str, Any]:
     config = _app_config()
@@ -2205,10 +3218,15 @@ def _club_setup_status() -> dict[str, Any]:
             db.execute(
                 """
                 SELECT 1
-                FROM users
-                WHERE active = 1 AND can_manage_users = 1
+                FROM users u
+                JOIN user_clubs uc ON uc.user_id = u.id
+                WHERE u.active = 1
+                  AND u.can_manage_users = 1
+                  AND uc.club_id = ?
+                  AND uc.active = 1
                 LIMIT 1
-                """
+                """,
+                (_active_club_id(db),),
             ).fetchone()
         )
 
@@ -2316,6 +3334,24 @@ def get_app_config() -> dict[str, Any]:
     return _app_config()
 
 
+@app.get("/api/app-config/features")
+def get_app_features() -> dict[str, dict[str, Any]]:
+    with connect() as db:
+        return _club_features(db)
+
+
+@app.put("/api/app-config/features")
+def put_app_features(
+    payload: ClubFeaturesPayload,
+    _: dict[str, Any] = Depends(require("can_manage_settings")),
+) -> dict[str, dict[str, Any]]:
+    with connect() as db:
+        club_id = _active_club_id(db)
+        _set_club_features(db, club_id, payload.features, payload.labels)
+        db.commit()
+        return _club_features(db, club_id)
+
+
 @app.put("/api/app-config")
 def put_app_config(
     payload: AppConfigPayload,
@@ -2324,93 +3360,149 @@ def put_app_config(
     values = payload.model_dump()
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        club_id = _active_club_id(db)
         db.execute(
             """
-            INSERT INTO app_config (
-                id,
-                app_name,
-                app_subtitle,
-                primary_color,
-                club_description,
-                website_url,
-                contact_email,
-                contact_phone,
-                club_address,
-                show_sujet,
-                label_sujet,
-                show_archive,
-                label_archive,
-                show_photos,
-                label_photos,
-                show_documents,
-                label_documents,
-                show_polls,
-                label_polls,
-                show_links,
-                label_links,
-                updated_at
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                app_name = excluded.app_name,
-                app_subtitle = excluded.app_subtitle,
-                primary_color = excluded.primary_color,
-                club_description = excluded.club_description,
-                website_url = excluded.website_url,
-                contact_email = excluded.contact_email,
-                contact_phone = excluded.contact_phone,
-                club_address = excluded.club_address,
-                show_sujet = excluded.show_sujet,
-                label_sujet = excluded.label_sujet,
-                show_archive = excluded.show_archive,
-                label_archive = excluded.label_archive,
-                show_photos = excluded.show_photos,
-                label_photos = excluded.label_photos,
-                show_documents = excluded.show_documents,
-                label_documents = excluded.label_documents,
-                show_polls = excluded.show_polls,
-                label_polls = excluded.label_polls,
-                show_links = excluded.show_links,
-                label_links = excluded.label_links,
-                updated_at = excluded.updated_at
+            UPDATE clubs
+            SET
+                name = ?,
+                short_name = ?,
+                subtitle = ?,
+                primary_color = ?,
+                secondary_color = ?,
+                description = ?,
+                website = ?,
+                email = ?,
+                phone = ?,
+                address = ?,
+                city = ?,
+                country = ?,
+                app_title = ?,
+                welcome_text = ?,
+                updated_at = ?
+            WHERE id = ?
             """,
             (
                 values["app_name"].strip(),
+                values["short_name"].strip() or values["app_name"].strip(),
                 values["app_subtitle"].strip(),
                 values["primary_color"].upper(),
+                values["secondary_color"].upper(),
                 values["club_description"].strip(),
                 values["website_url"].strip(),
                 values["contact_email"].strip(),
                 values["contact_phone"].strip(),
                 values["club_address"].strip(),
-                int(values["show_sujet"]),
-                values["label_sujet"].strip(),
-                int(values["show_archive"]),
-                values["label_archive"].strip(),
-                int(values["show_photos"]),
-                values["label_photos"].strip(),
-                int(values["show_documents"]),
-                values["label_documents"].strip(),
-                int(values["show_polls"]),
-                values["label_polls"].strip(),
-                int(values["show_links"]),
-                values["label_links"].strip(),
+                values["city"].strip(),
+                values["country"].strip(),
+                values["app_title"].strip(),
+                values["welcome_text"].strip(),
                 now,
+                club_id,
             ),
         )
+
+        _set_club_features(
+            db,
+            club_id,
+            {
+                "sujet_next": bool(values["show_sujet"]),
+                "sujet_archive": bool(values["show_archive"]),
+                "photos": bool(values["show_photos"]),
+                "documents": bool(values["show_documents"]),
+                "polls": bool(values["show_polls"]),
+                "links": bool(values["show_links"]),
+            },
+            {
+                "sujet_next": values["label_sujet"].strip(),
+                "sujet_archive": values["label_archive"].strip(),
+                "photos": values["label_photos"].strip(),
+                "documents": values["label_documents"].strip(),
+                "polls": values["label_polls"].strip(),
+                "links": values["label_links"].strip(),
+            },
+        )
+
+        if club_id == 1:
+            # Keep the legacy module columns synchronized during the transition.
+            db.execute(
+                """
+                UPDATE app_config
+                SET
+                    app_subtitle = ?,
+                    show_sujet = ?,
+                    label_sujet = ?,
+                    show_archive = ?,
+                    label_archive = ?,
+                    show_photos = ?,
+                    label_photos = ?,
+                    show_documents = ?,
+                    label_documents = ?,
+                    show_polls = ?,
+                    label_polls = ?,
+                    show_links = ?,
+                    label_links = ?,
+                    updated_at = ?
+                WHERE id = 1
+                """,
+                (
+                    values["app_subtitle"].strip(),
+                    int(values["show_sujet"]),
+                    values["label_sujet"].strip(),
+                    int(values["show_archive"]),
+                    values["label_archive"].strip(),
+                    int(values["show_photos"]),
+                    values["label_photos"].strip(),
+                    int(values["show_documents"]),
+                    values["label_documents"].strip(),
+                    int(values["show_polls"]),
+                    values["label_polls"].strip(),
+                    int(values["show_links"]),
+                    values["label_links"].strip(),
+                    now,
+                ),
+            )
+
+        # Keep the original FLAPAMAMAKU compatibility row synchronized while
+        # the app migrates to the central clubs configuration.
+        if club_id == 1:
+            db.execute(
+                """
+                UPDATE app_config
+                SET
+                    app_name = ?,
+                    primary_color = ?,
+                    club_description = ?,
+                    website_url = ?,
+                    contact_email = ?,
+                    contact_phone = ?,
+                    club_address = ?
+                WHERE id = 1
+                """,
+                (
+                    values["app_name"].strip(),
+                    values["primary_color"].upper(),
+                    values["club_description"].strip(),
+                    values["website_url"].strip(),
+                    values["contact_email"].strip(),
+                    values["contact_phone"].strip(),
+                    values["club_address"].strip(),
+                ),
+            )
         db.commit()
     return _app_config()
-
 
 @app.get("/api/app-config/logo")
 def get_app_logo() -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT logo_data, logo_mime FROM app_config WHERE id = 1"
+            "SELECT logo, logo_mime FROM clubs WHERE id = ?",
+            (_active_club_id(db),),
         ).fetchone()
-    if row is None or not row["logo_data"]:
+    if row is None or not row["logo"]:
         raise HTTPException(status_code=404, detail="Logo nicht vorhanden")
     return Response(
-        content=row["logo_data"],
+        content=row["logo"],
         media_type=row["logo_mime"] or "image/webp",
         headers={"Cache-Control": "no-cache"},
     )
@@ -2424,18 +3516,25 @@ async def upload_app_logo(
     raw = await logo.read()
     optimized, mime = _optimize_image(raw, logo.content_type or "")
     with connect() as db:
+        club_id = _active_club_id(db)
+        now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            UPDATE app_config
-            SET logo_data = ?, logo_mime = ?, updated_at = ?
-            WHERE id = 1
+            UPDATE clubs
+            SET logo = ?, logo_mime = ?, updated_at = ?
+            WHERE id = ?
             """,
-            (
-                optimized,
-                mime,
-                datetime.now(timezone.utc).isoformat(),
-            ),
+            (optimized, mime, now, club_id),
         )
+        if club_id == 1:
+            db.execute(
+                """
+                UPDATE app_config
+                SET logo_data = ?, logo_mime = ?, updated_at = ?
+                WHERE id = 1
+                """,
+                (optimized, mime, now),
+            )
         db.commit()
     return _app_config()
 
@@ -2445,14 +3544,25 @@ def delete_app_logo(
     _: dict[str, Any] = Depends(require("can_manage_settings")),
 ) -> None:
     with connect() as db:
+        club_id = _active_club_id(db)
+        now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            UPDATE app_config
-            SET logo_data = NULL, logo_mime = '', updated_at = ?
-            WHERE id = 1
+            UPDATE clubs
+            SET logo = NULL, logo_mime = '', updated_at = ?
+            WHERE id = ?
             """,
-            (datetime.now(timezone.utc).isoformat(),),
+            (now, club_id),
         )
+        if club_id == 1:
+            db.execute(
+                """
+                UPDATE app_config
+                SET logo_data = NULL, logo_mime = '', updated_at = ?
+                WHERE id = 1
+                """,
+                (now,),
+            )
         db.commit()
 
 
@@ -2509,21 +3619,48 @@ def system_status(
             database_integrity = (
                 str(integrity[0]).lower() if integrity is not None else "unbekannt"
             )
+            club_id = _active_club_id(db)
             active_users = int(
-                db.execute("SELECT COUNT(*) FROM users WHERE active = 1").fetchone()[0]
+                db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM user_clubs uc
+                    JOIN users u ON u.id = uc.user_id
+                    WHERE uc.club_id = ? AND uc.active = 1 AND u.active = 1
+                    """,
+                    (club_id,),
+                ).fetchone()[0]
             )
             active_sessions = int(
-                db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                db.execute(
+                    "SELECT COUNT(*) FROM sessions WHERE active_club_id = ?",
+                    (club_id,),
+                ).fetchone()[0]
             )
-            members = int(db.execute("SELECT COUNT(*) FROM members").fetchone()[0])
+            members = int(
+                db.execute(
+                    "SELECT COUNT(*) FROM members WHERE club_id = ?",
+                    (club_id,),
+                ).fetchone()[0]
+            )
             registered_devices = int(
                 db.execute(
-                    "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+                    """
+                    SELECT COUNT(*)
+                    FROM push_tokens
+                    WHERE enabled = 1 AND club_id = ?
+                    """,
+                    (club_id,),
                 ).fetchone()[0]
             )
             queued_push = int(
                 db.execute(
-                    "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+                    """
+                    SELECT COUNT(*)
+                    FROM push_notifications
+                    WHERE sent_at IS NULL AND club_id = ?
+                    """,
+                    (club_id,),
                 ).fetchone()[0]
             )
     except sqlite3.Error:
@@ -2735,8 +3872,16 @@ def bootstrap(payload: BootstrapPayload) -> dict[str, Any]:
                 now,
             ],
         )
-        db.commit()
         user_id = cursor.lastrowid
+        db.execute(
+            """
+            INSERT INTO user_clubs (
+                user_id, club_id, role, active, created_at, updated_at
+            ) VALUES (?, ?, 'super_admin', 1, ?, ?)
+            """,
+            (user_id, _active_club_id(db), now, now),
+        )
+        db.commit()
     return _user_profile(user_id)
 
 
@@ -2747,7 +3892,12 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
 
     with connect() as db:
         row = db.execute(
-            "SELECT * FROM users WHERE username = ? COLLATE NOCASE AND active = 1",
+            """
+            SELECT u.*
+            FROM users u
+            WHERE u.username = ? COLLATE NOCASE
+              AND u.active = 1
+            """,
             (payload.username.strip(),),
         ).fetchone()
         if row is None or not _check_password(
@@ -2758,37 +3908,85 @@ def login(request: Request, payload: LoginPayload) -> dict[str, Any]:
             _record_login_failure(rate_key)
             raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
 
+        user_id = int(row["id"])
+        clubs = _accessible_club_rows(db, user_id)
+        if not clubs:
+            suspended = db.execute(
+                """
+                SELECT c.billing_suspension_reason
+                FROM clubs c
+                JOIN user_clubs uc ON uc.club_id = c.id
+                WHERE uc.user_id = ?
+                  AND uc.active = 1
+                  AND c.active = 1
+                  AND c.billing_status != 'active'
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if suspended is not None:
+                reason = str(
+                    suspended["billing_suspension_reason"] or "Ausstehende Zahlung"
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Verein gesperrt: {reason}",
+                )
+            _record_login_failure(rate_key)
+            raise HTTPException(status_code=401, detail="Keinem aktiven Verein zugeordnet")
+
+        instance_club_id = _instance_club_id(db)
+        club_ids = [int(club["id"]) for club in clubs]
+        if _is_super_admin(db, user_id) or instance_club_id in club_ids:
+            initial_club_id = instance_club_id
+        else:
+            initial_club_id = club_ids[0]
+
+        requires_club_selection = (
+            not _is_super_admin(db, user_id) and len(clubs) > 1
+        )
+
         _clear_login_failures(rate_key)
         token = secrets.token_urlsafe(48)
         now_dt = datetime.now(timezone.utc)
         expires = (now_dt + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
         db.execute(
-            """
-            DELETE FROM sessions
-            WHERE expires_at <= ?
-            """,
+            "DELETE FROM sessions WHERE expires_at <= ?",
             (now_dt.isoformat(),),
         )
         db.execute(
             """
-            INSERT INTO sessions (token_hash, user_id, instance_id, expires_at, created_at)
+            INSERT INTO sessions (
+                token_hash, user_id, expires_at, created_at, active_club_id
+            )
             VALUES (?, ?, ?, ?, ?)
             """,
             (
                 _token_hash(token),
-                row["id"],
-                INSTANCE_ID,
+                user_id,
                 expires,
                 now_dt.isoformat(),
+                initial_club_id,
             ),
         )
         db.commit()
 
+        club_payload = [
+            {
+                **dict(club),
+                "current": int(club["id"]) == initial_club_id,
+            }
+            for club in clubs
+        ]
+
     return {
         "token": token,
         "expires_at": expires,
-        "user": _user_profile(row["id"]),
+        "user": current_user(authorization=f"Bearer {token}"),
+        "clubs": club_payload,
+        "requires_club_selection": requires_club_selection,
     }
+
 
 @app.post("/api/auth/logout", status_code=204)
 def logout(
@@ -2796,13 +3994,435 @@ def logout(
 ) -> None:
     token = _extract_token(authorization)
     with connect() as db:
-        db.execute("DELETE FROM sessions WHERE token_hash = ? AND instance_id = ?", (_token_hash(token), INSTANCE_ID))
+        db.execute("DELETE FROM sessions WHERE token_hash = ?", (_token_hash(token),))
         db.commit()
 
 
 @app.get("/api/auth/me")
 def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-    return _user_profile(user["id"])
+    return user
+
+
+@app.get("/api/clubs/accessible")
+def accessible_clubs(
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = _accessible_club_rows(db, int(user["id"]))
+    return [
+        {
+            **dict(row),
+            "current": int(row["id"]) == int(user["current_club_id"]),
+        }
+        for row in rows
+    ]
+
+
+@app.post("/api/clubs")
+def create_club(
+    payload: ClubCreatePayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=403,
+            detail="Nur Super-Admins dürfen Vereine anlegen",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        try:
+            cursor = db.execute(
+                """
+                INSERT INTO clubs (
+                    slug, name, short_name, subtitle, active,
+                    primary_color, secondary_color,
+                    description, website, email, phone, address,
+                    city, country, app_title, welcome_text,
+                    created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, 1,
+                    ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?
+                )
+                """,
+                (
+                    payload.slug.strip().lower(),
+                    payload.name.strip(),
+                    payload.short_name.strip() or payload.name.strip(),
+                    payload.subtitle.strip(),
+                    payload.primary_color.upper(),
+                    payload.secondary_color.upper(),
+                    payload.description.strip(),
+                    payload.website.strip(),
+                    payload.email.strip(),
+                    payload.phone.strip(),
+                    payload.address.strip(),
+                    payload.city.strip(),
+                    payload.country.strip(),
+                    payload.app_title.strip(),
+                    payload.welcome_text.strip(),
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="Vereins-Slug bereits vorhanden")
+
+        club_id = int(cursor.lastrowid)
+        _set_club_features(
+            db,
+            club_id,
+            {
+                key: default_enabled
+                for key, (_, default_enabled) in CLUB_FEATURE_DEFAULTS.items()
+            },
+            {
+                key: default_label
+                for key, (default_label, _) in CLUB_FEATURE_DEFAULTS.items()
+            },
+        )
+        db.commit()
+
+        row = db.execute(
+            """
+            SELECT
+                id, slug, name, short_name, subtitle, active,
+                primary_color, secondary_color,
+                description, website, email, phone, address,
+                city, country, app_title, welcome_text,
+                created_at, updated_at
+            FROM clubs
+            WHERE id = ?
+            """,
+            (club_id,),
+        ).fetchone()
+    return dict(row)
+
+
+@app.get("/api/operator/billing/clubs")
+def operator_billing_clubs(
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    _require_super_admin(user)
+    with connect() as db:
+        rows = db.execute(
+            """
+            SELECT
+                c.id, c.slug, c.name, c.short_name, c.active,
+                c.billing_status, c.billing_email,
+                c.billing_amount_rappen, c.billing_interval_months,
+                c.billing_due_days, c.billing_grace_days,
+                c.billing_next_invoice_date,
+                c.billing_auto_suspend, c.billing_suspension_reason,
+                COALESCE(SUM(
+                    CASE WHEN i.status = 'open' THEN i.amount_rappen ELSE 0 END
+                ), 0) AS open_amount_rappen,
+                COALESCE(SUM(
+                    CASE WHEN i.status = 'open' THEN 1 ELSE 0 END
+                ), 0) AS open_invoice_count
+            FROM clubs c
+            LEFT JOIN club_invoices i ON i.club_id = c.id
+            GROUP BY c.id
+            ORDER BY c.name COLLATE NOCASE, c.id
+            """
+        ).fetchall()
+    return [
+        {
+            **dict(row),
+            "billing_auto_suspend": bool(row["billing_auto_suspend"]),
+            "open_amount_chf": round(int(row["open_amount_rappen"]) / 100, 2),
+        }
+        for row in rows
+    ]
+
+
+@app.put("/api/operator/billing/clubs/{club_id}")
+def operator_update_billing_settings(
+    club_id: int,
+    payload: ClubBillingSettingsPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    next_invoice_date = payload.next_invoice_date.strip()
+    if next_invoice_date:
+        _parse_billing_date(next_invoice_date)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE clubs
+            SET
+                billing_email = ?,
+                billing_amount_rappen = ?,
+                billing_interval_months = ?,
+                billing_due_days = ?,
+                billing_grace_days = ?,
+                billing_next_invoice_date = ?,
+                billing_auto_suspend = ?,
+                updated_at = ?
+            WHERE id = ? AND active = 1
+            """,
+            (
+                payload.billing_email.strip(),
+                payload.amount_rappen,
+                payload.interval_months,
+                payload.due_days,
+                payload.grace_days,
+                next_invoice_date,
+                int(payload.auto_suspend),
+                now,
+                club_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        db.commit()
+        row = db.execute(
+            """
+            SELECT
+                id, slug, name, billing_status, billing_email,
+                billing_amount_rappen, billing_interval_months,
+                billing_due_days, billing_grace_days,
+                billing_next_invoice_date,
+                billing_auto_suspend, billing_suspension_reason
+            FROM clubs
+            WHERE id = ?
+            """,
+            (club_id,),
+        ).fetchone()
+    result = dict(row)
+    result["billing_auto_suspend"] = bool(result["billing_auto_suspend"])
+    result["billing_amount_chf"] = round(
+        int(result["billing_amount_rappen"]) / 100,
+        2,
+    )
+    return result
+
+
+@app.get("/api/operator/billing/clubs/{club_id}/invoices")
+def operator_club_invoices(
+    club_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> list[dict[str, Any]]:
+    _require_super_admin(user)
+    with connect() as db:
+        club = db.execute("SELECT id FROM clubs WHERE id = ?", (club_id,)).fetchone()
+        if club is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        rows = db.execute(
+            """
+            SELECT *
+            FROM club_invoices
+            WHERE club_id = ?
+            ORDER BY issue_date DESC, id DESC
+            """,
+            (club_id,),
+        ).fetchall()
+    return [_invoice_row(row) for row in rows]
+
+
+@app.get("/api/operator/billing/invoices/{invoice_id}/pdf")
+def operator_invoice_pdf(
+    invoice_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> Response:
+    _require_super_admin(user)
+    with connect() as db:
+        invoice_row = db.execute(
+            "SELECT * FROM club_invoices WHERE id = ?",
+            (invoice_id,),
+        ).fetchone()
+        if invoice_row is None:
+            raise HTTPException(status_code=404, detail="Rechnung nicht gefunden")
+        club_row = db.execute(
+            """
+            SELECT
+                id, slug, name, address, city, country, billing_email
+            FROM clubs
+            WHERE id = ?
+            """,
+            (int(invoice_row["club_id"]),),
+        ).fetchone()
+        if club_row is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+
+    invoice = _invoice_row(invoice_row)
+    club = dict(club_row)
+    pdf_bytes = _invoice_pdf_bytes(invoice, club)
+    filename = f"vereinsrechnung-{invoice['invoice_number']}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/operator/billing/run")
+def operator_run_billing(
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, int]:
+    _require_super_admin(user)
+    return _run_billing_cycle()
+
+
+@app.post("/api/operator/billing/clubs/{club_id}/suspend")
+def operator_suspend_club(
+    club_id: int,
+    payload: ClubBillingSuspendPayload,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE clubs
+            SET billing_status = 'suspended',
+                billing_suspension_reason = ?,
+                updated_at = ?
+            WHERE id = ? AND active = 1
+            """,
+            (payload.reason.strip(), now, club_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        db.commit()
+    return {"club_id": club_id, "billing_status": "suspended"}
+
+
+@app.post("/api/operator/billing/clubs/{club_id}/reactivate")
+def operator_reactivate_club(
+    club_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """
+            UPDATE clubs
+            SET billing_status = 'active',
+                billing_suspension_reason = '',
+                updated_at = ?
+            WHERE id = ? AND active = 1
+            """,
+            (now, club_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        db.commit()
+    return {"club_id": club_id, "billing_status": "active"}
+
+
+@app.post("/api/operator/billing/invoices/{invoice_id}/paid")
+def operator_mark_invoice_paid(
+    invoice_id: int,
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    _require_super_admin(user)
+    now_dt = datetime.now(timezone.utc)
+    today = now_dt.date().isoformat()
+    with connect() as db:
+        invoice = db.execute(
+            "SELECT * FROM club_invoices WHERE id = ?",
+            (invoice_id,),
+        ).fetchone()
+        if invoice is None:
+            raise HTTPException(status_code=404, detail="Rechnung nicht gefunden")
+        club_id = int(invoice["club_id"])
+        db.execute(
+            """
+            UPDATE club_invoices
+            SET status = 'paid', paid_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now_dt.isoformat(), now_dt.isoformat(), invoice_id),
+        )
+        club_billing = db.execute(
+            "SELECT billing_grace_days FROM clubs WHERE id = ?",
+            (club_id,),
+        ).fetchone()
+        grace_days = max(
+            0,
+            int(club_billing["billing_grace_days"] if club_billing else 0),
+        )
+        overdue = db.execute(
+            """
+            SELECT 1
+            FROM club_invoices
+            WHERE club_id = ?
+              AND status = 'open'
+              AND date(due_date, '+' || ? || ' days') < ?
+            LIMIT 1
+            """,
+            (club_id, grace_days, today),
+        ).fetchone()
+        if overdue is None:
+            db.execute(
+                """
+                UPDATE clubs
+                SET billing_status = 'active',
+                    billing_suspension_reason = '',
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now_dt.isoformat(), club_id),
+            )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM club_invoices WHERE id = ?",
+            (invoice_id,),
+        ).fetchone()
+    return _invoice_row(row)
+
+
+@app.post("/api/auth/club")
+def switch_active_club(
+    payload: ClubSwitchPayload,
+    authorization: str | None = Header(default=None),
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    token = _extract_token(authorization)
+    with connect() as db:
+        club = db.execute(
+            """
+            SELECT id, slug, name, active, billing_status, billing_suspension_reason
+            FROM clubs
+            WHERE id = ? AND active = 1
+            """,
+            (payload.club_id,),
+        ).fetchone()
+        if club is None:
+            raise HTTPException(status_code=404, detail="Verein nicht gefunden")
+        role = _user_club_access(db, int(user["id"]), int(payload.club_id))
+        if role is None:
+            raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Verein")
+        if str(club["billing_status"] or "active") != "active" and role != "super_admin":
+            reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
+            raise HTTPException(status_code=403, detail=f"Verein gesperrt: {reason}")
+        cursor = db.execute(
+            """
+            UPDATE sessions
+            SET active_club_id = ?
+            WHERE token_hash = ? AND user_id = ?
+            """,
+            (payload.club_id, _token_hash(token), user["id"]),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=401, detail="Sitzung nicht gefunden")
+        db.commit()
+    return {
+        "club_id": int(club["id"]),
+        "slug": str(club["slug"]),
+        "name": str(club["name"]),
+        "club_role": role,
+    }
 
 
 @app.get("/api/roles")
@@ -2826,11 +4446,22 @@ def get_users(
     with connect() as db:
         rows = db.execute(
             """
-            SELECT u.*, m.name AS member_name
+            SELECT
+                u.*,
+                m.name AS member_name,
+                uc.role AS club_role,
+                uc.club_id AS current_club_id
             FROM users u
-            LEFT JOIN members m ON m.id = u.member_id
+            JOIN user_clubs uc
+              ON uc.user_id = u.id
+             AND uc.club_id = ?
+             AND uc.active = 1
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = uc.club_id
             ORDER BY u.username COLLATE NOCASE
-            """
+            """,
+            (_active_club_id(db),),
         ).fetchall()
     return [_serialize_user(row) for row in rows]
 
@@ -2876,10 +4507,27 @@ def post_user(
                     now,
                 ],
             )
+            user_id = cursor.lastrowid
+            club_role = "club_admin" if effective["can_manage_users"] else "member"
+            db.execute(
+                """
+                INSERT INTO user_clubs (
+                    user_id, club_id, role, active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    _active_club_id(db),
+                    club_role,
+                    int(payload.active),
+                    now,
+                    now,
+                ),
+            )
             db.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Benutzername bereits vorhanden")
-    return _user_profile(cursor.lastrowid)
+    return _user_profile(user_id)
 
 
 @app.put("/api/users/{user_id}")
@@ -2933,6 +4581,17 @@ def put_user(
 
     values.append(user_id)
     with connect() as db:
+        club_id = _active_club_id(db)
+        target = db.execute(
+            """
+            SELECT 1
+            FROM user_clubs
+            WHERE user_id = ? AND club_id = ? AND active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if target is None:
+            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
         try:
             cursor = db.execute(
                 f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
@@ -2954,7 +4613,16 @@ def revoke_user_sessions(
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> None:
     with connect() as db:
-        user = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        club_id = _active_club_id(db)
+        user = db.execute(
+            """
+            SELECT u.id
+            FROM users u
+            JOIN user_clubs uc ON uc.user_id = u.id
+            WHERE u.id = ? AND uc.club_id = ? AND uc.active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
         if user is None:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
         db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
@@ -2969,10 +4637,29 @@ def delete_user(
     if user_id == actor["id"]:
         raise HTTPException(status_code=400, detail="Eigenes Konto kann nicht gelöscht werden")
     with connect() as db:
-        db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-        cursor = db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        if cursor.rowcount == 0:
+        club_id = _active_club_id(db)
+        membership = db.execute(
+            """
+            SELECT role
+            FROM user_clubs
+            WHERE user_id = ? AND club_id = ? AND active = 1
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if membership is None:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+
+        db.execute(
+            "DELETE FROM user_clubs WHERE user_id = ? AND club_id = ?",
+            (user_id, club_id),
+        )
+        remaining = db.execute(
+            "SELECT 1 FROM user_clubs WHERE user_id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if remaining is None:
+            db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         db.commit()
 
 
@@ -3006,8 +4693,8 @@ async def post_gallery_snapshot(
         cursor = db.execute(
             """
             INSERT INTO gallery_snapshots (
-                user_id, image_data, image_mime, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?)
+                user_id, image_data, image_mime, created_at, expires_at, club_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 user["id"],
@@ -3015,6 +4702,7 @@ async def post_gallery_snapshot(
                 mime,
                 now.isoformat(),
                 expires.isoformat(),
+                _active_club_id(db),
             ),
         )
         db.commit()
@@ -3023,10 +4711,12 @@ async def post_gallery_snapshot(
             SELECT gs.*, u.username, m.name AS member_name
             FROM gallery_snapshots gs
             JOIN users u ON u.id = gs.user_id
-            LEFT JOIN members m ON m.id = u.member_id
-            WHERE gs.id = ?
+            LEFT JOIN members m
+              ON m.id = u.member_id
+             AND m.club_id = gs.club_id
+            WHERE gs.id = ? AND gs.club_id = ?
             """,
-            (cursor.lastrowid,),
+            (cursor.lastrowid, _active_club_id(db)),
         ).fetchone()
     return _serialize_snapshot(row, user)
 
@@ -3042,9 +4732,13 @@ def get_gallery_snapshot_image(
             """
             SELECT image_data, image_mime
             FROM gallery_snapshots
-            WHERE id = ? AND expires_at > ?
+            WHERE id = ? AND club_id = ? AND expires_at > ?
             """,
-            (snapshot_id, datetime.now(timezone.utc).isoformat()),
+            (
+                snapshot_id,
+                _active_club_id(db),
+                datetime.now(timezone.utc).isoformat(),
+            ),
         ).fetchone()
         db.commit()
     if row is None:
@@ -3062,15 +4756,23 @@ def delete_gallery_snapshot(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
+        club_id = _active_club_id(db)
         row = db.execute(
-            "SELECT user_id FROM gallery_snapshots WHERE id = ?",
-            (snapshot_id,),
+            """
+            SELECT user_id
+            FROM gallery_snapshots
+            WHERE id = ? AND club_id = ?
+            """,
+            (snapshot_id, club_id),
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Snapshot nicht gefunden")
         if row["user_id"] != user["id"] and not user.get("can_photos", False):
             raise HTTPException(status_code=403, detail="Keine Berechtigung")
-        db.execute("DELETE FROM gallery_snapshots WHERE id = ?", (snapshot_id,))
+        db.execute(
+            "DELETE FROM gallery_snapshots WHERE id = ? AND club_id = ?",
+            (snapshot_id, club_id),
+        )
         db.commit()
 
 
@@ -3093,14 +4795,21 @@ def get_push_admin(
     _: dict[str, Any] = Depends(require("can_manage_users")),
 ) -> dict[str, Any]:
     with connect() as db:
+        club_id = _active_club_id(db)
         registered_devices_total = int(
             db.execute(
-                "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1"
+                "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1 AND club_id = ?",
+                (club_id,),
             ).fetchone()[0]
         )
         queued_notifications = int(
             db.execute(
-                "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL"
+                """
+                SELECT COUNT(*)
+                FROM push_notifications
+                WHERE sent_at IS NULL AND club_id = ?
+                """,
+                (club_id,),
             ).fetchone()[0]
         )
         rows = db.execute(
@@ -3111,28 +4820,37 @@ def get_push_admin(
                     SELECT COUNT(*)
                     FROM push_deliveries pd
                     WHERE pd.notification_id = pn.id
+                      AND pd.club_id = pn.club_id
                       AND pd.sent_at IS NOT NULL
                 ) AS delivered_count,
                 (
                     SELECT COUNT(*)
                     FROM push_deliveries pd
                     WHERE pd.notification_id = pn.id
+                      AND pd.club_id = pn.club_id
                       AND pd.sent_at IS NULL
                       AND pd.last_error <> ''
                 ) AS failed_count
             FROM push_notifications pn
+            WHERE pn.club_id = ?
             ORDER BY pn.id DESC
             LIMIT 50
-            """
+            """,
+            (club_id,),
         ).fetchall()
         last_delivery_error = db.execute(
             """
-            SELECT last_error
-            FROM push_deliveries
-            WHERE last_error IS NOT NULL AND last_error <> ''
-            ORDER BY rowid DESC
+            SELECT pd.last_error
+            FROM push_deliveries pd
+            JOIN push_notifications pn ON pn.id = pd.notification_id
+            WHERE pd.club_id = ?
+              AND pn.club_id = ?
+              AND pd.last_error IS NOT NULL
+              AND pd.last_error <> ''
+            ORDER BY pd.rowid DESC
             LIMIT 1
-            """
+            """,
+            (club_id, club_id),
         ).fetchone()
 
     return {
@@ -3175,9 +4893,9 @@ def send_manual_push(
                 0 AS delivered_count,
                 0 AS failed_count
             FROM push_notifications pn
-            WHERE pn.id = ?
+            WHERE pn.id = ? AND pn.club_id = ?
             """,
-            (notification_id,),
+            (notification_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_push_notification(row)
 
@@ -3195,15 +4913,23 @@ def register_push_token(
         db.execute(
             """
             INSERT INTO push_tokens (
-                user_id, token, platform, enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, 1, ?, ?)
+                user_id, token, platform, enabled, created_at, updated_at, club_id
+            ) VALUES (?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(token) DO UPDATE SET
                 user_id = excluded.user_id,
                 platform = excluded.platform,
                 enabled = 1,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                club_id = excluded.club_id
             """,
-            (user["id"], payload.token, platform, now, now),
+            (
+                user["id"],
+                payload.token,
+                platform,
+                now,
+                now,
+                _active_club_id(db),
+            ),
         )
         db.commit()
     return {"registered": True}
@@ -3216,8 +4942,11 @@ def unregister_push_token(
 ) -> None:
     with connect() as db:
         db.execute(
-            "DELETE FROM push_tokens WHERE token = ? AND user_id = ?",
-            (payload.token, user["id"]),
+            """
+            DELETE FROM push_tokens
+            WHERE token = ? AND user_id = ? AND club_id = ?
+            """,
+            (payload.token, user["id"], _active_club_id(db)),
         )
         db.commit()
 
@@ -3227,24 +4956,40 @@ def push_status(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
+        club_id = _active_club_id(db)
         count = db.execute(
-            "SELECT COUNT(*) FROM push_tokens WHERE user_id = ? AND enabled = 1",
-            (user["id"],),
+            """
+            SELECT COUNT(*)
+            FROM push_tokens
+            WHERE user_id = ? AND enabled = 1 AND club_id = ?
+            """,
+            (user["id"], club_id),
         ).fetchone()[0]
         total_devices = db.execute(
-            "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1",
+            "SELECT COUNT(*) FROM push_tokens WHERE enabled = 1 AND club_id = ?",
+            (club_id,),
         ).fetchone()[0]
         queued = db.execute(
-            "SELECT COUNT(*) FROM push_notifications WHERE sent_at IS NULL",
+            """
+            SELECT COUNT(*)
+            FROM push_notifications
+            WHERE sent_at IS NULL AND club_id = ?
+            """,
+            (club_id,),
         ).fetchone()[0]
         last_delivery_error = db.execute(
             """
-            SELECT last_error
-            FROM push_deliveries
-            WHERE last_error IS NOT NULL AND last_error <> ''
-            ORDER BY rowid DESC
+            SELECT pd.last_error
+            FROM push_deliveries pd
+            JOIN push_notifications pn ON pn.id = pd.notification_id
+            WHERE pd.club_id = ?
+              AND pn.club_id = ?
+              AND pd.last_error IS NOT NULL
+              AND pd.last_error <> ''
+            ORDER BY pd.rowid DESC
             LIMIT 1
-            """
+            """,
+            (club_id, club_id),
         ).fetchone()
     diagnostic = _firebase_diagnostic()
     return {
@@ -3300,15 +5045,16 @@ def _create_poll(
             """
             SELECT COALESCE(MAX(sort_order), 0)
             FROM content_items
-            WHERE section = 'polls'
-            """
+            WHERE section = 'polls' AND club_id = ?
+            """,
+            (_active_club_id(db),),
         ).fetchone()[0]
         cursor = db.execute(
             """
             INSERT INTO content_items (
                 section, title, text, link_url, poll_options,
-                poll_allow_suggestions, sort_order, created_at
-            ) VALUES ('polls', ?, ?, '', ?, ?, ?, ?)
+                poll_allow_suggestions, sort_order, created_at, club_id
+            ) VALUES ('polls', ?, ?, '', ?, ?, ?, ?, ?)
             """,
             (
                 payload.title,
@@ -3317,6 +5063,7 @@ def _create_poll(
                 int(payload.allow_suggestions),
                 max_order + 1,
                 now,
+                _active_club_id(db),
             ),
         )
         rule = CONTENT_PUSH_RULES.get("polls")
@@ -3331,8 +5078,8 @@ def _create_poll(
             )
         db.commit()
         row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (cursor.lastrowid,),
+            "SELECT * FROM content_items WHERE id = ? AND club_id = ?",
+            (cursor.lastrowid, _active_club_id(db)),
         ).fetchone()
     return _serialize_content(row, user["id"])
 
@@ -3349,18 +5096,15 @@ def _update_poll(
         allow_suggestions=payload.allow_suggestions,
     )
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if existing is None:
+        existing = _require_active_club_row(db, "content_items", poll_id)
+        if existing["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
         db.execute(
             """
             UPDATE content_items
             SET title = ?, text = ?, link_url = '',
                 poll_options = ?, poll_allow_suggestions = ?
-            WHERE id = ? AND section = 'polls'
+            WHERE id = ? AND section = 'polls' AND club_id = ?
             """,
             (
                 payload.title,
@@ -3368,13 +5112,11 @@ def _update_poll(
                 json.dumps(options, ensure_ascii=False),
                 int(payload.allow_suggestions),
                 poll_id,
+                _active_club_id(db),
             ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (poll_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", poll_id)
     return _serialize_content(row, user["id"])
 
 
@@ -3385,18 +5127,28 @@ def _delete_poll(
     if not user.get("can_polls", False):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
     with connect() as db:
-        existing = db.execute(
-            "SELECT id FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if existing is None:
+        existing = _require_active_club_row(db, "content_items", poll_id)
+        if existing["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
-        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (poll_id,))
-        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (poll_id,))
-        db.execute("DELETE FROM content_images WHERE content_id = ?", (poll_id,))
+        club_id = _active_club_id(db)
         db.execute(
-            "DELETE FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
+            "DELETE FROM poll_votes WHERE poll_id = ? AND club_id = ?",
+            (poll_id, club_id),
+        )
+        db.execute(
+            "DELETE FROM poll_suggestions WHERE poll_id = ? AND club_id = ?",
+            (poll_id, club_id),
+        )
+        db.execute(
+            "DELETE FROM content_images WHERE content_id = ? AND club_id = ?",
+            (poll_id, club_id),
+        )
+        db.execute(
+            """
+            DELETE FROM content_items
+            WHERE id = ? AND section = 'polls' AND club_id = ?
+            """,
+            (poll_id, club_id),
         )
         db.commit()
 
@@ -3406,13 +5158,15 @@ def get_polls(
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     with connect() as db:
+        _require_club_feature(db, "polls")
         rows = db.execute(
             """
             SELECT *
             FROM content_items
-            WHERE section = 'polls'
+            WHERE section = 'polls' AND club_id = ?
             ORDER BY sort_order ASC, id ASC
-            """
+            """,
+            (_active_club_id(db),),
         ).fetchall()
     return [_serialize_content(row, user["id"]) for row in rows]
 
@@ -3447,19 +5201,29 @@ def get_content(
     section: str | None = None,
     user: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
-    if section in {"sujet", "archive"}:
-        return []
-    sql = "SELECT * FROM content_items WHERE section NOT IN ('sujet', 'archive')"
-    values: list[Any] = []
+    sql = "SELECT * FROM content_items WHERE club_id = ?"
     if section:
         _content_permission(section)
         sql += " AND section = ?"
-        values.append(section)
     sql += " ORDER BY sort_order ASC, id ASC"
 
     with connect() as db:
         _cleanup_expired_snapshots(db)
+        if section:
+            _require_section_feature(db, section)
+        values: list[Any] = [_active_club_id(db)]
+        if section:
+            values.append(section)
         rows = db.execute(sql, values).fetchall()
+        if not section:
+            rows = [
+                row for row in rows
+                if SECTION_FEATURES.get(str(row["section"])) is None
+                or _club_feature_enabled(
+                    db,
+                    SECTION_FEATURES[str(row["section"])],
+                )
+            ]
         snapshots: list[sqlite3.Row] = []
         if section is None or section == "gallery":
             snapshots = db.execute(
@@ -3468,10 +5232,10 @@ def get_content(
                 FROM gallery_snapshots gs
                 JOIN users u ON u.id = gs.user_id
                 LEFT JOIN members m ON m.id = u.member_id
-                WHERE gs.expires_at > ?
+                WHERE gs.expires_at > ? AND gs.club_id = ?
                 ORDER BY gs.created_at DESC, gs.id DESC
                 """,
-                (datetime.now(timezone.utc).isoformat(),),
+                (datetime.now(timezone.utc).isoformat(), _active_club_id(db)),
             ).fetchall()
         db.commit()
 
@@ -3489,13 +5253,15 @@ def reorder_content_items(
         return []
 
     with connect() as db:
+        club_id = _active_club_id(db)
+        placeholders = ",".join("?" for _ in payload.item_ids)
         rows = db.execute(
             f"""
             SELECT id, section
             FROM content_items
-            WHERE id IN ({",".join("?" for _ in payload.item_ids)})
+            WHERE id IN ({placeholders}) AND club_id = ?
             """,
-            payload.item_ids,
+            [*payload.item_ids, club_id],
         ).fetchall()
 
         if len(rows) != len(set(payload.item_ids)):
@@ -3510,15 +5276,16 @@ def reorder_content_items(
 
         section = next(iter(sections))
         _require_content_permission(section, user)
+        _require_section_feature(db, section)
 
         current_rows = db.execute(
             """
             SELECT id
             FROM content_items
-            WHERE section = ?
+            WHERE section = ? AND club_id = ?
             ORDER BY sort_order ASC, id ASC
             """,
-            (section,),
+            (section, club_id),
         ).fetchall()
         current_ids = [row["id"] for row in current_rows]
         if set(current_ids) != set(payload.item_ids):
@@ -3532,9 +5299,9 @@ def reorder_content_items(
                 """
                 UPDATE content_items
                 SET sort_order = ?
-                WHERE id = ? AND section = ?
+                WHERE id = ? AND section = ? AND club_id = ?
                 """,
-                (position, item_id, section),
+                (position, item_id, section, club_id),
             )
         db.commit()
 
@@ -3542,41 +5309,36 @@ def reorder_content_items(
             """
             SELECT *
             FROM content_items
-            WHERE section = ?
+            WHERE section = ? AND club_id = ?
             ORDER BY sort_order ASC, id ASC
             """,
-            (section,),
+            (section, club_id),
         ).fetchall()
-    return [_serialize_content(row) for row in ordered]
-
+    return [_serialize_content(row, user["id"]) for row in ordered]
 
 @app.post("/api/content")
 def post_content(
     payload: ContentPayload,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
-    if payload.section in {"sujet", "archive"}:
-        raise HTTPException(
-            status_code=409,
-            detail="Sujet und Archiv werden über das Jahres-Sujet-Modell verwaltet",
-        )
     _require_content_permission(payload.section, user)
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
+        _require_section_feature(db, payload.section)
         max_order = db.execute(
             """
             SELECT COALESCE(MAX(sort_order), 0)
             FROM content_items
-            WHERE section = ?
+            WHERE section = ? AND club_id = ?
             """,
-            (payload.section,),
+            (payload.section, _active_club_id(db)),
         ).fetchone()[0]
         cursor = db.execute(
             """
             INSERT INTO content_items (
                 section, title, text, link_url, poll_options,
-                poll_allow_suggestions, sort_order, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                poll_allow_suggestions, sort_order, created_at, club_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.section,
@@ -3591,6 +5353,7 @@ def post_content(
                 if payload.section == "polls" else 0,
                 max_order + 1,
                 now,
+                _active_club_id(db),
             ),
         )
         rule = CONTENT_PUSH_RULES.get(payload.section)
@@ -3604,10 +5367,7 @@ def post_content(
                 route=route,
             )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (cursor.lastrowid,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", cursor.lastrowid)
     return _serialize_content(row, user["id"])
 
 
@@ -3617,26 +5377,16 @@ def put_content(
     payload: ContentPayload,
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
-    if payload.section in {"sujet", "archive"}:
-        raise HTTPException(
-            status_code=409,
-            detail="Sujet und Archiv werden über das Jahres-Sujet-Modell verwaltet",
-        )
     _require_content_permission(payload.section, user)
     with connect() as db:
-        current = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if current is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        current = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(current["section"], user)
         db.execute(
             """
             UPDATE content_items
             SET section = ?, title = ?, text = ?, link_url = ?,
                 poll_options = ?, poll_allow_suggestions = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
             (
                 payload.section,
@@ -3650,13 +5400,11 @@ def put_content(
                 int(payload.poll_allow_suggestions)
                 if payload.section == "polls" else 0,
                 row_id,
+                _active_club_id(db),
             ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -3666,17 +5414,13 @@ def delete_content(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        row = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        row = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(row["section"], user)
-        db.execute("DELETE FROM content_images WHERE content_id = ?", (row_id,))
-        db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (row_id,))
-        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ?", (row_id,))
-        db.execute("DELETE FROM content_items WHERE id = ?", (row_id,))
+        club_id = _active_club_id(db)
+        db.execute("DELETE FROM content_images WHERE content_id = ? AND club_id = ?", (row_id, club_id))
+        db.execute("DELETE FROM poll_votes WHERE poll_id = ? AND club_id = ?", (row_id, club_id))
+        db.execute("DELETE FROM poll_suggestions WHERE poll_id = ? AND club_id = ?", (row_id, club_id))
+        db.execute("DELETE FROM content_items WHERE id = ? AND club_id = ?", (row_id, club_id))
         db.commit()
 
 
@@ -3687,12 +5431,7 @@ async def upload_content_document(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         if existing["section"] != "documents":
             raise HTTPException(status_code=422, detail="PDF nur bei Dokumenten erlaubt")
@@ -3712,15 +5451,12 @@ async def upload_content_document(
             """
             UPDATE content_items
             SET document_data = ?, document_mime = 'application/pdf', document_name = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, filename, row_id),
+            (data, filename, row_id, _active_club_id(db)),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row, user["id"])
 
 
@@ -3734,9 +5470,9 @@ def get_content_document(
             """
             SELECT document_data, document_mime, document_name
             FROM content_items
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if row is None or row["document_data"] is None:
         raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
@@ -3757,20 +5493,15 @@ def delete_content_document(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         db.execute(
             """
             UPDATE content_items
             SET document_data = NULL, document_mime = '', document_name = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         db.commit()
 
@@ -3782,11 +5513,8 @@ def vote_poll(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
-        poll = db.execute(
-            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if poll is None:
+        poll = _require_active_club_row(db, "content_items", poll_id)
+        if poll["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
         try:
             options = json.loads(poll["poll_options"] or "[]")
@@ -3797,19 +5525,24 @@ def vote_poll(
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO poll_votes (
+                poll_id, user_id, option_index, created_at, club_id
+            )
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(poll_id, user_id) DO UPDATE SET
                 option_index = excluded.option_index,
                 created_at = excluded.created_at
             """,
-            (poll_id, user["id"], payload.option_index, now),
+            (
+                poll_id,
+                user["id"],
+                payload.option_index,
+                now,
+                _active_club_id(db),
+            ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (poll_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", poll_id)
     return _serialize_content(row, user["id"])
 
 
@@ -3824,11 +5557,8 @@ def suggest_and_vote_poll(
         raise HTTPException(status_code=422, detail="Vorschlag darf nicht leer sein")
 
     with connect() as db:
-        poll = db.execute(
-            "SELECT * FROM content_items WHERE id = ? AND section = 'polls'",
-            (poll_id,),
-        ).fetchone()
-        if poll is None:
+        poll = _require_active_club_row(db, "content_items", poll_id)
+        if poll["section"] != "polls":
             raise HTTPException(status_code=404, detail="Umfrage nicht gefunden")
         if not bool(poll["poll_allow_suggestions"]):
             raise HTTPException(
@@ -3848,17 +5578,20 @@ def suggest_and_vote_poll(
             """
             SELECT option_index
             FROM poll_suggestions
-            WHERE poll_id = ? AND user_id = ?
+            WHERE poll_id = ? AND user_id = ? AND club_id = ?
             """,
-            (poll_id, user["id"]),
+            (poll_id, user["id"], _active_club_id(db)),
         ).fetchone()
 
         if owned is not None:
             option_index = int(owned["option_index"])
             if not (0 <= option_index < len(options)):
                 db.execute(
-                    "DELETE FROM poll_suggestions WHERE poll_id = ? AND user_id = ?",
-                    (poll_id, user["id"]),
+                    """
+                    DELETE FROM poll_suggestions
+                    WHERE poll_id = ? AND user_id = ? AND club_id = ?
+                    """,
+                    (poll_id, user["id"], _active_club_id(db)),
                 )
                 owned = None
             else:
@@ -3878,17 +5611,31 @@ def suggest_and_vote_poll(
                     )
                 options[option_index] = suggestion
                 db.execute(
-                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
-                    (json.dumps(options, ensure_ascii=False), poll_id),
+                    """
+                    UPDATE content_items
+                    SET poll_options = ?
+                    WHERE id = ? AND club_id = ?
+                    """,
+                    (
+                        json.dumps(options, ensure_ascii=False),
+                        poll_id,
+                        _active_club_id(db),
+                    ),
                 )
                 now = datetime.now(timezone.utc).isoformat()
                 db.execute(
                     """
                     UPDATE poll_suggestions
                     SET suggestion_text = ?, updated_at = ?
-                    WHERE poll_id = ? AND user_id = ?
+                    WHERE poll_id = ? AND user_id = ? AND club_id = ?
                     """,
-                    (suggestion, now, poll_id, user["id"]),
+                    (
+                        suggestion,
+                        now,
+                        poll_id,
+                        user["id"],
+                        _active_club_id(db),
+                    ),
                 )
 
         if owned is None:
@@ -3912,15 +5659,23 @@ def suggest_and_vote_poll(
                 option_index = len(options) - 1
                 now = datetime.now(timezone.utc).isoformat()
                 db.execute(
-                    "UPDATE content_items SET poll_options = ? WHERE id = ?",
-                    (json.dumps(options, ensure_ascii=False), poll_id),
+                    """
+                    UPDATE content_items
+                    SET poll_options = ?
+                    WHERE id = ? AND club_id = ?
+                    """,
+                    (
+                        json.dumps(options, ensure_ascii=False),
+                        poll_id,
+                        _active_club_id(db),
+                    ),
                 )
                 db.execute(
                     """
                     INSERT INTO poll_suggestions (
                         poll_id, user_id, option_index, suggestion_text,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, club_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         poll_id,
@@ -3929,25 +5684,31 @@ def suggest_and_vote_poll(
                         suggestion,
                         now,
                         now,
+                        _active_club_id(db),
                     ),
                 )
 
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             """
-            INSERT INTO poll_votes (poll_id, user_id, option_index, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO poll_votes (
+                poll_id, user_id, option_index, created_at, club_id
+            )
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(poll_id, user_id) DO UPDATE SET
                 option_index = excluded.option_index,
                 created_at = excluded.created_at
             """,
-            (poll_id, user["id"], option_index, now),
+            (
+                poll_id,
+                user["id"],
+                option_index,
+                now,
+                _active_club_id(db),
+            ),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (poll_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", poll_id)
     return _serialize_content(row, user["id"])
 
 
@@ -3974,38 +5735,37 @@ async def upload_content_images(
         prepared.append((data, optimized_mime))
 
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         now = datetime.now(timezone.utc).isoformat()
         max_order = db.execute(
             """
             SELECT COALESCE(MAX(sort_order), 0)
             FROM content_images
-            WHERE content_id = ?
+            WHERE content_id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         ).fetchone()[0]
         db.executemany(
             """
             INSERT INTO content_images (
-                content_id, image_data, image_mime, sort_order, created_at
-            ) VALUES (?, ?, ?, ?, ?)
+                content_id, image_data, image_mime, sort_order, created_at, club_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             [
-                (row_id, data, mime, max_order + index + 1, now)
+                (
+                    row_id,
+                    data,
+                    mime,
+                    max_order + index + 1,
+                    now,
+                    _active_club_id(db),
+                )
                 for index, (data, mime) in enumerate(prepared)
             ],
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -4016,17 +5776,17 @@ def reorder_content_images(
     user: dict[str, Any] = Depends(current_user),
 ) -> dict[str, Any]:
     with connect() as db:
-        existing = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        club_id = _active_club_id(db)
 
         rows = db.execute(
-            "SELECT id FROM content_images WHERE content_id = ?",
-            (row_id,),
+            """
+            SELECT id
+            FROM content_images
+            WHERE content_id = ? AND club_id = ?
+            """,
+            (row_id, club_id),
         ).fetchall()
         current_ids = {row["id"] for row in rows}
         requested_ids = payload.image_ids
@@ -4043,15 +5803,12 @@ def reorder_content_images(
                 """
                 UPDATE content_images
                 SET sort_order = ?
-                WHERE id = ? AND content_id = ?
+                WHERE id = ? AND content_id = ? AND club_id = ?
                 """,
-                (position, image_id, row_id),
+                (position, image_id, row_id, club_id),
             )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -4064,11 +5821,20 @@ def get_content_gallery_image(
     with connect() as db:
         row = db.execute(
             """
-            SELECT image_data, image_mime
-            FROM content_images
-            WHERE id = ? AND content_id = ?
+            SELECT ci.image_data, ci.image_mime
+            FROM content_images ci
+            JOIN content_items c ON c.id = ci.content_id
+            WHERE ci.id = ?
+              AND ci.content_id = ?
+              AND ci.club_id = ?
+              AND c.club_id = ?
             """,
-            (image_id, row_id),
+            (
+                image_id,
+                row_id,
+                _active_club_id(db),
+                _active_club_id(db),
+            ),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -4086,16 +5852,14 @@ def delete_content_gallery_image(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         cursor = db.execute(
-            "DELETE FROM content_images WHERE id = ? AND content_id = ?",
-            (image_id, row_id),
+            """
+            DELETE FROM content_images
+            WHERE id = ? AND content_id = ? AND club_id = ?
+            """,
+            (image_id, row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Bild nicht gefunden")
@@ -4108,24 +5872,23 @@ def delete_all_content_images(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        club_id = _active_club_id(db)
         db.execute(
-            "DELETE FROM content_images WHERE content_id = ?",
-            (row_id,),
+            """
+            DELETE FROM content_images
+            WHERE content_id = ? AND club_id = ?
+            """,
+            (row_id, club_id),
         )
         db.execute(
             """
             UPDATE content_items
             SET image_data = NULL, image_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, club_id),
         )
         db.commit()
 
@@ -4146,26 +5909,19 @@ async def upload_content_image(
     )
 
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
+        club_id = _active_club_id(db)
         db.execute(
             """
             UPDATE content_items
             SET image_data = ?, image_mime = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, row_id),
+            (data, optimized_mime, row_id, club_id),
         )
         db.commit()
-        row = db.execute(
-            "SELECT * FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
+        row = _require_active_club_row(db, "content_items", row_id)
     return _serialize_content(row)
 
 
@@ -4176,8 +5932,12 @@ def get_content_image(
 ) -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT image_data, image_mime FROM content_items WHERE id = ?",
-            (row_id,),
+            """
+            SELECT image_data, image_mime
+            FROM content_items
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if row is None or row["image_data"] is None:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -4194,20 +5954,15 @@ def delete_content_image(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
-        existing = db.execute(
-            "SELECT section FROM content_items WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        existing = _require_active_club_row(db, "content_items", row_id)
         _require_content_permission(existing["section"], user)
         db.execute(
             """
             UPDATE content_items
             SET image_data = NULL, image_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         db.commit()
 
@@ -4221,8 +5976,13 @@ def reorder_news(
         return []
 
     with connect() as db:
+        club_id = _active_club_id(db)
         current_ids = {
-            int(row["id"]) for row in db.execute("SELECT id FROM news").fetchall()
+            int(row["id"])
+            for row in db.execute(
+                "SELECT id FROM news WHERE club_id = ?",
+                (club_id,),
+            ).fetchall()
         }
         if set(payload.item_ids) != current_ids:
             raise HTTPException(
@@ -4231,8 +5991,12 @@ def reorder_news(
             )
         for position, news_id in enumerate(payload.item_ids, start=1):
             db.execute(
-                "UPDATE news SET sort_order = ? WHERE id = ?",
-                (position, news_id),
+                """
+                UPDATE news
+                SET sort_order = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (position, news_id, club_id),
             )
         db.commit()
 
@@ -4301,14 +6065,17 @@ async def upload_news_image(
             """
             UPDATE news
             SET image_data = ?, image_mime = ?, image_url = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, row_id),
+            (data, optimized_mime, row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
         db.commit()
-        row = db.execute("SELECT * FROM news WHERE id = ?", (row_id,)).fetchone()
+        row = db.execute(
+            "SELECT * FROM news WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
+        ).fetchone()
     return _serialize_news(row)
 
 
@@ -4319,8 +6086,12 @@ def get_news_image(
 ) -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT image_data, image_mime FROM news WHERE id = ?",
-            (row_id,),
+            """
+            SELECT image_data, image_mime
+            FROM news
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
         ).fetchone()
 
     if row is None or row["image_data"] is None:
@@ -4343,9 +6114,9 @@ def delete_news_image(
             """
             UPDATE news
             SET image_data = NULL, image_mime = '', image_url = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Entry not found")
@@ -4364,15 +6135,21 @@ def get_events(
                 """
                 SELECT event_id, COUNT(*) AS count
                 FROM event_registrations
+                WHERE club_id = ?
                 GROUP BY event_id
-                """
+                """,
+                (_active_club_id(db),),
             ).fetchall()
         }
         mine = {
             row["event_id"]
             for row in db.execute(
-                "SELECT event_id FROM event_registrations WHERE user_id = ?",
-                (user["id"],),
+                """
+                SELECT event_id
+                FROM event_registrations
+                WHERE user_id = ? AND club_id = ?
+                """,
+                (user["id"], _active_club_id(db)),
             ).fetchall()
         }
     for item in items:
@@ -4424,7 +6201,11 @@ def get_event_registrations(
     _: dict[str, Any] = Depends(current_user),
 ) -> list[dict[str, Any]]:
     with connect() as db:
-        event = db.execute("SELECT id FROM events WHERE id = ?", (row_id,)).fetchone()
+        club_id = _active_club_id(db)
+        event = db.execute(
+            "SELECT id FROM events WHERE id = ? AND club_id = ?",
+            (row_id, club_id),
+        ).fetchone()
         if event is None:
             raise HTTPException(status_code=404, detail="Termin nicht gefunden")
         rows = db.execute(
@@ -4433,10 +6214,12 @@ def get_event_registrations(
             FROM event_registrations r
             JOIN users u ON u.id = r.user_id
             LEFT JOIN members m ON m.id = u.member_id
-            WHERE r.event_id = ? AND u.active = 1
+            WHERE r.event_id = ?
+              AND r.club_id = ?
+              AND u.active = 1
             ORDER BY name COLLATE NOCASE
             """,
-            (row_id,),
+            (row_id, club_id),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -4447,30 +6230,26 @@ def register_for_event(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
+        club_id = _active_club_id(db)
         event = db.execute(
-            "SELECT id, registration_enabled, registration_deadline FROM events WHERE id = ?",
-            (row_id,),
+            "SELECT id FROM events WHERE id = ? AND club_id = ?",
+            (row_id, club_id),
         ).fetchone()
         if event is None:
             raise HTTPException(status_code=404, detail="Termin nicht gefunden")
-        if not bool(event["registration_enabled"]):
-            raise HTTPException(status_code=409, detail="Für diesen Termin ist keine Anmeldung möglich")
-        deadline = str(event["registration_deadline"] or "").strip()
-        if deadline:
-            try:
-                deadline_value = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
-                if deadline_value.tzinfo is None:
-                    deadline_value = deadline_value.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) > deadline_value.astimezone(timezone.utc):
-                    raise HTTPException(status_code=409, detail="Der Anmeldeschluss ist abgelaufen")
-            except ValueError:
-                pass
         db.execute(
             """
-            INSERT OR IGNORE INTO event_registrations (event_id, user_id, created_at)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO event_registrations (
+                event_id, user_id, created_at, club_id
+            )
+            VALUES (?, ?, ?, ?)
             """,
-            (row_id, user["id"], datetime.now(timezone.utc).isoformat()),
+            (
+                row_id,
+                user["id"],
+                datetime.now(timezone.utc).isoformat(),
+                club_id,
+            ),
         )
         db.commit()
 
@@ -4481,9 +6260,19 @@ def unregister_from_event(
     user: dict[str, Any] = Depends(current_user),
 ) -> None:
     with connect() as db:
+        club_id = _active_club_id(db)
+        event = db.execute(
+            "SELECT id FROM events WHERE id = ? AND club_id = ?",
+            (row_id, club_id),
+        ).fetchone()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Termin nicht gefunden")
         db.execute(
-            "DELETE FROM event_registrations WHERE event_id = ? AND user_id = ?",
-            (row_id, user["id"]),
+            """
+            DELETE FROM event_registrations
+            WHERE event_id = ? AND user_id = ? AND club_id = ?
+            """,
+            (row_id, user["id"], club_id),
         )
         db.commit()
 
@@ -4494,7 +6283,11 @@ def delete_events(
     _: dict[str, Any] = Depends(require("can_events")),
 ) -> None:
     with connect() as db:
-        db.execute("DELETE FROM event_registrations WHERE event_id = ?", (row_id,))
+        club_id = _active_club_id(db)
+        db.execute(
+            "DELETE FROM event_registrations WHERE event_id = ? AND club_id = ?",
+            (row_id, club_id),
+        )
         db.commit()
     delete_row("events", row_id)
 
@@ -4508,8 +6301,10 @@ def get_member_filters(
             """
             SELECT id, label, active, sort_order
             FROM member_filters
+            WHERE club_id = ?
             ORDER BY sort_order ASC, label COLLATE NOCASE ASC, id ASC
-            """
+            """,
+            (_active_club_id(db),),
         ).fetchall()
     return [
         {
@@ -4529,27 +6324,39 @@ def post_member_filter(
 ) -> dict[str, Any]:
     with connect() as db:
         sort_order = db.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM member_filters"
+            """
+            SELECT COALESCE(MAX(sort_order), 0) + 1
+            FROM member_filters
+            WHERE club_id = ?
+            """,
+            (_active_club_id(db),),
         ).fetchone()[0]
         try:
             cursor = db.execute(
                 """
-                INSERT INTO member_filters (label, active, sort_order, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO member_filters (
+                    label, active, sort_order, created_at, club_id
+                )
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     payload.label.strip(),
                     1 if payload.active else 0,
                     sort_order,
                     datetime.now(timezone.utc).isoformat(),
+                    _active_club_id(db),
                 ),
             )
             db.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Filter existiert bereits")
         row = db.execute(
-            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
-            (cursor.lastrowid,),
+            """
+            SELECT id, label, active, sort_order
+            FROM member_filters
+            WHERE id = ? AND club_id = ?
+            """,
+            (cursor.lastrowid, _active_club_id(db)),
         ).fetchone()
     return {
         "id": int(row["id"]),
@@ -4565,13 +6372,24 @@ def reorder_member_filters(
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> list[dict[str, Any]]:
     with connect() as db:
-        ids = {int(row["id"]) for row in db.execute("SELECT id FROM member_filters")}
+        club_id = _active_club_id(db)
+        ids = {
+            int(row["id"])
+            for row in db.execute(
+                "SELECT id FROM member_filters WHERE club_id = ?",
+                (club_id,),
+            )
+        }
         if set(payload.item_ids) != ids:
             raise HTTPException(status_code=422, detail="Filterreihenfolge ist unvollständig")
         for position, filter_id in enumerate(payload.item_ids, start=1):
             db.execute(
-                "UPDATE member_filters SET sort_order = ? WHERE id = ?",
-                (position, filter_id),
+                """
+                UPDATE member_filters
+                SET sort_order = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (position, filter_id, club_id),
             )
         db.commit()
     return get_member_filters(_)
@@ -4586,8 +6404,17 @@ def put_member_filter(
     with connect() as db:
         try:
             cursor = db.execute(
-                "UPDATE member_filters SET label = ?, active = ? WHERE id = ?",
-                (payload.label.strip(), 1 if payload.active else 0, filter_id),
+                """
+                UPDATE member_filters
+                SET label = ?, active = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (
+                    payload.label.strip(),
+                    1 if payload.active else 0,
+                    filter_id,
+                    _active_club_id(db),
+                ),
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Filter nicht gefunden")
@@ -4595,8 +6422,12 @@ def put_member_filter(
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Filter existiert bereits")
         row = db.execute(
-            "SELECT id, label, active, sort_order FROM member_filters WHERE id = ?",
-            (filter_id,),
+            """
+            SELECT id, label, active, sort_order
+            FROM member_filters
+            WHERE id = ? AND club_id = ?
+            """,
+            (filter_id, _active_club_id(db)),
         ).fetchone()
     return {
         "id": int(row["id"]),
@@ -4612,8 +6443,18 @@ def delete_member_filter(
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> None:
     with connect() as db:
-        db.execute("DELETE FROM member_filter_links WHERE filter_id = ?", (filter_id,))
-        cursor = db.execute("DELETE FROM member_filters WHERE id = ?", (filter_id,))
+        club_id = _active_club_id(db)
+        db.execute(
+            """
+            DELETE FROM member_filter_links
+            WHERE filter_id = ? AND club_id = ?
+            """,
+            (filter_id, club_id),
+        )
+        cursor = db.execute(
+            "DELETE FROM member_filters WHERE id = ? AND club_id = ?",
+            (filter_id, club_id),
+        )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Filter nicht gefunden")
         db.commit()
@@ -4632,15 +6473,15 @@ def put_my_member(
     assignments = ", ".join(f"{column} = ?" for column in data)
     with connect() as db:
         cursor = db.execute(
-            f"UPDATE members SET {assignments} WHERE id = ?",
-            [*data.values(), member_id],
+            f"UPDATE members SET {assignments} WHERE id = ? AND club_id = ?",
+            [*data.values(), member_id, _active_club_id(db)],
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
         db.commit()
         row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (member_id,),
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (member_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_member(row)
 
@@ -4668,16 +6509,16 @@ async def upload_my_member_photo(
             """
             UPDATE members
             SET photo_data = ?, photo_mime = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, member_id),
+            (data, optimized_mime, member_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
         db.commit()
         row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (member_id,),
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (member_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_member(row)
 
@@ -4694,9 +6535,9 @@ def delete_my_member_photo(
             """
             UPDATE members
             SET photo_data = NULL, photo_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (member_id,),
+            (member_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
@@ -4710,14 +6551,6 @@ def get_members(
     return list_rows("members")
 
 
-@app.post("/api/members")
-def post_members(
-    payload: MemberPayload,
-    _: dict[str, object] = Depends(require("can_members")),
-) -> dict[str, object]:
-    return create_row("members", payload)
-
-
 @app.put("/api/members/order")
 def reorder_members(
     payload: ContentOrderPayload,
@@ -4727,30 +6560,87 @@ def reorder_members(
         return []
 
     with connect() as db:
+        club_id = _active_club_id(db)
+        placeholders = ",".join("?" for _ in payload.item_ids)
         rows = db.execute(
-            f"SELECT id FROM members WHERE id IN ({','.join('?' for _ in payload.item_ids)})",
-            payload.item_ids,
+            f"""
+            SELECT id
+            FROM members
+            WHERE id IN ({placeholders}) AND club_id = ?
+            """,
+            [*payload.item_ids, club_id],
         ).fetchall()
         if len(rows) != len(set(payload.item_ids)):
             raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist ungültig")
 
-        all_ids = [row["id"] for row in db.execute(
-            "SELECT id FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
-        ).fetchall()]
+        all_ids = [
+            row["id"]
+            for row in db.execute(
+                """
+                SELECT id
+                FROM members
+                WHERE club_id = ?
+                ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC
+                """,
+                (club_id,),
+            ).fetchall()
+        ]
         if set(all_ids) != set(payload.item_ids):
             raise HTTPException(status_code=422, detail="Mitgliederreihenfolge ist unvollständig")
 
         for position, member_id in enumerate(payload.item_ids, start=1):
             db.execute(
-                "UPDATE members SET sort_order = ? WHERE id = ?",
-                (position, member_id),
+                """
+                UPDATE members
+                SET sort_order = ?
+                WHERE id = ? AND club_id = ?
+                """,
+                (position, member_id, club_id),
             )
         db.commit()
         ordered = db.execute(
-            "SELECT * FROM members ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC"
+            """
+            SELECT *
+            FROM members
+            WHERE club_id = ?
+            ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC
+            """,
+            (club_id,),
         ).fetchall()
 
     return [_serialize_member(row) for row in ordered]
+
+
+@app.post("/api/members")
+def post_members(
+    payload: MemberPayload,
+    _: dict[str, Any] = Depends(require("can_members")),
+) -> dict[str, Any]:
+    item = create_row("members", payload)
+    with connect() as db:
+        club_id = _active_club_id(db)
+        max_order = db.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0)
+            FROM members
+            WHERE id != ? AND club_id = ?
+            """,
+            (item["id"], club_id),
+        ).fetchone()[0]
+        db.execute(
+            """
+            UPDATE members
+            SET sort_order = ?
+            WHERE id = ? AND club_id = ?
+            """,
+            (int(max_order or 0) + 1, item["id"], club_id),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (item["id"], club_id),
+        ).fetchone()
+    return _serialize_member(row)
 
 
 @app.put("/api/members/{row_id}")
@@ -4782,16 +6672,16 @@ async def upload_member_photo(
             """
             UPDATE members
             SET photo_data = ?, photo_mime = ?
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (data, optimized_mime, row_id),
+            (data, optimized_mime, row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
         db.commit()
         row = db.execute(
-            "SELECT * FROM members WHERE id = ?",
-            (row_id,),
+            "SELECT * FROM members WHERE id = ? AND club_id = ?",
+            (row_id, _active_club_id(db)),
         ).fetchone()
     return _serialize_member(row)
 
@@ -4803,8 +6693,12 @@ def get_member_photo(
 ) -> Response:
     with connect() as db:
         row = db.execute(
-            "SELECT photo_data, photo_mime FROM members WHERE id = ?",
-            (row_id,),
+            """
+            SELECT photo_data, photo_mime
+            FROM members
+            WHERE id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
         ).fetchone()
     if row is None or row["photo_data"] is None:
         raise HTTPException(status_code=404, detail="Photo not found")
@@ -4826,9 +6720,9 @@ def delete_member_photo(
             """
             UPDATE members
             SET photo_data = NULL, photo_mime = ''
-            WHERE id = ?
+            WHERE id = ? AND club_id = ?
             """,
-            (row_id,),
+            (row_id, _active_club_id(db)),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Mitglied nicht gefunden")
@@ -4841,20 +6735,12 @@ def delete_members(
     _: dict[str, Any] = Depends(require("can_members")),
 ) -> None:
     with connect() as db:
-        db.execute("DELETE FROM member_filter_links WHERE member_id = ?", (row_id,))
+        db.execute(
+            """
+            DELETE FROM member_filter_links
+            WHERE member_id = ? AND club_id = ?
+            """,
+            (row_id, _active_club_id(db)),
+        )
         db.commit()
     delete_row("members", row_id)
-
-# Phase 4/5 extensions.
-from .phase45 import install_phase45
-
-install_phase45(
-    app,
-    connect=connect,
-    current_user=current_user,
-    require=require,
-    optimize_image=_optimize_image,
-    instance_id=INSTANCE_ID,
-    is_production=IS_PRODUCTION,
-)
-

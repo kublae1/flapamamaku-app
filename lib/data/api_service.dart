@@ -30,10 +30,6 @@ class ApiService {
     'CLUB_INSTANCE_ID',
     defaultValue: 'flapamamaku',
   );
-  static const allowServerChange = bool.fromEnvironment(
-    'ALLOW_SERVER_CHANGE',
-    defaultValue: true,
-  );
 
   String _baseUrl;
   String get baseUrl => _baseUrl;
@@ -60,8 +56,6 @@ class ApiService {
   }
 
   Map<String, String> get authHeaders => {
-        if (!allowServerChange && expectedInstanceId.trim().isNotEmpty)
-          'X-Club-Instance': expectedInstanceId.trim().toLowerCase(),
         if (hasToken) 'Authorization': 'Bearer $_token',
       };
 
@@ -77,7 +71,7 @@ class ApiService {
     final response = await http
         .post(
           _uri('/api/auth/login'),
-          headers: _jsonHeaders,
+          headers: const {'Content-Type': 'application/json'},
           body: jsonEncode({
             'username': username,
             'password': password,
@@ -94,6 +88,29 @@ class ApiService {
   Future<Map<String, dynamic>> fetchMe() async {
     final response = await http
         .get(_uri('/api/auth/me'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> fetchAccessibleClubs() async {
+    final response = await http
+        .get(_uri('/api/clubs/accessible'), headers: authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final values = jsonDecode(response.body) as List<dynamic>;
+    return values
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> switchClub(int clubId) async {
+    final response = await http
+        .post(
+          _uri('/api/auth/club'),
+          headers: _jsonHeaders,
+          body: jsonEncode({'club_id': clubId}),
+        )
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     return jsonDecode(response.body) as Map<String, dynamic>;
@@ -134,9 +151,6 @@ class ApiService {
     final imageUrl = json['image_url']?.toString() ?? '';
     json['image_url'] = absolute(imageUrl);
 
-    final logoUrl = json['logo_url']?.toString() ?? '';
-    json['logo_url'] = absolute(logoUrl);
-
     final documentUrl = json['document_url']?.toString() ?? '';
     json['document_url'] = absolute(documentUrl);
     return json;
@@ -157,7 +171,7 @@ class ApiService {
         statusCode: 409,
       );
     }
-    if (!allowServerChange && expected.isNotEmpty && serverInstanceId != expected) {
+    if (expected.isNotEmpty && serverInstanceId != expected) {
       throw ApiException(
         'Dieser Server gehört zu einem anderen Verein '
         '(erwartet: $expected, gefunden: $serverInstanceId).',
@@ -288,28 +302,10 @@ class ApiService {
     _ensureSuccess(response);
   }
 
-  Future<List<ContentItem>> fetchSujets({String scope = 'all'}) async {
-    final response = await http
-        .get(
-          _uri('/api/sujets?scope=${Uri.encodeQueryComponent(scope)}'),
-          headers: authHeaders,
-        )
-        .timeout(const Duration(seconds: 8));
-    _ensureSuccess(response);
-    final values = jsonDecode(response.body) as List<dynamic>;
-    return values.map((value) {
-      final json = _prepareContentJson(
-        Map<String, dynamic>.from(value as Map<String, dynamic>),
-      );
-      return ContentItem.fromJson(json);
-    }).toList();
-  }
-
   Future<List<ContentItem>> fetchContent({String? section}) async {
-    if (section == 'polls') return fetchPolls();
-    if (section == 'sujet') return fetchSujets(scope: 'current');
-    if (section == 'archive') return fetchSujets(scope: 'archive');
-
+    if (section == 'polls') {
+      return fetchPolls();
+    }
     final suffix = section == null || section.isEmpty
         ? ''
         : '?section=${Uri.encodeQueryComponent(section)}';
@@ -318,19 +314,15 @@ class ApiService {
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final values = jsonDecode(response.body) as List<dynamic>;
-    final generic = values
+    return values
         .map((value) {
           final json = _prepareContentJson(
             Map<String, dynamic>.from(value as Map<String, dynamic>),
           );
           return ContentItem.fromJson(json);
         })
-        .where((item) => item.section != 'polls' &&
-            item.section != 'sujet' && item.section != 'archive')
+        .where((item) => section != null || item.section != 'polls')
         .toList();
-    if (section != null) return generic;
-    final sujets = await fetchSujets();
-    return [...generic, ...sujets];
   }
 
   Future<ContentItem> saveContent(ContentItem item) async {
@@ -545,13 +537,6 @@ class ApiService {
       'title': item.title,
       'location': item.location,
       'time': item.time,
-      'end_time': item.endTime,
-      'meeting_point': item.meetingPoint,
-      'description': item.description,
-      'responsible': item.responsible,
-      'registration_deadline': item.registrationDeadline,
-      'registration_enabled': item.registrationEnabled,
-      'document_url': item.documentUrl,
     });
     final response = item.id == null
         ? await http

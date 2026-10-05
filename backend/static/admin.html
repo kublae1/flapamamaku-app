@@ -441,6 +441,79 @@
   </section>
 
   <div id="admin-view" class="hidden">
+    <div class="card" id="tenant-context-card" style="grid-column:1/-1;margin-bottom:0">
+      <div class="preview-heading" style="align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:12px;min-width:0">
+          <img id="tenant-context-logo" alt="" style="width:54px;height:54px;object-fit:contain;border-radius:12px;background:#24272b;display:none">
+          <div>
+            <div class="meta">Aktueller Mandant</div>
+            <h2 id="tenant-context-name" style="margin:2px 0">Verein wird geladen …</h2>
+            <div class="meta" id="tenant-context-role"></div>
+          </div>
+        </div>
+        <div id="tenant-switch-wrap" class="hidden" style="margin-left:auto;min-width:260px">
+          <label for="tenant-switch">Verein wechseln</label>
+          <select id="tenant-switch"></select>
+          <button type="button" id="club-create-open" style="margin-top:8px;width:100%">+ Neuer Verein</button>
+        </div>
+      </div>
+      <div class="meta" id="tenant-context-features" style="margin-top:10px">Module werden geladen …</div>
+    </div>
+
+    <div id="club-create-card" class="card hidden" style="grid-column:1/-1;margin-bottom:0">
+      <div class="preview-heading">
+        <div>
+          <div class="meta">White Label</div>
+          <h2 style="margin:2px 0">Neuen Verein vollständig einrichten</h2>
+        </div>
+        <button type="button" id="club-create-close">Schliessen</button>
+      </div>
+      <form id="club-create-form" class="grid" style="margin-top:14px">
+        <div>
+          <label>Vereinsname</label>
+          <input name="name" maxlength="120" required>
+          <label>Slug</label>
+          <input name="slug" maxlength="80" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="mein-verein" required>
+          <label>Kurzname</label>
+          <input name="short_name" maxlength="80">
+          <label>Untertitel</label>
+          <input name="subtitle" maxlength="120">
+          <label>Hauptfarbe</label>
+          <input name="primary_color" type="color" value="#8A101B">
+          <label>Nebenfarbe</label>
+          <input name="secondary_color" type="color" value="#FFFFFF">
+          <label>Vereinslogo</label>
+          <input name="logo_file" type="file" accept="image/jpeg,image/png,image/webp">
+        </div>
+        <div>
+          <h3>Module</h3>
+          <p class="meta">Die Auswahl gilt nur für den neuen Verein.</p>
+          <div id="club-create-features" class="permission-grid">
+            <label><input type="checkbox" data-key="news" data-label="News" checked> News</label>
+            <label><input type="checkbox" data-key="events" data-label="Termine" checked> Termine</label>
+            <label><input type="checkbox" data-key="members" data-label="Mitglieder" checked> Mitglieder</label>
+            <label><input type="checkbox" data-key="documents" data-label="Dokumente" checked> Dokumente</label>
+            <label><input type="checkbox" data-key="gallery" data-label="Galerie" checked> Galerie</label>
+            <label><input type="checkbox" data-key="photos" data-label="Fotoalben" checked> Fotoalben</label>
+            <label><input type="checkbox" data-key="sujet_next" data-label="Sujet nächstes Jahr" checked> Sujet nächstes Jahr</label>
+            <label><input type="checkbox" data-key="sujet_archive" data-label="Vergangene Sujet" checked> Vergangene Sujet</label>
+            <label><input type="checkbox" data-key="push_notifications" data-label="Push-Nachrichten" checked> Push</label>
+            <label><input type="checkbox" data-key="calendar" data-label="Kalender" checked> Kalender</label>
+            <label><input type="checkbox" data-key="participant_lists" data-label="Teilnehmerlisten" checked> Teilnehmerlisten</label>
+            <label><input type="checkbox" data-key="polls" data-label="Umfragen" checked> Umfragen</label>
+            <label><input type="checkbox" data-key="links" data-label="Links" checked> Links</label>
+          </div>
+          <h3 style="margin-top:18px">Vereinsadmin</h3>
+          <label>Benutzername</label>
+          <input name="admin_username" maxlength="120" required>
+          <label>Passwort</label>
+          <input name="admin_password" type="password" minlength="6" maxlength="200" required>
+          <p class="meta">Der Vereinsadmin wird direkt dem neu angelegten Verein zugeordnet.</p>
+          <p><button class="primary" type="submit">Verein anlegen und einrichten</button></p>
+          <p id="club-create-status" class="meta"></p>
+        </div>
+      </form>
+    </div>
     <nav>
       <button class="active" data-panel="news" data-permission="can_news">News</button>
       <button data-panel="events" data-permission="can_events">Termine</button>
@@ -448,6 +521,7 @@
       <button data-panel="users" data-permission="can_manage_users">Benutzer & Rechte</button>
       <button data-panel="content" id="content-nav">Medien & Inhalte</button>
       <button data-panel="push" id="push-nav" data-permission="can_manage_users">Push</button>
+      <button data-panel="billing" id="billing-nav">Vereinsabrechnung</button>
       <button data-panel="system" id="system-nav" data-permission="can_manage_settings">Verein & System</button>
       <button id="logout-button">Abmelden</button>
     </nav>
@@ -482,14 +556,7 @@
           <input name="day" type="hidden"><input name="month" type="hidden">
           <label>Titel</label><input name="title" required>
           <label>Ort</label><input name="location">
-          <label>Beginn</label><input name="time">
-          <label>Ende (optional)</label><input name="end_time">
-          <label>Treffpunkt</label><input name="meeting_point">
-          <label>Beschreibung</label><textarea name="description"></textarea>
-          <label>Verantwortliche Person</label><input name="responsible">
-          <label>Anmeldeschluss</label><input name="registration_deadline" type="datetime-local">
-          <label style="display:flex;gap:8px;align-items:center"><input name="registration_enabled" type="checkbox" checked> Anmeldung möglich</label>
-          <label>Dokument-Link</label><input name="document_url" type="url" placeholder="https://...">
+          <label>Zeit</label><input name="time">
           <p><button class="primary" type="submit">Speichern</button></p>
         </form>
         <div class="card"><h2>Termine</h2><div id="events-list"></div></div>
@@ -845,20 +912,6 @@
             <option value="links">Links</option>
             <option value="whatsapp">WhatsApp-Gruppe</option>
           </select>
-          <div id="sujet-meta-wrap" class="hidden">
-            <label>Jahr</label>
-            <input name="sujet_year" type="number" min="1900" max="2200" inputmode="numeric">
-            <label>Motto</label>
-            <input name="sujet_motto" maxlength="300" placeholder="Jahresmotto">
-            <label>Logo</label>
-            <input name="sujet_logo_file" type="file" accept="image/*">
-            <p id="sujet-logo-current" class="meta"></p>
-            <label style="display:flex;align-items:center;gap:8px">
-              <input name="sujet_is_current" type="checkbox">
-              Aktuelles Sujet (erscheint unter «Sujet»)
-            </label>
-            <p class="meta">Pro Jahr ist genau ein Sujet möglich. Ein aktuelles Sujet wird automatisch aus dem Archiv herausgenommen.</p>
-          </div>
           <label>Titel</label><input name="title" required>
           <label>Text / Beschreibung</label><textarea name="text"></textarea>
           <label>Link (optional)</label><input name="link_url" placeholder="https://...">
@@ -986,6 +1039,55 @@
       </div>
     </section>
 
+    <section id="billing" class="panel">
+      <div class="workspace-title">
+        <div>
+          <h2>Vereinsabrechnung</h2>
+          <p class="meta">Nur für Super-Admins. Rechnungen, Zahlungssperren und Wiederfreigaben gelten auf Vereinsebene.</p>
+        </div>
+        <button type="button" id="billing-run" class="primary">Rechnungslauf jetzt ausführen</button>
+      </div>
+      <div class="grid">
+        <form class="card" id="billing-settings-form">
+          <h2>Abrechnung einstellen</h2>
+          <label>Verein</label>
+          <select name="club_id" id="billing-club-select"></select>
+          <label>Rechnungs-E-Mail</label>
+          <input name="billing_email" type="email" maxlength="320">
+          <label>Betrag pro Periode in CHF</label>
+          <input name="amount_chf" type="number" min="0" step="0.05" value="0">
+          <label>Abrechnungsintervall in Monaten</label>
+          <input name="interval_months" type="number" min="1" max="24" value="12">
+          <label>Zahlungsziel in Tagen</label>
+          <input name="due_days" type="number" min="1" max="90" value="30">
+          <label>Kulanzfrist nach Fälligkeit in Tagen</label>
+          <input name="grace_days" type="number" min="0" max="365" value="0">
+          <label>Nächstes Rechnungsdatum</label>
+          <input name="next_invoice_date" type="date">
+          <label style="display:flex;align-items:center;gap:8px">
+            <input name="auto_suspend" type="checkbox" checked>
+            Verein bei überfälliger Rechnung automatisch sperren
+          </label>
+          <p><button class="primary" type="submit">Abrechnung speichern</button></p>
+          <div class="actions">
+            <button type="button" id="billing-suspend">Verein sperren</button>
+            <button type="button" id="billing-reactivate">Verein wieder freigeben</button>
+          </div>
+          <p id="billing-settings-status" class="meta"></p>
+        </form>
+        <div>
+          <div class="card">
+            <h2>Vereine</h2>
+            <div id="billing-club-list"></div>
+          </div>
+          <div class="card">
+            <h2>Rechnungen des gewählten Vereins</h2>
+            <div id="billing-invoice-list"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="system" class="panel">
       <div id="onboarding-card" class="card hidden" style="margin-bottom:16px">
         <h2>Verein jetzt einrichten</h2>
@@ -1018,14 +1120,22 @@
             <h2>Verein & Branding</h2>
             <span class="meta">Vorbereitung für White Label</span>
           </div>
-          <label>App-Name</label>
+          <label>Vereinsname</label>
           <input name="app_name" maxlength="80" required>
+          <label>Kurzname</label>
+          <input name="short_name" maxlength="80">
           <label>Untertitel</label>
           <input name="app_subtitle" maxlength="120">
+          <label>App-Titel</label>
+          <input name="app_title" maxlength="120">
           <label>Hauptfarbe</label>
           <input name="primary_color" type="color" value="#8A101B">
+          <label>Nebenfarbe</label>
+          <input name="secondary_color" type="color" value="#FFFFFF">
           <label>Vereinsbeschreibung</label>
           <textarea name="club_description" maxlength="4000" placeholder="Kurze Beschreibung des Vereins"></textarea>
+          <label>Begrüssungstext</label>
+          <textarea name="welcome_text" maxlength="2000"></textarea>
           <label>Webseite</label>
           <input name="website_url" maxlength="500" placeholder="https://...">
           <label>Kontakt E-Mail</label>
@@ -1033,27 +1143,28 @@
           <label>Kontakt Telefon</label>
           <input name="contact_phone" maxlength="80">
           <label>Vereinsadresse</label>
-          <textarea name="club_address" maxlength="500" placeholder="Strasse, PLZ Ort"></textarea>
-          <h3 style="margin-top:22px">Inhaltsmodule</h3>
-          <p class="meta">Bereiche können pro Verein ein- oder ausgeblendet und umbenannt werden.</p>
+          <textarea name="club_address" maxlength="500" placeholder="Strasse / Adresse"></textarea>
+          <label>Ort</label>
+          <input name="city" maxlength="160">
+          <label>Land</label>
+          <input name="country" maxlength="120">
 
-          <label><input name="show_sujet" type="checkbox" checked> Bereich anzeigen</label>
-          <input name="label_sujet" maxlength="80" value="Sujet nächstes Jahr">
+          <h3 style="margin-top:22px">Module dieses Vereins</h3>
+          <p class="meta">Deaktivierte Module sind in der App nicht sichtbar und werden serverseitig gesperrt.</p>
+          <div id="club-feature-list" class="permission-grid"></div>
 
-          <label><input name="show_archive" type="checkbox" checked> Bereich anzeigen</label>
-          <input name="label_archive" maxlength="80" value="Vergangene Sujet">
-
-          <label><input name="show_photos" type="checkbox" checked> Bereich anzeigen</label>
-          <input name="label_photos" maxlength="80" value="Fotoalben">
-
-          <label><input name="show_documents" type="checkbox" checked> Bereich anzeigen</label>
-          <input name="label_documents" maxlength="80" value="Dokumente">
-
-          <label><input name="show_polls" type="checkbox" checked> Bereich anzeigen</label>
-          <input name="label_polls" maxlength="80" value="Umfragen">
-
-          <label><input name="show_links" type="checkbox" checked> Bereich anzeigen</label>
-          <input name="label_links" maxlength="80" value="Links">
+          <input name="show_sujet" type="checkbox" hidden>
+          <input name="label_sujet" type="hidden">
+          <input name="show_archive" type="checkbox" hidden>
+          <input name="label_archive" type="hidden">
+          <input name="show_photos" type="checkbox" hidden>
+          <input name="label_photos" type="hidden">
+          <input name="show_documents" type="checkbox" hidden>
+          <input name="label_documents" type="hidden">
+          <input name="show_polls" type="checkbox" hidden>
+          <input name="label_polls" type="hidden">
+          <input name="show_links" type="checkbox" hidden>
+          <input name="label_links" type="hidden">
 
           <label>Vereinslogo</label>
           <input name="logo_file" type="file" accept="image/jpeg,image/png,image/webp">
@@ -1109,13 +1220,15 @@
 <script>
 let token = sessionStorage.getItem("flapamamaku_token") || "";
 let apiVersion = "";
-let clubInstanceId = "";
 let currentUser = null;
 let bootstrapRequired = false;
 let justBootstrapped = false;
 let userAccounts = [];
 let memberFilters = [];
 let roleDefinitions = [];
+let accessibleClubs = [];
+let activeClubConfig = null;
+let billingClubs = [];
 
 const permissionFields = [
   "can_news","can_events","can_members","can_documents","can_photos",
@@ -1150,7 +1263,7 @@ const contentLabels = {
 
 const resources = {
   news: ["title", "text", "date", "image_url"],
-  events: ["event_date", "day", "month", "title", "location", "time", "end_time", "meeting_point", "description", "responsible", "registration_deadline", "document_url"],
+  events: ["event_date", "day", "month", "title", "location", "time"],
   members: [
     "name", "role", "since", "birth_date", "status", "member_group", "engagement", "partner_name",
     "phone_mobile", "phone_private", "phone_work",
@@ -1162,35 +1275,459 @@ async function api(path, options = {}) {
   const headers = options.body instanceof FormData
     ? {}
     : {"Content-Type": "application/json"};
-  if (clubInstanceId) headers["X-Club-Instance"] = clubInstanceId;
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}});
-  if (!response.ok) {
-  const raw = await response.text();
-  let detail = "";
-  try {
-    const parsed = JSON.parse(raw);
-    detail = String(parsed?.detail || "").trim();
-  } catch (_) {}
-  const defaults = {
-    400: "Die Eingabe konnte nicht verarbeitet werden.",
-    401: "Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.",
-    403: "Für diese Aktion fehlt die Berechtigung.",
-    404: "Der gewünschte Inhalt wurde nicht gefunden.",
-    409: "Die Änderung steht im Konflikt mit bereits vorhandenen Daten.",
-    413: "Die Datei ist zu gross.",
-    422: "Bitte die eingegebenen Daten prüfen.",
-    429: "Zu viele Anfragen. Bitte kurz warten und nochmals versuchen."
-  };
-  const message = detail || defaults[response.status] ||
-    (response.status >= 500
-      ? "Der Server hat momentan ein Problem. Bitte später nochmals versuchen."
-      : "Die Anfrage konnte nicht abgeschlossen werden.");
-  throw new Error(message);
-}
+  if (!response.ok) throw new Error(await response.text());
   if (response.status === 204) return null;
   return response.json();
 }
+
+async function loadTenantContext() {
+  if (!currentUser) return;
+
+  const [clubs, config] = await Promise.all([
+    api("/api/clubs/accessible"),
+    api("/api/app-config"),
+  ]);
+  accessibleClubs = clubs || [];
+  activeClubConfig = config || {};
+
+  const name = activeClubConfig.app_name || "Vereins-App";
+  document.getElementById("tenant-context-name").textContent = name;
+  document.getElementById("tenant-context-role").textContent =
+    currentUser.is_super_admin
+      ? "Rolle: Super-Admin"
+      : `Rolle: ${currentUser.club_role === "club_admin" ? "Vereinsadmin" : "Mitglied"}`;
+
+  const logo = document.getElementById("tenant-context-logo");
+  if (activeClubConfig.logo_url) {
+    logo.src = activeClubConfig.logo_url + "?v=" + Date.now();
+    logo.style.display = "block";
+  } else {
+    logo.removeAttribute("src");
+    logo.style.display = "none";
+  }
+
+  const enabledFeatures = Object.entries(activeClubConfig.features || {})
+    .filter(([, value]) => value?.enabled !== false)
+    .map(([, value]) => value?.label || "")
+    .filter(Boolean);
+  document.getElementById("tenant-context-features").textContent =
+    enabledFeatures.length
+      ? "Aktive Module: " + enabledFeatures.join(", ")
+      : "Keine Module aktiviert";
+
+  const wrap = document.getElementById("tenant-switch-wrap");
+  const select = document.getElementById("tenant-switch");
+  wrap.classList.toggle("hidden", !currentUser.is_super_admin);
+  document.getElementById("club-create-card")
+    ?.classList.toggle("hidden", !currentUser.is_super_admin || document.getElementById("club-create-card")?.dataset.open !== "1");
+  select.innerHTML = "";
+  accessibleClubs.forEach(club => {
+    const option = document.createElement("option");
+    option.value = club.id;
+    option.textContent = club.name || club.slug;
+    option.selected = !!club.current;
+    select.appendChild(option);
+  });
+
+  const featureVisibility = {
+    news: activeClubConfig.show_news !== false,
+    events: activeClubConfig.show_events !== false,
+    members: activeClubConfig.show_members !== false,
+    push: activeClubConfig.show_push_notifications !== false,
+  };
+  document.querySelector('nav button[data-panel="news"]')
+    ?.classList.toggle("hidden", !featureVisibility.news || !currentUser.can_news);
+  document.querySelector('nav button[data-panel="events"]')
+    ?.classList.toggle("hidden", !featureVisibility.events || !currentUser.can_events);
+  document.getElementById("members-nav")
+    ?.classList.toggle(
+      "hidden",
+      !featureVisibility.members ||
+      !(currentUser.can_members || currentUser.can_manage_users),
+    );
+  document.getElementById("push-nav")
+    ?.classList.toggle(
+      "hidden",
+      !featureVisibility.push || !currentUser.can_manage_users,
+    );
+}
+
+document.getElementById("club-create-open").addEventListener("click", () => {
+  if (!currentUser?.is_super_admin) return;
+  const card = document.getElementById("club-create-card");
+  card.dataset.open = "1";
+  card.classList.remove("hidden");
+  card.scrollIntoView({behavior: "smooth", block: "start"});
+});
+
+document.getElementById("club-create-close").addEventListener("click", () => {
+  const card = document.getElementById("club-create-card");
+  card.dataset.open = "0";
+  card.classList.add("hidden");
+});
+
+function neutralClubSlug(value) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+document.querySelector('#club-create-form input[name="name"]').addEventListener("input", event => {
+  const form = document.getElementById("club-create-form");
+  const slug = form.elements.slug;
+  if (!slug.dataset.manual || slug.dataset.manual === "0") {
+    slug.value = neutralClubSlug(event.currentTarget.value);
+  }
+});
+
+document.querySelector('#club-create-form input[name="slug"]').addEventListener("input", event => {
+  event.currentTarget.dataset.manual = "1";
+});
+
+document.getElementById("club-create-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser?.is_super_admin) return;
+
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const status = document.getElementById("club-create-status");
+  button.disabled = true;
+  status.textContent = "Verein wird angelegt …";
+
+  try {
+    const name = form.elements.name.value.trim();
+    const slug = form.elements.slug.value.trim().toLowerCase();
+    const created = await api("/api/clubs", {
+      method: "POST",
+      body: JSON.stringify({
+        slug,
+        name,
+        short_name: form.elements.short_name.value.trim() || name,
+        subtitle: form.elements.subtitle.value.trim(),
+        primary_color: form.elements.primary_color.value.toUpperCase(),
+        secondary_color: form.elements.secondary_color.value.toUpperCase(),
+        description: "",
+        website: "",
+        email: "",
+        phone: "",
+        address: "",
+        city: "",
+        country: "",
+        app_title: name,
+        welcome_text: "",
+      }),
+    });
+
+    status.textContent = "Verein angelegt. Mandant wird eingerichtet …";
+    await api("/api/auth/club", {
+      method: "POST",
+      body: JSON.stringify({club_id: Number(created.id)}),
+    });
+    currentUser = await api("/api/auth/me");
+
+    const features = {};
+    const labels = {};
+    document.querySelectorAll("#club-create-features [data-key]").forEach(input => {
+      features[input.dataset.key] = input.checked;
+      labels[input.dataset.key] = input.dataset.label || input.dataset.key;
+    });
+    await api("/api/app-config/features", {
+      method: "PUT",
+      body: JSON.stringify({features, labels}),
+    });
+
+    const logoFile = form.elements.logo_file.files?.[0];
+    if (logoFile) {
+      status.textContent = "Logo wird gespeichert …";
+      const upload = new FormData();
+      upload.append("logo", logoFile);
+      await api("/api/app-config/logo", {method: "POST", body: upload});
+    }
+
+    status.textContent = "Vereinsadmin wird erstellt …";
+    await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username: form.elements.admin_username.value.trim(),
+        password: form.elements.admin_password.value,
+        active: true,
+        role_key: "admin",
+        permission_overrides: {},
+      }),
+    });
+
+    status.textContent = "Verein ist einsatzbereit.";
+    alert("Der neue Verein wurde vollständig eingerichtet.");
+    window.location.reload();
+  } catch (error) {
+    status.textContent = "Einrichtung konnte nicht vollständig abgeschlossen werden.";
+    alert("Der neue Verein konnte nicht vollständig eingerichtet werden.");
+    console.error(error);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("tenant-switch").addEventListener("change", async event => {
+  if (!currentUser?.is_super_admin) return;
+  const clubId = Number(event.currentTarget.value || 0);
+  if (!clubId || clubId === Number(currentUser.current_club_id || 0)) return;
+  event.currentTarget.disabled = true;
+  try {
+    await api("/api/auth/club", {
+      method: "POST",
+      body: JSON.stringify({club_id: clubId}),
+    });
+    currentUser = await api("/api/auth/me");
+    window.location.reload();
+  } catch (error) {
+    alert("Verein konnte nicht gewechselt werden.");
+    console.error(error);
+    event.currentTarget.disabled = false;
+  }
+});
+
+
+function formatCHF(rappen) {
+  return (Number(rappen || 0) / 100).toLocaleString("de-CH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }) + " CHF";
+}
+
+function selectedBillingClub() {
+  const id = Number(document.getElementById("billing-club-select")?.value || 0);
+  return billingClubs.find(club => Number(club.id) === id) || null;
+}
+
+function fillBillingSettings(club) {
+  const form = document.getElementById("billing-settings-form");
+  if (!form || !club) return;
+  form.elements.billing_email.value = club.billing_email || "";
+  form.elements.amount_chf.value = (Number(club.billing_amount_rappen || 0) / 100).toFixed(2);
+  form.elements.interval_months.value = Number(club.billing_interval_months || 12);
+  form.elements.due_days.value = Number(club.billing_due_days || 30);
+  form.elements.grace_days.value = Number(club.billing_grace_days || 0);
+  form.elements.next_invoice_date.value = club.billing_next_invoice_date || "";
+  form.elements.auto_suspend.checked = club.billing_auto_suspend !== false;
+  document.getElementById("billing-settings-status").textContent =
+    club.billing_status === "suspended"
+      ? "Status: GESPERRT – " + (club.billing_suspension_reason || "Ausstehende Zahlung")
+      : "Status: aktiv";
+}
+
+async function loadBillingInvoices(clubId) {
+  const box = document.getElementById("billing-invoice-list");
+  if (!box || !clubId) return;
+  box.innerHTML = '<p class="meta">Rechnungen werden geladen …</p>';
+  try {
+    const invoices = await api(`/api/operator/billing/clubs/${clubId}/invoices`);
+    if (!invoices.length) {
+      box.innerHTML = '<p class="meta">Noch keine Rechnungen vorhanden.</p>';
+      return;
+    }
+    box.innerHTML = "";
+    invoices.forEach(invoice => {
+      const row = document.createElement("div");
+      row.className = "entry";
+      row.innerHTML = `
+        <h3>${invoice.invoice_number}</h3>
+        <div class="meta">
+          Periode ${invoice.period_start} bis ${invoice.period_end}<br>
+          Rechnungsdatum ${invoice.issue_date} · Fällig ${invoice.due_date}<br>
+          Betrag ${formatCHF(invoice.amount_rappen)} · Status:
+          <strong>${invoice.status === "paid" ? "bezahlt" : "offen"}</strong>
+        </div>
+        <div class="actions">
+          <button type="button" data-billing-pdf="${invoice.id}" data-billing-number="${invoice.invoice_number}">PDF erzeugen</button>
+          ${invoice.status === "open" ? `<button type="button" data-billing-paid="${invoice.id}">Als bezahlt verbuchen</button>` : ""}
+        </div>
+      `;
+      box.appendChild(row);
+    });
+    box.querySelectorAll("[data-billing-pdf]").forEach(button => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const headers = token ? {Authorization: `Bearer ${token}`} : {};
+          const response = await fetch(`/api/operator/billing/invoices/${button.dataset.billingPdf}/pdf`, {headers});
+          if (!response.ok) throw new Error(await response.text());
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `vereinsrechnung-${button.dataset.billingNumber || button.dataset.billingPdf}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 30000);
+        } catch (error) {
+          alert("PDF-Rechnung konnte nicht erzeugt werden.");
+          console.error(error);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+    box.querySelectorAll("[data-billing-paid]").forEach(button => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api(`/api/operator/billing/invoices/${button.dataset.billingPaid}/paid`, {
+            method: "POST",
+          });
+          await loadBillingAdmin();
+        } catch (error) {
+          alert("Zahlung konnte nicht verbucht werden.");
+          console.error(error);
+          button.disabled = false;
+        }
+      });
+    });
+  } catch (error) {
+    box.innerHTML = '<p class="error">Rechnungen konnten nicht geladen werden.</p>';
+    console.error(error);
+  }
+}
+
+async function loadBillingAdmin() {
+  if (!currentUser?.is_super_admin) return;
+  const list = document.getElementById("billing-club-list");
+  const select = document.getElementById("billing-club-select");
+  if (!list || !select) return;
+  list.innerHTML = '<p class="meta">Vereine werden geladen …</p>';
+  try {
+    const previous = Number(select.value || currentUser.current_club_id || 0);
+    billingClubs = await api("/api/operator/billing/clubs");
+    select.innerHTML = "";
+    billingClubs.forEach(club => {
+      const option = document.createElement("option");
+      option.value = club.id;
+      option.textContent = club.name || club.slug;
+      select.appendChild(option);
+    });
+    const chosen = billingClubs.some(club => Number(club.id) === previous)
+      ? previous
+      : Number(billingClubs[0]?.id || 0);
+    if (chosen) select.value = String(chosen);
+
+    list.innerHTML = "";
+    billingClubs.forEach(club => {
+      const row = document.createElement("div");
+      row.className = "entry";
+      const suspended = club.billing_status === "suspended";
+      row.innerHTML = `
+        <h3>${club.name || club.slug}</h3>
+        <div class="meta">
+          Status: <strong>${suspended ? "GESPERRT" : "aktiv"}</strong>
+          ${suspended && club.billing_suspension_reason ? " · " + club.billing_suspension_reason : ""}<br>
+          Periodenbetrag: ${formatCHF(club.billing_amount_rappen)} ·
+          Offen: ${formatCHF(club.open_amount_rappen)} in ${club.open_invoice_count || 0} Rechnung(en)<br>
+          Zahlungsziel: ${club.billing_due_days || 30} Tage · Kulanz: ${club.billing_grace_days || 0} Tage<br>
+          Nächste Rechnung: ${club.billing_next_invoice_date || "nicht eingerichtet"}
+        </div>
+      `;
+      list.appendChild(row);
+    });
+
+    const club = selectedBillingClub();
+    fillBillingSettings(club);
+    if (club) await loadBillingInvoices(Number(club.id));
+  } catch (error) {
+    list.innerHTML = '<p class="error">Vereinsabrechnung konnte nicht geladen werden.</p>';
+    console.error(error);
+  }
+}
+
+document.getElementById("billing-nav")?.addEventListener("click", loadBillingAdmin);
+
+document.getElementById("billing-club-select")?.addEventListener("change", async () => {
+  const club = selectedBillingClub();
+  fillBillingSettings(club);
+  if (club) await loadBillingInvoices(Number(club.id));
+});
+
+document.getElementById("billing-settings-form")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser?.is_super_admin) return;
+  const form = event.currentTarget;
+  const clubId = Number(form.elements.club_id.value || 0);
+  if (!clubId) return;
+  const amountRappen = Math.round(Number(form.elements.amount_chf.value || 0) * 100);
+  try {
+    await api(`/api/operator/billing/clubs/${clubId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        billing_email: form.elements.billing_email.value.trim(),
+        amount_rappen: amountRappen,
+        interval_months: Number(form.elements.interval_months.value || 12),
+        due_days: Number(form.elements.due_days.value || 30),
+        grace_days: Number(form.elements.grace_days.value || 0),
+        next_invoice_date: form.elements.next_invoice_date.value || "",
+        auto_suspend: form.elements.auto_suspend.checked,
+      }),
+    });
+    await loadBillingAdmin();
+    alert("Vereinsabrechnung wurde gespeichert.");
+  } catch (error) {
+    alert("Vereinsabrechnung konnte nicht gespeichert werden.");
+    console.error(error);
+  }
+});
+
+document.getElementById("billing-run")?.addEventListener("click", async event => {
+  if (!currentUser?.is_super_admin) return;
+  event.currentTarget.disabled = true;
+  try {
+    const result = await api("/api/operator/billing/run", {method: "POST"});
+    await loadBillingAdmin();
+    alert(`Rechnungslauf abgeschlossen. Neue Rechnungen: ${result.created_invoices}. Neu gesperrte Vereine: ${result.suspended_clubs}.`);
+  } catch (error) {
+    alert("Rechnungslauf konnte nicht ausgeführt werden.");
+    console.error(error);
+  } finally {
+    event.currentTarget.disabled = false;
+  }
+});
+
+document.getElementById("billing-suspend")?.addEventListener("click", async () => {
+  const club = selectedBillingClub();
+  if (!currentUser?.is_super_admin || !club) return;
+  try {
+    await api(`/api/operator/billing/clubs/${club.id}/suspend`, {
+      method: "POST",
+      body: JSON.stringify({reason: "Ausstehende Zahlung"}),
+    });
+    await loadBillingAdmin();
+  } catch (error) {
+    alert("Verein konnte nicht gesperrt werden.");
+    console.error(error);
+  }
+});
+
+document.getElementById("billing-reactivate")?.addEventListener("click", async () => {
+  const club = selectedBillingClub();
+  if (!currentUser?.is_super_admin || !club) return;
+  try {
+    await api(`/api/operator/billing/clubs/${club.id}/reactivate`, {
+      method: "POST",
+    });
+    await loadBillingAdmin();
+  } catch (error) {
+    alert("Verein konnte nicht wieder freigegeben werden.");
+    console.error(error);
+  }
+});
 
 function showAuth() {
   document.getElementById("auth-view").classList.remove("hidden");
@@ -1209,6 +1746,8 @@ function applyPermissions() {
     ?.classList.toggle("hidden", !currentUser?.can_manage_users);
   document.getElementById("system-admin-backup-card")
     ?.classList.toggle("hidden", !currentUser?.can_manage_users);
+  document.getElementById("billing-nav")
+    ?.classList.toggle("hidden", !currentUser?.is_super_admin);
 
   document.querySelectorAll("[data-permission]").forEach(button => {
     button.classList.toggle("hidden", !currentUser?.[button.dataset.permission]);
@@ -1273,9 +1812,6 @@ function formData(form, resource) {
     }
   }
   resources[resource].forEach(key => data[key] = form.elements[key].value.trim());
-  if (resource === "events") {
-    data.registration_enabled = form.elements.registration_enabled.checked;
-  }
   if (resource === "members") {
     data.filter_ids = [...document.querySelectorAll('#member-filter-checkboxes input[type="checkbox"]:checked')]
       .map(input => Number(input.value))
@@ -1448,10 +1984,6 @@ function edit(resource, item) {
     }
     form.elements[key].value = item[key] || "";
   });
-
-  if (resource === "events") {
-    form.elements.registration_enabled.checked = item.registration_enabled !== false && item.registration_enabled !== 0;
-  }
 
   if (resource === "members") {
     const selected = new Set((item.filter_ids || []).map(Number));
@@ -1814,10 +2346,7 @@ async function loadPreviewRemoteImage(url) {
     return;
   }
   try {
-    const headers = {
-      ...(token ? {Authorization: `Bearer ${token}`} : {}),
-      ...(clubInstanceId ? {"X-Club-Instance": clubInstanceId} : {}),
-    };
+    const headers = token ? {Authorization: `Bearer ${token}`} : {};
     const response = await fetch(url, {headers});
     if (!response.ok) throw new Error("preview image failed");
     const blob = await response.blob();
@@ -1851,14 +2380,6 @@ function updateContentFormMode() {
   const section = form.elements.section.value;
   if (!form.elements.id.value) {
     form.elements.replace_images.checked = false;
-  }
-  const annualSujet = section === "sujet" || section === "archive";
-  const sujetMeta = document.getElementById("sujet-meta-wrap");
-  sujetMeta.classList.toggle("hidden", !annualSujet);
-  form.elements.sujet_year.required = annualSujet;
-  if (annualSujet && !form.elements.sujet_year.value) {
-    form.elements.sujet_year.value = String(new Date().getFullYear() + (section === "sujet" ? 1 : 0));
-    form.elements.sujet_is_current.checked = section === "sujet";
   }
   document.getElementById("document-upload-wrap")
     .classList.toggle("hidden", section !== "documents");
@@ -1921,14 +2442,7 @@ function canEditContentSection(section) {
 }
 
 async function loadContent() {
-  const [genericItems, annualSujets] = await Promise.all([
-    api("/api/content"),
-    api("/api/sujets"),
-  ]);
-  const items = [
-    ...genericItems.filter(item => !["sujet", "archive"].includes(item.section)),
-    ...annualSujets,
-  ];
+  const items = await api("/api/content");
   const list = document.getElementById("content-list");
   const summary = document.getElementById("content-summary");
   const filter = document.getElementById("content-filter")?.value || "";
@@ -2065,8 +2579,7 @@ function clearExistingImageObjectUrls() {
 
 async function saveImageOrder(item, orderedImages) {
   if (!item?.id || !orderedImages.length) return item;
-  const base = item?.annual_sujet ? `/api/sujets/${item.id}` : `/api/content/${item.id}`;
-  const updated = await api(`${base}/images/order`, {
+  const updated = await api(`/api/content/${item.id}/images/order`, {
     method:"PUT",
     body:JSON.stringify({
       image_ids: orderedImages.map(image => image.id),
@@ -2138,10 +2651,7 @@ async function renderExistingImages(item) {
     thumb.className = "existing-image-thumb";
     thumb.alt = `Bild ${index + 1}`;
     try {
-      const headers = {
-      ...(token ? {Authorization: `Bearer ${token}`} : {}),
-      ...(clubInstanceId ? {"X-Club-Instance": clubInstanceId} : {}),
-    };
+      const headers = token ? {Authorization: `Bearer ${token}`} : {};
       const response = await fetch(image.url, {headers});
       if (response.ok) {
         const blob = await response.blob();
@@ -2179,9 +2689,8 @@ async function renderExistingImages(item) {
     remove.textContent = "Löschen";
     remove.onclick = async () => {
       if (!confirm(`Bild ${index + 1} wirklich löschen?`)) return;
-      const base = item?.annual_sujet ? `/api/sujets/${item.id}` : `/api/content/${item.id}`;
-      await api(`${base}/images/${image.id}`, {method:"DELETE"});
-      const refreshed = item?.annual_sujet ? await api("/api/sujets") : await api("/api/content");
+      await api(`/api/content/${item.id}/images/${image.id}`, {method:"DELETE"});
+      const refreshed = await api("/api/content");
       const updated = refreshed.find(entry => entry.id === item.id);
       await renderExistingImages(updated);
       if (updated) {
@@ -2208,11 +2717,6 @@ function resetContentForm({keepSection = true} = {}) {
   form.elements.replace_images.checked = false;
   form.elements.poll_options.value = "";
   form.elements.poll_allow_suggestions.checked = false;
-  form.elements.sujet_year.value = "";
-  form.elements.sujet_motto.value = "";
-  form.elements.sujet_logo_file.value = "";
-  document.getElementById("sujet-logo-current").textContent = "";
-  form.elements.sujet_is_current.checked = section === "sujet";
   updatePollSuggestionToggle();
   renderPollMemberSuggestions(null);
   form.elements.document_file.value = "";
@@ -2242,11 +2746,6 @@ function editContent(item) {
   form.elements.title.value = item.title || "";
   form.elements.text.value = item.text || "";
   form.elements.link_url.value = item.link_url || "";
-  form.elements.sujet_year.value = item.year || "";
-  form.elements.sujet_motto.value = item.motto || "";
-  form.elements.sujet_logo_file.value = "";
-  document.getElementById("sujet-logo-current").textContent = item.logo_url ? "Logo gespeichert" : "";
-  form.elements.sujet_is_current.checked = item.is_current === true;
   form.elements.poll_options.value = (item.poll_options || []).join("\n");
   form.elements.poll_allow_suggestions.checked = item.poll_allow_suggestions === true;
   updatePollSuggestionToggle();
@@ -2267,9 +2766,7 @@ async function removeContent(id, section = "") {
   if (!confirm(section === "polls" ? "Umfrage wirklich löschen?" : "Eintrag wirklich löschen?")) return;
   const path = section === "polls"
     ? `/api/polls/${id}`
-    : (["sujet", "archive"].includes(section)
-        ? `/api/sujets/${id}`
-        : `/api/content/${id}`);
+    : `/api/content/${id}`;
   await api(path, {method:"DELETE"});
   await loadContent();
 }
@@ -2398,44 +2895,15 @@ document.getElementById("content-form").addEventListener("submit", async event =
     poll_options: [],
     poll_allow_suggestions: false,
   };
-  const isAnnualSujet = section === "sujet" || section === "archive";
-  let saved;
-  if (section === "polls") {
-    saved = await api(id ? `/api/polls/${id}` : "/api/polls", {
-      method: id ? "PUT" : "POST",
-      body: JSON.stringify(pollPayload),
-    });
-  } else if (isAnnualSujet) {
-    const year = Number(form.elements.sujet_year.value);
-    if (!Number.isInteger(year) || year < 1900 || year > 2200) {
-      alert("Bitte ein gültiges Sujet-Jahr erfassen.");
-      return;
-    }
-    saved = await api(id ? `/api/sujets/${id}` : "/api/sujets", {
-      method: id ? "PUT" : "POST",
-      body: JSON.stringify({
-        year,
-        title: contentPayload.title,
-        motto: form.elements.sujet_motto.value.trim(),
-        text: contentPayload.text,
-        is_current: form.elements.sujet_is_current.checked,
-      }),
-    });
-  } else {
-    saved = await api(id ? `/api/content/${id}` : "/api/content", {
-      method: id ? "PUT" : "POST",
-      body: JSON.stringify(contentPayload),
-    });
-  }
-
-  if (isAnnualSujet) {
-    const logoFile = form.elements.sujet_logo_file.files[0];
-    if (logoFile) {
-      const logoUpload = new FormData();
-      logoUpload.append("logo", logoFile);
-      await api(`/api/sujets/${saved.id}/logo`, {method:"POST", body:logoUpload});
-    }
-  }
+  const saved = section === "polls"
+    ? await api(id ? `/api/polls/${id}` : "/api/polls", {
+        method: id ? "PUT" : "POST",
+        body: JSON.stringify(pollPayload),
+      })
+    : await api(id ? `/api/content/${id}` : "/api/content", {
+        method: id ? "PUT" : "POST",
+        body: JSON.stringify(contentPayload),
+      });
 
   const documentFile = form.elements.document_file.files[0];
   if (section === "documents" && documentFile) {
@@ -2449,18 +2917,12 @@ document.getElementById("content-form").addEventListener("submit", async event =
 
   const files = [...form.elements.image_files.files];
   if (files.length) {
-    const mediaBase = isAnnualSujet
-      ? `/api/sujets/${saved.id}`
-      : `/api/content/${saved.id}`;
     if (id && form.elements.replace_images.checked) {
-      const existing = saved.images || [];
-      for (const image of existing) {
-        await api(`${mediaBase}/images/${image.id}`, {method:"DELETE"});
-      }
+      await api(`/api/content/${saved.id}/images`, {method:"DELETE"});
     }
     const upload = new FormData();
     files.forEach(file => upload.append("images", file));
-    await api(`${mediaBase}/images`, {
+    await api(`/api/content/${saved.id}/images`, {
       method:"POST",
       body:upload,
     });
@@ -2515,34 +2977,9 @@ function formatBytes(value) {
 
 async function downloadSystemBackup(name) {
   const response = await fetch(`/api/system/backups/${encodeURIComponent(name)}`, {
-    headers: {
-      ...(token ? {Authorization: `Bearer ${token}`} : {}),
-      ...(clubInstanceId ? {"X-Club-Instance": clubInstanceId} : {}),
-    },
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
   });
-  if (!response.ok) {
-  const raw = await response.text();
-  let detail = "";
-  try {
-    const parsed = JSON.parse(raw);
-    detail = String(parsed?.detail || "").trim();
-  } catch (_) {}
-  const defaults = {
-    400: "Die Eingabe konnte nicht verarbeitet werden.",
-    401: "Die Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.",
-    403: "Für diese Aktion fehlt die Berechtigung.",
-    404: "Der gewünschte Inhalt wurde nicht gefunden.",
-    409: "Die Änderung steht im Konflikt mit bereits vorhandenen Daten.",
-    413: "Die Datei ist zu gross.",
-    422: "Bitte die eingegebenen Daten prüfen.",
-    429: "Zu viele Anfragen. Bitte kurz warten und nochmals versuchen."
-  };
-  const message = detail || defaults[response.status] ||
-    (response.status >= 500
-      ? "Der Server hat momentan ein Problem. Bitte später nochmals versuchen."
-      : "Die Anfrage konnte nicht abgeschlossen werden.");
-  throw new Error(message);
-}
+  if (!response.ok) throw new Error(await response.text());
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -2559,10 +2996,7 @@ async function restoreSystemBackup(file) {
   form.append("backup_file", file, file.name);
   const response = await fetch("/api/system/restore", {
     method: "POST",
-    headers: {
-      ...(token ? {Authorization: `Bearer ${token}`} : {}),
-      ...(clubInstanceId ? {"X-Club-Instance": clubInstanceId} : {}),
-    },
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
     body: form,
   });
   if (!response.ok) {
@@ -2580,29 +3014,75 @@ async function loadAppConfig() {
   if (!(currentUser?.can_manage_settings || currentUser?.can_manage_users)) return;
   try {
     const config = await api("/api/app-config");
+    activeClubConfig = config;
     const form = document.getElementById("app-config-form");
     const visibleAppName = config.app_name || "Vereins-App";
     form.elements.app_name.value = visibleAppName;
+    form.elements.short_name.value = config.short_name || "";
     form.elements.app_subtitle.value = config.app_subtitle || "";
+    form.elements.app_title.value = config.app_title || "";
+    form.elements.club_description.value = config.club_description || "";
+    form.elements.welcome_text.value = config.welcome_text || "";
+    form.elements.website_url.value = config.website_url || "";
+    form.elements.contact_email.value = config.contact_email || "";
+    form.elements.contact_phone.value = config.contact_phone || "";
+    form.elements.club_address.value = config.club_address || "";
+    form.elements.city.value = config.city || "";
+    form.elements.country.value = config.country || "";
+
+    form.elements.primary_color.value =
+      /^#[0-9A-Fa-f]{6}$/.test(config.primary_color || "")
+        ? config.primary_color
+        : "#8A101B";
+    form.elements.secondary_color.value =
+      /^#[0-9A-Fa-f]{6}$/.test(config.secondary_color || "")
+        ? config.secondary_color
+        : "#FFFFFF";
 
     document.title = `${visibleAppName} Admin`;
     const adminTitle = document.getElementById("admin-title");
     if (adminTitle) adminTitle.textContent = `${visibleAppName} Verwaltung`;
     const previewName = document.getElementById("preview-app-name");
     if (previewName) previewName.textContent = visibleAppName;
-    form.elements.club_description.value = config.club_description || "";
-    form.elements.website_url.value = config.website_url || "";
-    form.elements.contact_email.value = config.contact_email || "";
-    form.elements.contact_phone.value = config.contact_phone || "";
-    form.elements.club_address.value = config.club_address || "";
-    for (const key of ["sujet","archive","photos","documents","polls","links"]) {
-      form.elements[`show_${key}`].checked = config[`show_${key}`] !== false;
-      form.elements[`label_${key}`].value = config[`label_${key}`] || "";
+
+    const featureBox = document.getElementById("club-feature-list");
+    featureBox.innerHTML = "";
+    Object.entries(config.features || {}).forEach(([key, value]) => {
+      const label = document.createElement("label");
+      label.style.display = "grid";
+      label.style.gridTemplateColumns = "auto 1fr";
+      label.style.gap = "8px";
+      label.style.alignItems = "center";
+      label.innerHTML = `
+        <input type="checkbox" data-feature-key="${key}" ${value?.enabled !== false ? "checked" : ""}>
+        <span>${value?.label || key}</span>
+        <input
+          type="text"
+          data-feature-label="${key}"
+          maxlength="80"
+          value="${String(value?.label || "").replaceAll("&","&amp;").replaceAll('"',"&quot;").replaceAll("<","&lt;")}"
+          style="grid-column:2"
+          aria-label="Bezeichnung ${key}"
+        >
+      `;
+      featureBox.appendChild(label);
+    });
+
+    const legacy = {
+      sujet: "sujet_next",
+      archive: "sujet_archive",
+      photos: "photos",
+      documents: "documents",
+      polls: "polls",
+      links: "links",
+    };
+    for (const [legacyKey, featureKey] of Object.entries(legacy)) {
+      const feature = config.features?.[featureKey] || {};
+      form.elements[`show_${legacyKey}`].checked = feature.enabled !== false;
+      form.elements[`label_${legacyKey}`].value =
+        feature.label || config[`label_${legacyKey}`] || "";
     }
-    form.elements.primary_color.value =
-      /^#[0-9A-Fa-f]{6}$/.test(config.primary_color || "")
-        ? config.primary_color
-        : "#8A101B";
+
     const preview = document.getElementById("app-logo-preview");
     const image = document.getElementById("app-logo-image");
     if (config.logo_url) {
@@ -2612,6 +3092,8 @@ async function loadAppConfig() {
       image.removeAttribute("src");
       preview.classList.add("hidden");
     }
+
+    await loadTenantContext();
   } catch (error) {
     console.error(error);
   }
@@ -2846,31 +3328,65 @@ document.getElementById("app-config-form").addEventListener("submit", async even
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
   try {
+    const features = {};
+    const labels = {};
+    document.querySelectorAll("#club-feature-list [data-feature-key]").forEach(input => {
+      features[input.dataset.featureKey] = input.checked;
+    });
+    document.querySelectorAll("#club-feature-list [data-feature-label]").forEach(input => {
+      labels[input.dataset.featureLabel] = input.value.trim();
+    });
+
+    const legacy = {
+      sujet: "sujet_next",
+      archive: "sujet_archive",
+      photos: "photos",
+      documents: "documents",
+      polls: "polls",
+      links: "links",
+    };
+    for (const [legacyKey, featureKey] of Object.entries(legacy)) {
+      form.elements[`show_${legacyKey}`].checked = features[featureKey] !== false;
+      form.elements[`label_${legacyKey}`].value = labels[featureKey] || "";
+    }
+
     await api("/api/app-config", {
       method: "PUT",
       body: JSON.stringify({
         app_name: form.elements.app_name.value.trim(),
+        short_name: form.elements.short_name.value.trim(),
         app_subtitle: form.elements.app_subtitle.value.trim(),
+        app_title: form.elements.app_title.value.trim(),
         primary_color: form.elements.primary_color.value.toUpperCase(),
+        secondary_color: form.elements.secondary_color.value.toUpperCase(),
         club_description: form.elements.club_description.value.trim(),
+        welcome_text: form.elements.welcome_text.value.trim(),
         website_url: form.elements.website_url.value.trim(),
         contact_email: form.elements.contact_email.value.trim(),
         contact_phone: form.elements.contact_phone.value.trim(),
         club_address: form.elements.club_address.value.trim(),
+        city: form.elements.city.value.trim(),
+        country: form.elements.country.value.trim(),
         show_sujet: form.elements.show_sujet.checked,
-        label_sujet: form.elements.label_sujet.value.trim(),
+        label_sujet: form.elements.label_sujet.value.trim() || "Sujet nächstes Jahr",
         show_archive: form.elements.show_archive.checked,
-        label_archive: form.elements.label_archive.value.trim(),
+        label_archive: form.elements.label_archive.value.trim() || "Vergangene Sujet",
         show_photos: form.elements.show_photos.checked,
-        label_photos: form.elements.label_photos.value.trim(),
+        label_photos: form.elements.label_photos.value.trim() || "Fotoalben",
         show_documents: form.elements.show_documents.checked,
-        label_documents: form.elements.label_documents.value.trim(),
+        label_documents: form.elements.label_documents.value.trim() || "Dokumente",
         show_polls: form.elements.show_polls.checked,
-        label_polls: form.elements.label_polls.value.trim(),
+        label_polls: form.elements.label_polls.value.trim() || "Umfragen",
         show_links: form.elements.show_links.checked,
-        label_links: form.elements.label_links.value.trim(),
+        label_links: form.elements.label_links.value.trim() || "Links",
       }),
     });
+
+    await api("/api/app-config/features", {
+      method: "PUT",
+      body: JSON.stringify({features, labels}),
+    });
+
     const logoFile = form.elements.logo_file.files[0];
     if (logoFile) {
       const upload = new FormData();
@@ -2881,10 +3397,12 @@ document.getElementById("app-config-form").addEventListener("submit", async even
       });
       form.elements.logo_file.value = "";
     }
+
+    currentUser = await api("/api/auth/me");
     await loadAppConfig();
-    alert("Branding wurde gespeichert.");
+    alert("Vereinskonfiguration wurde gespeichert.");
   } catch (error) {
-    alert("Branding konnte nicht gespeichert werden.");
+    alert("Vereinskonfiguration konnte nicht gespeichert werden.");
     console.error(error);
   } finally {
     button.disabled = false;
@@ -3017,8 +3535,9 @@ async function startAdmin() {
   }
   showAdmin();
   applyPermissions();
+  await loadTenantContext();
   document.getElementById("status").textContent =
-    `Angemeldet: ${currentUser.member_name || currentUser.username} · API v${apiVersion || "?"}`;
+    `Angemeldet: ${currentUser.member_name || currentUser.username} · ${activeClubConfig?.app_name || "Verein"} · API v${apiVersion || "?"}`;
 
   const loadSafely = async (name, action) => {
     try {
@@ -3067,7 +3586,6 @@ async function startAdmin() {
   try {
     const health = await api("/api/health");
     apiVersion = health.version || "";
-    clubInstanceId = String(health.instance_id || "").trim().toLowerCase();
     const status = await api("/api/auth/status");
     bootstrapRequired = status.bootstrap_required;
     document.getElementById("status").textContent = `API online · v${health.version}`;

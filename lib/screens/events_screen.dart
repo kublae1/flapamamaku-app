@@ -88,6 +88,7 @@ class _EventsScreenState extends State<EventsScreen> {
     final event = store.events[index];
 
     if (direction == DismissDirection.endToStart) {
+      if (!store.showParticipantLists) return false;
       final result = await _ask(
         context,
         title: 'Anmelden',
@@ -100,6 +101,7 @@ class _EventsScreenState extends State<EventsScreen> {
     }
 
     if (direction == DismissDirection.startToEnd) {
+      if (!store.showCalendar) return false;
       final result = await _ask(
         context,
         title: 'Kalender',
@@ -137,7 +139,13 @@ class _EventsScreenState extends State<EventsScreen> {
 
           return Dismissible(
             key: ValueKey('event-$i-${e.title}'),
-            direction: DismissDirection.horizontal,
+            direction: store.showCalendar && store.showParticipantLists
+                ? DismissDirection.horizontal
+                : store.showCalendar
+                    ? DismissDirection.startToEnd
+                    : store.showParticipantLists
+                        ? DismissDirection.endToStart
+                        : DismissDirection.none,
             confirmDismiss: (direction) => _handleSwipe(
               context,
               i,
@@ -215,23 +223,26 @@ class _EventsScreenState extends State<EventsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${e.displayDate}\n${e.location}\n${e.time}', style: const TextStyle(color: Colors.white70)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${e.registrationCount} angemeldet',
-                      style: const TextStyle(color: FlapBrand.gold, fontWeight: FontWeight.w700),
-                    ),
-                    if (isRegistered || isInCalendar) ...[
+                    if (store.showParticipantLists) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '${e.registrationCount} angemeldet',
+                        style: const TextStyle(color: FlapBrand.gold, fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                    if ((store.showParticipantLists && isRegistered) ||
+                        (store.showCalendar && isInCalendar)) ...[
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 8,
                         runSpacing: 4,
                         children: [
-                          if (isRegistered)
+                          if (store.showParticipantLists && isRegistered)
                             const Chip(
                               avatar: Icon(Icons.check_circle_outline, size: 18),
                               label: Text('Angemeldet'),
                             ),
-                          if (isInCalendar)
+                          if (store.showCalendar && isInCalendar)
                             const Chip(
                               avatar: Icon(Icons.calendar_month_outlined, size: 18),
                               label: Text('Im Kalender'),
