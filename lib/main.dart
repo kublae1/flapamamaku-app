@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'data/app_store.dart';
 import 'data/runtime_content_policy.dart';
 import 'screens/home_shell.dart';
@@ -6,7 +8,22 @@ import 'screens/login_screen.dart';
 import 'screens/biometric_lock_screen.dart';
 import 'theme/flap_brand.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Managed white-label builds are permanently bound to the server compiled
+  // into the APK. Older test builds could leave a manually selected pilot
+  // server in SharedPreferences; remove that stale override before AppStore is
+  // constructed so FLAPAMAMAKU can never reopen another club's server.
+  const allowServerChange = bool.fromEnvironment(
+    'ALLOW_SERVER_CHANGE',
+    defaultValue: true,
+  );
+  if (!allowServerChange) {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('flapamamaku_server_url');
+  }
+
   runApp(const FlapamamakuApp());
 }
 
