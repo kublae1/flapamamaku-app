@@ -65,5 +65,10 @@ jobs:
           assert 'if (!allowServerChange && expected.isNotEmpty && serverInstanceId != expected)' in api
           runtime = Path('backend/app/runtime.py').read_text()
           assert 'register_platform_club' in runtime
-          print('Selectable club-server mode and platform self-registration verified')
+          assert '@app.get("/api/system/platform-clubs")' in runtime
+          assert '_admin_selector_injection' in runtime
+          assert 'Verein auswählen' in runtime
+          assert 'Vereins-Admin öffnen' in runtime
+          assert 'path in {"/admin", "/admin/"}' in runtime
+          print('Selectable club-server mode, platform registration and Docker admin club selector verified')
           PY
