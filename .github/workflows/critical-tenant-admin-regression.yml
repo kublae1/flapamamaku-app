@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/critical-tenant-admin-regression-20261005
+      - fix/tenant-recovery-20261005
   pull_request:
     branches:
       - main
@@ -15,7 +16,7 @@ permissions:
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -26,14 +27,57 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
+        run: pip install -r backend/requirements.txt httpx
 
       - name: Compile backend regression code
         working-directory: backend
-        run: python -m py_compile app/main.py app/phase45.py app/runtime.py tests/critical_tenant_admin_regression.py
+        run: >-
+          python -m py_compile
+          app/main.py app/phase45.py app/runtime.py
+          tests/critical_tenant_admin_regression.py
+          tests/test_multitenant_isolation.py
+          tests/test_multiclub_app_behavior.py
+          tests/test_club_billing_suspension.py
+          tests/test_white_label_onboarding.py
 
       - name: Verify production tenant and admin repair
         run: python backend/tests/critical_tenant_admin_regression.py
+
+      - name: Verify integrated multi-tenant isolation and media
+        env:
+          FLAPAMAMAKU_DB: /tmp/recovery-multitenant.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/recovery-multitenant-backups
+        run: |
+          rm -f "$FLAPAMAMAKU_DB"
+          rm -rf "$FLAPAMAMAKU_BACKUP_DIR"
+          python backend/tests/test_multitenant_isolation.py
+
+      - name: Verify multi-club app behavior
+        env:
+          FLAPAMAMAKU_DB: /tmp/recovery-multiclub.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/recovery-multiclub-backups
+        run: |
+          rm -f "$FLAPAMAMAKU_DB"
+          rm -rf "$FLAPAMAMAKU_BACKUP_DIR"
+          python backend/tests/test_multiclub_app_behavior.py
+
+      - name: Verify per-club billing and suspension
+        env:
+          FLAPAMAMAKU_DB: /tmp/recovery-billing.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/recovery-billing-backups
+        run: |
+          rm -f "$FLAPAMAMAKU_DB"
+          rm -rf "$FLAPAMAMAKU_BACKUP_DIR"
+          python backend/tests/test_club_billing_suspension.py
+
+      - name: Verify white-label onboarding
+        env:
+          FLAPAMAMAKU_DB: /tmp/recovery-onboarding.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/recovery-onboarding-backups
+        run: |
+          rm -f "$FLAPAMAMAKU_DB"
+          rm -rf "$FLAPAMAMAKU_BACKUP_DIR"
+          python backend/tests/test_white_label_onboarding.py
 
       - uses: subosito/flutter-action@v2
         with:
@@ -49,26 +93,30 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
-      - name: Verify FLAPAMAMAKU supports selectable club servers
+      - name: Verify recovered Superuser club switch and member mapping
         shell: bash
         run: |
           python3 - <<'PY'
           import json
           from pathlib import Path
+
           profile = json.loads(Path('config/white-label/flapamamaku.json').read_text())
           assert profile['id'] == 'flapamamaku'
-          assert profile['instance_id'] == 'flapamamaku'
-          assert profile['api_base_url'] == 'https://flapamamaku.kublaecloud.synology.me'
           assert profile['allow_server_change'] is True
-          api = Path('lib/data/api_service.dart').read_text()
-          assert 'if (!allowServerChange && expectedInstanceId.trim().isNotEmpty)' in api
-          assert 'if (!allowServerChange && expected.isNotEmpty && serverInstanceId != expected)' in api
+
+          admin = Path('backend/static/admin.html').read_text()
+          assert 'tenant-switch' in admin
+          assert 'Verein wechseln' in admin
+          assert 'currentUser.is_super_admin' in admin
+
           runtime = Path('backend/app/runtime.py').read_text()
-          assert 'register_platform_club' in runtime
-          assert '@app.get("/api/system/platform-clubs")' in runtime
-          assert '_admin_selector_injection' in runtime
-          assert 'Verein auswählen' in runtime
-          assert 'Vereins-Admin öffnen' in runtime
-          assert 'path in {"/admin", "/admin/"}' in runtime
-          print('Selectable club-server mode, platform registration and Docker admin club selector verified')
+          assert 'user_club_members' in runtime
+          assert '_drop_single_instance_guards' in runtime
+          assert '_normalize_club_ids' in runtime
+          assert '_admin_selector_injection' not in runtime
+          assert '/api/system/platform-clubs' not in runtime
+
+          api = Path('lib/data/api_service.dart').read_text()
+          assert 'allowServerChange' in api
+          print('Recovered multi-club core, Superuser-only switch and per-club member mapping verified')
           PY
