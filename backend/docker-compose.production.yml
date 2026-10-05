@@ -5,8 +5,6 @@ services:
     container_name: ${FLAPAMAMAKU_CONTAINER_NAME:-flapamamaku-backend}
     restart: unless-stopped
     ports:
-      # Nur lokal auf dem Docker-/Synology-Host erreichbar.
-      # Der öffentliche Zugriff erfolgt ausschliesslich über den HTTPS-Reverse-Proxy.
       - "127.0.0.1:${FLAPAMAMAKU_HOST_PORT:-8087}:8000"
     environment:
       FLAPAMAMAKU_DB: /data/flapamamaku.db
@@ -17,14 +15,38 @@ services:
       FLAPAMAMAKU_ENV: production
       FLAPAMAMAKU_ALLOWED_ORIGINS: ${FLAPAMAMAKU_ALLOWED_ORIGINS}
       FLAPAMAMAKU_BUILD_SHA: ${FLAPAMAMAKU_BUILD_SHA:-unknown}
+      FLAPAMAMAKU_PLATFORM_DB: /platform/platform.db
     volumes:
       - flapamamaku-data:/data
+      - platform-data:/platform:ro
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)); assert d.get('status') == 'ok'"
+      test: ["CMD", "python", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=5)); assert d.get('status')=='ok'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  flapamamaku-platform:
+    image: ghcr.io/kublae1/flapamamaku-backend:latest
+    pull_policy: always
+    container_name: ${FLAPAMAMAKU_PLATFORM_CONTAINER_NAME:-flapamamaku-platform}
+    restart: unless-stopped
+    command: ["uvicorn", "app.platform_runtime:app", "--host", "0.0.0.0", "--port", "8091"]
+    ports:
+      - "127.0.0.1:${FLAPAMAMAKU_PLATFORM_HOST_PORT:-8091}:8091"
+    environment:
+      FLAPAMAMAKU_PLATFORM_DB: /platform/platform.db
+      FLAPAMAMAKU_PLATFORM_SESSION_DAYS: ${FLAPAMAMAKU_PLATFORM_SESSION_DAYS:-30}
+      FLAPAMAMAKU_PLATFORM_BILLING_INTERVAL_SECONDS: ${FLAPAMAMAKU_PLATFORM_BILLING_INTERVAL_SECONDS:-3600}
+    volumes:
+      - platform-data:/platform
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8091/api/platform/health',timeout=5)); assert d.get('status')=='ok'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -37,3 +59,5 @@ services:
 
 volumes:
   flapamamaku-data:
+  platform-data:
+    name: flapamamaku-platform-data
