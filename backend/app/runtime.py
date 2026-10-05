@@ -1,9 +1,15 @@
 import os
 import sqlite3
+from pathlib import Path
+
+from fastapi import Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import main as main_app
 
 app = main_app.app
+INSTANCE_ID = main_app.INSTANCE_ID
+PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db"))
 
 # Production wrapper only. The recovered multi-club core in app.main is the
 # single source of truth for club selection, tenant isolation, media, members,
@@ -45,11 +51,7 @@ def _table_exists(db: sqlite3.Connection, table: str) -> bool:
 
 
 def _drop_single_instance_guards(db: sqlite3.Connection) -> None:
-    """Remove Phase-4/5 triggers that reject integer multi-club IDs.
-
-    Those triggers were valid only for the later one-backend-per-club design and
-    conflict with the restored integrated multi-club database.
-    """
+    """Remove Phase-4/5 triggers that reject integer multi-club IDs."""
     rows = db.execute(
         """
         SELECT name
@@ -231,8 +233,7 @@ def _install_member_mapping(db: sqlite3.Connection) -> None:
 
     # Existing application code still reads users.member_id. Keep that legacy
     # field synchronized from the per-club mapping whenever a session is created
-    # or its active club changes. This prevents club A from resolving a member
-    # from club B without rewriting the whole stable API in one risky step.
+    # or its active club changes.
     if _table_exists(db, "sessions") and "active_club_id" in _columns(db, "sessions"):
         db.execute("DROP TRIGGER IF EXISTS sessions_member_context_insert")
         db.execute("DROP TRIGGER IF EXISTS sessions_member_context_update")
@@ -288,3 +289,57 @@ def recover_multiclub_state() -> None:
 async def run_multiclub_recovery() -> None:
     # main.app's own startup runs first and creates/migrates the base schema.
     recover_multiclub_state()
+
+
+def platform_access_state() -> tuple[str, str]:
+    """Keep Phase-9 external suspension for true one-club pilot instances.
+
+    The recovered FLAPAMAMAKU deployment is an integrated multi-club host and
+    therefore uses the stable per-club billing/suspension model in app.main.
+    Applying one external status to that host would incorrectly suspend every
+    club at once.
+    """
+    if INSTANCE_ID == "flapamamaku" or not PLATFORM_DB.exists():
+        return "active", ""
+    try:
+        db = sqlite3.connect(f"file:{PLATFORM_DB}?mode=ro", uri=True, timeout=2)
+        db.row_factory = sqlite3.Row
+        try:
+            row = db.execute(
+                "SELECT status,suspension_reason FROM platform_clubs WHERE instance_id=? COLLATE NOCASE",
+                (INSTANCE_ID,),
+            ).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return "active", ""
+    if not row:
+        return "active", ""
+    return str(row["status"]), str(row["suspension_reason"] or "")
+
+
+@app.middleware("http")
+async def phase9_pilot_instance_access_control(request: Request, call_next):
+    if INSTANCE_ID == "flapamamaku":
+        return await call_next(request)
+    path = request.url.path
+    if path == "/api/health" or path.endswith("flapamamaku-icon.png"):
+        return await call_next(request)
+    status, reason = platform_access_state()
+    if status == "active":
+        return await call_next(request)
+    message = reason or "Dieser Verein ist durch die Plattformverwaltung vorübergehend gesperrt."
+    if path.startswith("/api/"):
+        return JSONResponse(
+            status_code=423,
+            content={"detail": message, "club_status": "suspended"},
+        )
+    return HTMLResponse(
+        status_code=423,
+        content=(
+            "<!doctype html><html><head><meta charset='utf-8'><title>Verein gesperrt</title>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+            "<body style='font-family:system-ui;margin:3rem;max-width:720px'>"
+            "<h1>Zugriff vorübergehend gesperrt</h1><p>" + message + "</p></body></html>"
+        ),
+    )
