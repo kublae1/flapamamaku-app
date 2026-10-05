@@ -53,7 +53,7 @@ def _table_exists(db: sqlite3.Connection, table: str) -> bool:
 
 
 def _drop_single_instance_guards(db: sqlite3.Connection) -> None:
-    """Remove Phase-4/5 triggers that reject integer multi-club IDs."""
+    """Remove Phase-4/5 triggers that reject integrated numeric club IDs."""
     rows = db.execute(
         """
         SELECT name
@@ -91,6 +91,33 @@ def _normalize_club_ids(db: sqlite3.Connection) -> None:
               )
             """
         )
+
+
+def pre_recover_multiclub_state() -> None:
+    """Repair Masterplan guards before the stable schema initializer can write.
+
+    The old Phase-4/5 startup installed triggers that accepted only the literal
+    instance slug (for example ``flapamamaku``).  The recovered stable backend
+    legitimately uses numeric club IDs.  Those guards therefore have to be
+    removed before app.main's own startup/migrations run, not afterwards.
+    """
+    if not main_app.DB_PATH.exists():
+        return
+    try:
+        with main_app.connect() as db:
+            _drop_single_instance_guards(db)
+            _normalize_club_ids(db)
+            db.commit()
+    except sqlite3.Error:
+        main_app.logger.exception("Pre-start multi-club recovery failed")
+        raise
+
+
+# app.main has already registered its startup handlers when runtime is imported.
+# Put the compatibility repair in front of them so a migrated production DB can
+# be opened safely on the very first 0.9.3 start.
+if pre_recover_multiclub_state not in app.router.on_startup:
+    app.router.on_startup.insert(0, pre_recover_multiclub_state)
 
 
 def _install_member_mapping(db: sqlite3.Connection) -> None:
@@ -131,9 +158,9 @@ def _install_member_mapping(db: sqlite3.Connection) -> None:
         """
     )
 
-    # Conservative recovery for old records: only map automatically when there
-    # is exactly one unambiguous member in that club matching username to either
-    # member e-mail or member name.
+    # Conservative recovery: map only an unambiguous same-club member whose
+    # name or e-mail matches the login name.  Ambiguous rows stay unassigned
+    # instead of risking another cross-club identity leak.
     missing = db.execute(
         """
         SELECT ucm.user_id, ucm.club_id, u.username
@@ -198,7 +225,7 @@ def _install_member_mapping(db: sqlite3.Connection) -> None:
         """
     )
 
-    # A newly assigned member is stored against that member's club.
+    # A newly assigned member is stored against that member's own club.
     db.execute("DROP TRIGGER IF EXISTS users_member_mapping_update")
     db.execute(
         """
@@ -233,8 +260,9 @@ def _install_member_mapping(db: sqlite3.Connection) -> None:
         """
     )
 
-    # Keep the legacy column usable for old code paths, but the authoritative
-    # identity exposed to clients is resolved below from user_club_members.
+    # Keep the historical users.member_id usable for old code paths.  Client
+    # identity is nevertheless resolved below from user_club_members, so two
+    # simultaneous sessions in different clubs cannot leak identities.
     if _table_exists(db, "sessions") and "active_club_id" in _columns(db, "sessions"):
         db.execute("DROP TRIGGER IF EXISTS sessions_member_context_insert")
         db.execute("DROP TRIGGER IF EXISTS sessions_member_context_update")
@@ -294,8 +322,8 @@ def _scoped_member_id(
         if row is not None:
             return int(row["member_id"]) if row["member_id"] is not None else None
 
-    # Safe legacy fallback: accept users.member_id only if that member belongs
-    # to the active club. A foreign member ID is treated as no mapping.
+    # Safe legacy fallback: accept users.member_id only when that member belongs
+    # to the active club.  A foreign member ID is treated as no mapping.
     row = db.execute(
         """
         SELECT u.member_id
@@ -395,8 +423,7 @@ def _rebind_current_user_dependency(dependant: Any) -> None:
 
 
 # Functions such as login() resolve these names dynamically, while FastAPI
-# Depends objects captured the original callable during route registration. Fix
-# both so every production path uses the same club-scoped identity resolver.
+# Depends objects captured the original callable during route registration.
 main_app.current_user = scoped_current_user
 main_app._user_profile = scoped_user_profile
 for _route in app.routes:
@@ -419,7 +446,7 @@ def recover_multiclub_state() -> None:
 
 @app.on_event("startup")
 async def run_multiclub_recovery() -> None:
-    # main.app's own startup runs first and creates/migrates the base schema.
+    # This second pass runs after app.main created/updated every stable table.
     recover_multiclub_state()
 
 
