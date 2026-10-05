@@ -19,12 +19,12 @@ def connect():
     db = sqlite3.connect(DB, timeout=20)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA journal_mode=WAL")
     return db
 
 
 def init_db():
     with connect() as db:
+        db.execute("PRAGMA journal_mode=DELETE")
         db.executescript("""
         CREATE TABLE IF NOT EXISTS platform_schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS platform_superusers(
