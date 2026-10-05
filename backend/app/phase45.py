@@ -535,7 +535,7 @@ def install_phase45(
             row = db.execute("SELECT * FROM annual_sujets WHERE id = ?", (sujet_id,)).fetchone()
         return serialize_sujet(row)
 
-    @app.delete("/api/sujets/{sujet_id}/logo", status_code=204)
+    @app.delete("/api/sujets/{sujet_id}/logo")
     def delete_sujet_logo(
         sujet_id: int,
         _: dict[str, Any] = Depends(require("can_photos")),

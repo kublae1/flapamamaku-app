@@ -185,6 +185,15 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
     if (result != null && mounted) setState(() => inCalendar = result);
   }
 
+  Future<void> _launch(BuildContext context, Uri uri) async {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aktion konnte nicht geöffnet werden.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final event = widget.event;
