@@ -1,0 +1,9 @@
+{
+  "id": "pilot-verein-a",
+  "app_name": "PILOT VEREIN A",
+  "app_subtitle": "Technischer Pilotbetrieb",
+  "api_base_url": "https://pilot-a.example.invalid",
+  "app_icon_url": "",
+  "instance_id": "pilot-verein-a",
+  "allow_server_change": false
+}
