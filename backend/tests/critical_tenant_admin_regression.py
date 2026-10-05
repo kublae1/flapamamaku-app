@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -34,7 +35,8 @@ def wait_for_server(process: subprocess.Popen[str]) -> None:
     deadline = time.time() + 25
     while time.time() < deadline:
         if process.poll() is not None:
-            fail(f"backend exited early with {process.returncode}")
+            output = process.stdout.read() if process.stdout else ""
+            fail(f"backend exited early with {process.returncode}: {output[-2000:]}")
         try:
             response = requests.get(f"{BASE_URL}/api/health", timeout=1)
             if response.status_code == 200:
@@ -89,7 +91,14 @@ def stop_backend(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
-def call(method: str, path: str, *, token: str | None = None, expected: int = 200, **kwargs):
+def call(
+    method: str,
+    path: str,
+    *,
+    token: str | None = None,
+    expected: int | tuple[int, ...] = 200,
+    **kwargs: Any,
+) -> requests.Response:
     headers = dict(kwargs.pop("headers", {}))
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -100,8 +109,12 @@ def call(method: str, path: str, *, token: str | None = None, expected: int = 20
         timeout=10,
         **kwargs,
     )
-    if response.status_code != expected:
-        fail(f"{method} {path}: expected {expected}, got {response.status_code}: {response.text[:500]}")
+    accepted = (expected,) if isinstance(expected, int) else expected
+    if response.status_code not in accepted:
+        fail(
+            f"{method} {path}: expected {accepted}, got "
+            f"{response.status_code}: {response.text[:500]}"
+        )
     return response
 
 
@@ -111,7 +124,7 @@ def bootstrap_and_login() -> str:
         call(
             "POST",
             "/api/auth/bootstrap",
-            expected=201,
+            expected=(200, 201),
             json={"username": "incident-admin", "password": "IncidentTest!123"},
         )
     payload = call(
@@ -140,6 +153,22 @@ def main() -> None:
             me = call("GET", "/api/auth/me", token=token).json()
             if me.get("username") != "incident-admin":
                 fail("PC admin session did not resolve without tenant header")
+
+            # A real write operation must also work from the browser admin.
+            created = call(
+                "POST",
+                "/api/news",
+                token=token,
+                expected=(200, 201),
+                json={
+                    "title": "Admin-Reparaturtest",
+                    "text": "Schreibzugriff funktioniert wieder.",
+                    "date": "05.10.2026",
+                    "image_url": "",
+                },
+            ).json()
+            if not created.get("id"):
+                fail("PC admin write returned no saved record")
 
             # Mobile/white-label clients that explicitly present another club
             # must remain blocked at the HTTP tenant boundary.
