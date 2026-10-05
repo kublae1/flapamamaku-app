@@ -563,7 +563,7 @@ def install_phase45(
             raise HTTPException(status_code=404, detail="Sujet-Logo nicht gefunden")
         return Response(content=row["logo_data"], media_type=row["logo_mime"] or "image/jpeg")
 
-    @app.delete("/api/sujets/{sujet_id}", status_code=204)
+    @app.delete("/api/sujets/{sujet_id}")
     def delete_sujet(
         sujet_id: int,
         _: dict[str, Any] = Depends(require("can_photos")),
