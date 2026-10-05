@@ -118,8 +118,8 @@ def main():
             _, blocked = call(cbase, "/api/news", expect=423)
             assert blocked["club_status"] == "suspended"
             call(pbase, f"/api/platform/clubs/{pilot_id}/resume", "POST", token=token)
-            status, _ = call(cbase, "/api/news")
-            assert status == 200
+            status, _ = call(cbase, "/api/news", expect=401)
+            assert status == 401
 
             with sqlite3.connect(platform_db) as db:
                 inv = db.execute("SELECT id FROM platform_invoices WHERE club_id=?", (pilot_id,)).fetchone()[0]
@@ -129,8 +129,8 @@ def main():
             assert billing2["clubs_suspended"] == 1
             call(cbase, "/api/news", expect=423)
             call(pbase, f"/api/platform/invoices/{inv}/paid", "POST", token=token)
-            status, _ = call(cbase, "/api/news")
-            assert status == 200
+            status, _ = call(cbase, "/api/news", expect=401)
+            assert status == 401
 
             _, audit = call(pbase, "/api/platform/audit", token=token)
             actions = {row["action"] for row in audit}
