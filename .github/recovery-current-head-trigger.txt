@@ -1,0 +1,1 @@
+Trigger full Recovery Masterplan Gate for current recovery branch head after automated patch commits.
