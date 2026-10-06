@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -12,6 +13,13 @@ ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
 PROFILE_DIR = ROOT / "config" / "white-label"
 PILOT_NAMES = ("pilot-verein-a", "pilot-verein-b", "pilot-verein-c")
+
+
+def current_schema_version() -> int:
+    source = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")
+    match = re.search(r"^CURRENT_SCHEMA_VERSION\s*=\s*(\d+)\s*$", source, re.MULTILINE)
+    assert match is not None, "CURRENT_SCHEMA_VERSION not found"
+    return int(match.group(1))
 
 
 def run_instance(profile: dict[str, object], db_path: Path, backup_dir: Path) -> None:
@@ -48,6 +56,7 @@ print(main.INSTANCE_ID)
 
 
 def main() -> None:
+    expected_schema = current_schema_version()
     profiles: list[dict[str, object]] = []
     for name in PILOT_NAMES:
         path = PROFILE_DIR / f"{name}.json"
@@ -79,7 +88,9 @@ def main() -> None:
                     db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
                 )
                 rows = db.execute("SELECT title, club_id FROM news").fetchall()
-                assert version == 10, f"{instance_id}: unexpected schema version {version}"
+                assert version == expected_schema, (
+                    f"{instance_id}: unexpected schema version {version}; expected {expected_schema}"
+                )
                 assert len(rows) == 1
                 assert rows[0]["title"] == instance_id
                 assert rows[0]["club_id"] == instance_id
@@ -103,7 +114,7 @@ def main() -> None:
         for instance_id in PILOT_NAMES:
             assert observed[instance_id] == [instance_id]
 
-    print("Phase 8 pilot matrix passed for 3 isolated club instances")
+    print(f"Phase 8 pilot matrix passed for 3 isolated club instances at schema {expected_schema}")
 
 
 if __name__ == "__main__":
