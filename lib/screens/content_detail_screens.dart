@@ -275,9 +275,61 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                         icon: Icons.location_on_outlined,
                         text: event.location,
                       ),
+                      if (event.endTime.isNotEmpty) ...[
+                        const _DarkDivider(),
+                        _DarkInfoRow(icon: Icons.schedule_rounded, text: 'Ende: ${event.endTime}'),
+                      ],
+                      if (event.meetingPoint.isNotEmpty) ...[
+                        const _DarkDivider(),
+                        _DarkInfoRow(icon: Icons.place_outlined, text: 'Treffpunkt: ${event.meetingPoint}'),
+                      ],
+                      if (event.responsible.isNotEmpty) ...[
+                        const _DarkDivider(),
+                        _DarkInfoRow(icon: Icons.person_outline, text: 'Verantwortlich: ${event.responsible}'),
+                      ],
+                      if (event.registrationDeadline.isNotEmpty) ...[
+                        const _DarkDivider(),
+                        _DarkInfoRow(icon: Icons.timer_outlined, text: 'Anmeldeschluss: ${event.registrationDeadline}'),
+                      ],
                     ],
                   ),
                 ),
+                if (event.description.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _DarkPanel(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(event.description, style: const TextStyle(color: Colors.white70, height: 1.5)),
+                    ),
+                  ),
+                ],
+                if (event.location.isNotEmpty || event.documentUrl.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      if (event.location.isNotEmpty)
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            final uri = Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': event.location});
+                            launchUrl(uri, mode: LaunchMode.externalApplication);
+                          },
+                          icon: const Icon(Icons.map_outlined),
+                          label: const Text('Karte'),
+                        ),
+                      if (event.documentUrl.isNotEmpty)
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            final uri = Uri.tryParse(event.documentUrl);
+                            if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
+                          },
+                          icon: const Icon(Icons.description_outlined),
+                          label: const Text('Dokument'),
+                        ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -288,7 +340,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                           foregroundColor: Colors.white,
                           minimumSize: const Size.fromHeight(52),
                         ),
-                        onPressed: _register,
+                        onPressed: event.registrationEnabled ? _register : null,
                         icon: Icon(
                           registered
                               ? Icons.check_circle

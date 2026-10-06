@@ -155,6 +155,13 @@ class AdminScreen extends StatelessWidget {
     final title = TextEditingController(text: existing?.title ?? '');
     final location = TextEditingController(text: existing?.location ?? '');
     final time = TextEditingController(text: existing?.time ?? '');
+    final endTime = TextEditingController(text: existing?.endTime ?? '');
+    final meetingPoint = TextEditingController(text: existing?.meetingPoint ?? '');
+    final description = TextEditingController(text: existing?.description ?? '');
+    final responsible = TextEditingController(text: existing?.responsible ?? '');
+    final registrationDeadline = TextEditingController(text: existing?.registrationDeadline ?? '');
+    final documentUrl = TextEditingController(text: existing?.documentUrl ?? '');
+    var registrationEnabled = existing?.registrationEnabled ?? true;
     XFile? selectedImage;
     bool removeExistingImage = false;
 
@@ -185,7 +192,43 @@ class AdminScreen extends StatelessWidget {
                 ),
                 TextField(
                   controller: time,
-                  decoration: const InputDecoration(labelText: 'Zeit'),
+                  decoration: const InputDecoration(labelText: 'Beginn'),
+                ),
+                TextField(
+                  controller: endTime,
+                  decoration: const InputDecoration(labelText: 'Ende (optional)'),
+                ),
+                TextField(
+                  controller: meetingPoint,
+                  decoration: const InputDecoration(labelText: 'Treffpunkt'),
+                ),
+                TextField(
+                  controller: responsible,
+                  decoration: const InputDecoration(labelText: 'Verantwortliche Person'),
+                ),
+                TextField(
+                  controller: registrationDeadline,
+                  decoration: const InputDecoration(
+                    labelText: 'Anmeldeschluss',
+                    hintText: 'YYYY-MM-DDTHH:MM:SS',
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Anmeldung möglich'),
+                  value: registrationEnabled,
+                  onChanged: (value) => setDialogState(() => registrationEnabled = value),
+                ),
+                TextField(
+                  controller: description,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: const InputDecoration(labelText: 'Beschreibung'),
+                ),
+                TextField(
+                  controller: documentUrl,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(labelText: 'Dokument-Link'),
                 ),
                 const SizedBox(height: 14),
                 OutlinedButton.icon(
@@ -248,6 +291,13 @@ class AdminScreen extends StatelessWidget {
       time.text.trim(),
       id: existing?.id,
       eventDate: eventDate.text.trim(),
+      endTime: endTime.text.trim(),
+      meetingPoint: meetingPoint.text.trim(),
+      description: description.text.trim(),
+      responsible: responsible.text.trim(),
+      registrationDeadline: registrationDeadline.text.trim(),
+      registrationEnabled: registrationEnabled,
+      documentUrl: documentUrl.text.trim(),
       imageUrl: existing?.imageUrl ?? '',
     );
 
