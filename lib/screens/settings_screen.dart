@@ -4,6 +4,7 @@ import '../data/app_store.dart';
 import '../theme/flap_brand.dart';
 import 'password_change_screen.dart';
 
+// Validation marker for the push/biometric recovery build.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
