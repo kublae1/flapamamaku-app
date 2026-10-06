@@ -1,0 +1,40 @@
+name: Recovery Reset App To 581
+
+on:
+  push:
+    branches:
+      - recovery/masterplan-on-175c23b-20261006
+    paths:
+      - .github/workflows/recovery-reset-app-581.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reset-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: recovery/masterplan-on-175c23b-20261006
+          fetch-depth: 0
+      - name: Restore Flutter app from APK 581 commit
+        shell: bash
+        run: |
+          git checkout 175c23bac00df3766001d1ec4e35a9d18a1497d3 -- \
+            lib/data/api_service.dart \
+            lib/models/app_data.dart \
+            lib/screens/admin_screen.dart \
+            lib/screens/content_detail_screens.dart
+          git rm -f --ignore-unmatch lib/data/runtime_content_policy.dart test/runtime_content_policy_test.dart
+      - name: Commit 581 app baseline
+        shell: bash
+        run: |
+          if git diff --cached --quiet; then
+            echo "No app reset changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Recovery: restore Flutter app baseline from APK 581"
+          git push origin HEAD:recovery/masterplan-on-175c23b-20261006
