@@ -24,8 +24,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt httpx
-      - name: Compile stable backend and isolated platform
-        run: python -m py_compile backend/app/main.py backend/app/platform.py backend/app/platform_store.py backend/app/platform_runtime.py
+      - name: Compile stable backend and Masterplan extensions
+        run: python -m py_compile backend/app/main.py backend/app/runtime.py backend/app/masterplan_extensions.py backend/app/platform.py backend/app/platform_store.py backend/app/platform_runtime.py
       - name: Verify CMS contract
         run: python backend/tests/admin_cms_contract.py
       - name: Verify Phase 6 operations
@@ -37,7 +37,7 @@ jobs:
         run: |
           python tests/phase9_platform_contract.py
           python tests/platform_club_selector_contract.py
-      - name: Start integrated multi-club backend
+      - name: Start integrated multi-club Masterplan runtime
         env:
           FLAPAMAMAKU_DB: /tmp/recovery-masterplan.db
           FLAPAMAMAKU_BACKUP_DIR: /tmp/recovery-masterplan-backups
@@ -50,7 +50,7 @@ jobs:
           rm -rf /tmp/recovery-masterplan-backups
           mkdir -p /tmp/recovery-masterplan-backups
           cd backend
-          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8087 >/tmp/recovery-masterplan.log 2>&1 &
+          nohup python -m uvicorn app.runtime:app --host 127.0.0.1 --port 8087 >/tmp/recovery-masterplan.log 2>&1 &
           echo $! >/tmp/recovery-masterplan.pid
       - name: Verify Phase 1 baseline
         env:
