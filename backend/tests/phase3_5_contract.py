@@ -173,13 +173,22 @@ def verify_sqlite_club_integrity() -> None:
         for table in sorted(required):
             columns = {str(row["name"]) for row in db.execute(f"PRAGMA table_info({table})")}
             if "club_id" not in columns:
-                # Integrated sessions bind through active_club_id instead.
+                # Integrated sessions bind through active_club_id. Users are
+                # intentionally many-to-many through user_clubs, not a single
+                # club_id column. Both references must remain valid.
                 if table == "sessions" and "active_club_id" in columns:
                     bad = db.execute(
                         "SELECT COUNT(*) FROM sessions s LEFT JOIN clubs c ON c.id=s.active_club_id WHERE s.active_club_id IS NOT NULL AND c.id IS NULL"
                     ).fetchone()[0]
                     if bad:
                         fail("sessions contain invalid active_club_id")
+                    continue
+                if table == "users" and "user_clubs" in tables:
+                    bad = db.execute(
+                        "SELECT COUNT(*) FROM user_clubs uc LEFT JOIN users u ON u.id=uc.user_id LEFT JOIN clubs c ON c.id=uc.club_id WHERE u.id IS NULL OR c.id IS NULL"
+                    ).fetchone()[0]
+                    if bad:
+                        fail("user_clubs contains invalid user/club references")
                     continue
                 fail(f"{table} is missing club_id")
             bad = db.execute(
