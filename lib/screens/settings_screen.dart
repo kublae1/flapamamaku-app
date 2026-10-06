@@ -6,13 +6,83 @@ import '../theme/flap_brand.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  Future<void> _chooseClub(BuildContext context) async {
+    final store = AppStoreScope.of(context);
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: const Color(0xFF191B1E),
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          children: [
+            const ListTile(
+              title: Text(
+                'Verein wechseln',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+            for (final club in store.accessibleClubs)
+              ListTile(
+                leading: Icon(
+                  club['current'] == true
+                      ? Icons.check_circle_rounded
+                      : Icons.groups_rounded,
+                  color: club['current'] == true
+                      ? FlapBrand.gold
+                      : Colors.white70,
+                ),
+                title: Text(
+                  club['name']?.toString() ?? 'Verein',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                subtitle: (club['short_name']?.toString() ?? '').isEmpty
+                    ? null
+                    : Text(
+                        club['short_name'].toString(),
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                onTap: () {
+                  final rawId = club['id'];
+                  final id = rawId is int
+                      ? rawId
+                      : int.tryParse(rawId?.toString() ?? '');
+                  if (id != null) Navigator.of(context).pop(id);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || selected == store.currentClubId) return;
+    final ok = await store.selectClub(selected);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            store.authError ?? 'Verein konnte nicht gewechselt werden.',
+          ),
+        ),
+      );
+    } else if (context.mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
   static const String appVersion = String.fromEnvironment(
     'APP_VERSION',
-    defaultValue: '0.8.33',
+    defaultValue: '0.8.19',
   );
   static const String buildNumber = String.fromEnvironment(
     'APP_BUILD_NUMBER',
-    defaultValue: '35',
+    defaultValue: '34',
   );
 
   @override
@@ -61,49 +131,50 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 10),
-          _SettingsCard(
-            child: SwitchListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 4,
-              ),
-              secondary: const Icon(
-                Icons.fingerprint_rounded,
+          if (store.canSwitchClub) ...[
+            const SizedBox(height: 22),
+            const Text(
+              'VEREIN',
+              style: TextStyle(
                 color: FlapBrand.gold,
-                size: 29,
+                fontWeight: FontWeight.w900,
+                fontSize: 11,
+                letterSpacing: 1.5,
               ),
-              title: const Text(
-                'Biometrische Anmeldung',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              subtitle: Text(
-                store.biometricAvailable
-                    ? 'App nach dem Start mit Fingerabdruck oder Gerätebiometrie entsperren'
-                    : 'Wird beim Aktivieren auf diesem Gerät geprüft',
-                style: const TextStyle(color: Colors.white60),
-              ),
-              value: store.biometricEnabled,
-              activeThumbColor: Colors.white,
-              activeTrackColor: store.themeColor,
-              onChanged: (value) async {
-                final ok = await store.setBiometricEnabled(value);
-                if (!ok && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        store.authError ??
-                            'Biometrische Anmeldung konnte nicht geändert werden.',
-                      ),
-                    ),
-                  );
-                }
-              },
             ),
-          ),
+            const SizedBox(height: 10),
+            _SettingsCard(
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  Icons.groups_rounded,
+                  color: FlapBrand.gold,
+                  size: 29,
+                ),
+                title: Text(
+                  store.currentClubName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                subtitle: Text(
+                  store.isSuperAdmin
+                      ? 'Super-Admin · Verein wechseln'
+                      : 'Verein wechseln',
+                  style: const TextStyle(color: Colors.white60),
+                ),
+                trailing: const Icon(
+                  Icons.swap_horiz_rounded,
+                  color: Colors.white70,
+                ),
+                onTap: () => _chooseClub(context),
+              ),
+            ),
+          ],
           const SizedBox(height: 22),
           const Text(
             'BENACHRICHTIGUNGEN',

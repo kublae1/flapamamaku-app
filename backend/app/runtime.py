@@ -1,112 +1,464 @@
-import asyncio
 import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from fastapi import Depends, Request
+from fastapi import Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import main as main_app
 
 app = main_app.app
 INSTANCE_ID = main_app.INSTANCE_ID
-DB_PATH = main_app.DB_PATH
 PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db"))
-PUBLIC_URL = os.getenv("FLAPAMAMAKU_PUBLIC_URL", "").strip().rstrip("/")
-RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", "0.9.2").strip() or "0.9.2"
 
-# Keep the visible backend version aligned with the repaired Phase-9 runtime
-# without rewriting historical migration code in app.main.
+# Production wrapper only. The recovered multi-club core in app.main is the
+# single source of truth for club selection, tenant isolation, media, members,
+# billing and suspension. Do not inject a second platform/club selector here.
+RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", "0.9.3").strip() or "0.9.3"
 main_app.API_VERSION = RUNTIME_VERSION
 app.version = RUNTIME_VERSION
 
 
-def _club_name() -> str:
-    try:
-        db = sqlite3.connect(DB_PATH, timeout=2)
-        try:
-            row = db.execute("SELECT app_name FROM app_config WHERE id=1").fetchone()
-        finally:
-            db.close()
-        if row and str(row[0] or "").strip():
-            return str(row[0]).strip()
-    except sqlite3.Error:
-        pass
-    return "FLAPAMAMAKU" if INSTANCE_ID == "flapamamaku" else INSTANCE_ID
+_TENANT_TABLES = (
+    "news",
+    "events",
+    "members",
+    "member_filters",
+    "content_items",
+    "content_images",
+    "event_registrations",
+    "users",
+    "sessions",
+    "push_tokens",
+    "annual_sujets",
+    "annual_sujet_images",
+    "gallery_snapshots",
+    "poll_votes",
+    "poll_suggestions",
+    "push_notifications",
+)
 
 
-def register_platform_club() -> bool:
-    """Register this running club instance in the shared Phase-9 platform DB.
+def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row["name"]) for row in db.execute(f"PRAGMA table_info({table})")}
 
-    Registration is intentionally idempotent. Existing billing, suspension and
-    accounting values are never overwritten by a club runtime.
+
+def _table_exists(db: sqlite3.Connection, table: str) -> bool:
+    return db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone() is not None
+
+
+def _drop_single_instance_guards(db: sqlite3.Connection) -> None:
+    """Remove Phase-4/5 triggers that reject integrated numeric club IDs."""
+    rows = db.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type='trigger'
+          AND (name LIKE '%_club_guard_insert' OR name LIKE '%_club_guard_update')
+        """
+    ).fetchall()
+    for row in rows:
+        name = str(row["name"]).replace('"', '""')
+        db.execute(f'DROP TRIGGER IF EXISTS "{name}"')
+
+
+def _normalize_club_ids(db: sqlite3.Connection) -> None:
+    """Convert legacy instance-slug club IDs back to integrated numeric IDs."""
+    if not _table_exists(db, "clubs"):
+        return
+    for table in _TENANT_TABLES:
+        if not _table_exists(db, table) or "club_id" not in _columns(db, table):
+            continue
+        safe_table = table.replace('"', '""')
+        db.execute(
+            f"""
+            UPDATE "{safe_table}"
+            SET club_id = (
+                SELECT c.id
+                FROM clubs c
+                WHERE lower(c.slug) = lower(CAST("{safe_table}".club_id AS TEXT))
+                LIMIT 1
+            )
+            WHERE typeof(club_id) = 'text'
+              AND EXISTS (
+                SELECT 1 FROM clubs c
+                WHERE lower(c.slug) = lower(CAST("{safe_table}".club_id AS TEXT))
+              )
+            """
+        )
+
+
+def pre_recover_multiclub_state() -> None:
+    """Repair Masterplan guards before the stable schema initializer can write.
+
+    The old Phase-4/5 startup installed triggers that accepted only the literal
+    instance slug (for example ``flapamamaku``).  The recovered stable backend
+    legitimately uses numeric club IDs.  Those guards therefore have to be
+    removed before app.main's own startup/migrations run, not afterwards.
     """
-    if not PLATFORM_DB.exists():
-        return False
+    if not main_app.DB_PATH.exists():
+        return
     try:
-        db = sqlite3.connect(PLATFORM_DB, timeout=5)
-        db.row_factory = sqlite3.Row
-        try:
-            table = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_clubs'"
-            ).fetchone()
-            if not table:
-                return False
-            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-            existing = db.execute(
-                "SELECT id,name,api_base_url FROM platform_clubs WHERE instance_id=? COLLATE NOCASE",
-                (INSTANCE_ID,),
-            ).fetchone()
-            if existing is None:
-                db.execute(
-                    """
-                    INSERT INTO platform_clubs(
-                      instance_id,name,api_base_url,billing_email,monthly_fee_cents,
-                      currency,billing_day,due_days,auto_suspend_overdue,status,
-                      suspension_reason,created_at,updated_at
-                    ) VALUES (?,?,?,'',0,'CHF',1,30,0,'active','',?,?)
-                    """,
-                    (INSTANCE_ID, _club_name(), PUBLIC_URL, now, now),
-                )
-            else:
-                name = str(existing["name"] or "").strip()
-                url = str(existing["api_base_url"] or "").strip()
-                db.execute(
-                    """
-                    UPDATE platform_clubs
-                    SET name=?, api_base_url=?, updated_at=?
-                    WHERE id=?
-                    """,
-                    (
-                        _club_name() if not name or name == INSTANCE_ID else name,
-                        PUBLIC_URL if PUBLIC_URL and not url else url,
-                        now,
-                        existing["id"],
-                    ),
-                )
+        with main_app.connect() as db:
+            _drop_single_instance_guards(db)
+            _normalize_club_ids(db)
             db.commit()
-            return True
-        finally:
-            db.close()
     except sqlite3.Error:
-        return False
+        main_app.logger.exception("Pre-start multi-club recovery failed")
+        raise
 
 
-async def _platform_registration_loop() -> None:
-    for _ in range(120):
-        if await asyncio.to_thread(register_platform_club):
-            return
-        await asyncio.sleep(2)
+# app.main has already registered its startup handlers when runtime is imported.
+# Put the compatibility repair in front of them so a migrated production DB can
+# be opened safely on the very first 0.9.3 start.
+if pre_recover_multiclub_state not in app.router.on_startup:
+    app.router.on_startup.insert(0, pre_recover_multiclub_state)
+
+
+def _install_member_mapping(db: sqlite3.Connection) -> None:
+    """Persist member identity per user and club instead of globally."""
+    required = {"users", "members", "user_clubs"}
+    if not all(_table_exists(db, table) for table in required):
+        return
+    if "club_id" not in _columns(db, "members"):
+        return
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_club_members (
+            user_id INTEGER NOT NULL,
+            club_id INTEGER NOT NULL,
+            member_id INTEGER,
+            PRIMARY KEY(user_id, club_id),
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(club_id) REFERENCES clubs(id),
+            FOREIGN KEY(member_id) REFERENCES members(id)
+        )
+        """
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_club_members_member ON user_club_members(member_id)"
+    )
+
+    # Preserve every already-valid legacy association. Cross-club associations
+    # are intentionally not copied.
+    db.execute(
+        """
+        INSERT OR IGNORE INTO user_club_members(user_id, club_id, member_id)
+        SELECT uc.user_id, uc.club_id,
+               CASE WHEN m.club_id = uc.club_id THEN u.member_id ELSE NULL END
+        FROM user_clubs uc
+        JOIN users u ON u.id = uc.user_id
+        LEFT JOIN members m ON m.id = u.member_id
+        """
+    )
+
+    # Conservative recovery: map only an unambiguous same-club member whose
+    # name or e-mail matches the login name.  Ambiguous rows stay unassigned
+    # instead of risking another cross-club identity leak.
+    missing = db.execute(
+        """
+        SELECT ucm.user_id, ucm.club_id, u.username
+        FROM user_club_members ucm
+        JOIN users u ON u.id = ucm.user_id
+        WHERE ucm.member_id IS NULL
+        """
+    ).fetchall()
+    for row in missing:
+        matches = db.execute(
+            """
+            SELECT id
+            FROM members
+            WHERE club_id = ?
+              AND (
+                lower(trim(email)) = lower(trim(?))
+                OR lower(trim(name)) = lower(trim(?))
+              )
+            ORDER BY id
+            """,
+            (row["club_id"], row["username"], row["username"]),
+        ).fetchall()
+        if len(matches) == 1:
+            db.execute(
+                """
+                UPDATE user_club_members
+                SET member_id = ?
+                WHERE user_id = ? AND club_id = ?
+                """,
+                (matches[0]["id"], row["user_id"], row["club_id"]),
+            )
+
+    # Cross-club member IDs are forbidden at the storage boundary.
+    db.execute("DROP TRIGGER IF EXISTS user_club_members_guard_insert")
+    db.execute("DROP TRIGGER IF EXISTS user_club_members_guard_update")
+    db.execute(
+        """
+        CREATE TRIGGER user_club_members_guard_insert
+        BEFORE INSERT ON user_club_members
+        WHEN NEW.member_id IS NOT NULL
+         AND NOT EXISTS (
+             SELECT 1 FROM members m
+             WHERE m.id = NEW.member_id AND m.club_id = NEW.club_id
+         )
+        BEGIN
+            SELECT RAISE(ABORT, 'member belongs to another club');
+        END
+        """
+    )
+    db.execute(
+        """
+        CREATE TRIGGER user_club_members_guard_update
+        BEFORE UPDATE OF member_id, club_id ON user_club_members
+        WHEN NEW.member_id IS NOT NULL
+         AND NOT EXISTS (
+             SELECT 1 FROM members m
+             WHERE m.id = NEW.member_id AND m.club_id = NEW.club_id
+         )
+        BEGIN
+            SELECT RAISE(ABORT, 'member belongs to another club');
+        END
+        """
+    )
+
+    # A newly assigned member is stored against that member's own club.
+    db.execute("DROP TRIGGER IF EXISTS users_member_mapping_update")
+    db.execute(
+        """
+        CREATE TRIGGER users_member_mapping_update
+        AFTER UPDATE OF member_id ON users
+        WHEN NEW.member_id IS NOT NULL
+        BEGIN
+            INSERT INTO user_club_members(user_id, club_id, member_id)
+            SELECT NEW.id, m.club_id, NEW.member_id
+            FROM members m
+            JOIN user_clubs uc
+              ON uc.user_id = NEW.id AND uc.club_id = m.club_id AND uc.active = 1
+            WHERE m.id = NEW.member_id
+            ON CONFLICT(user_id, club_id) DO UPDATE SET member_id=excluded.member_id;
+        END
+        """
+    )
+
+    db.execute("DROP TRIGGER IF EXISTS user_clubs_member_mapping_insert")
+    db.execute(
+        """
+        CREATE TRIGGER user_clubs_member_mapping_insert
+        AFTER INSERT ON user_clubs
+        BEGIN
+            INSERT OR IGNORE INTO user_club_members(user_id, club_id, member_id)
+            SELECT NEW.user_id, NEW.club_id,
+                   CASE WHEN m.club_id = NEW.club_id THEN u.member_id ELSE NULL END
+            FROM users u
+            LEFT JOIN members m ON m.id = u.member_id
+            WHERE u.id = NEW.user_id;
+        END
+        """
+    )
+
+    # Keep the historical users.member_id usable for old code paths.  Client
+    # identity is nevertheless resolved below from user_club_members, so two
+    # simultaneous sessions in different clubs cannot leak identities.
+    if _table_exists(db, "sessions") and "active_club_id" in _columns(db, "sessions"):
+        db.execute("DROP TRIGGER IF EXISTS sessions_member_context_insert")
+        db.execute("DROP TRIGGER IF EXISTS sessions_member_context_update")
+        db.execute(
+            """
+            CREATE TRIGGER sessions_member_context_insert
+            AFTER INSERT ON sessions
+            WHEN NEW.active_club_id IS NOT NULL
+            BEGIN
+                UPDATE users
+                SET member_id = (
+                    SELECT ucm.member_id
+                    FROM user_club_members ucm
+                    WHERE ucm.user_id = NEW.user_id
+                      AND ucm.club_id = NEW.active_club_id
+                )
+                WHERE id = NEW.user_id;
+            END
+            """
+        )
+        db.execute(
+            """
+            CREATE TRIGGER sessions_member_context_update
+            AFTER UPDATE OF active_club_id ON sessions
+            WHEN NEW.active_club_id IS NOT NULL
+            BEGIN
+                UPDATE users
+                SET member_id = (
+                    SELECT ucm.member_id
+                    FROM user_club_members ucm
+                    WHERE ucm.user_id = NEW.user_id
+                      AND ucm.club_id = NEW.active_club_id
+                )
+                WHERE id = NEW.user_id;
+            END
+            """
+        )
+
+
+def _scoped_member_id(
+    db: sqlite3.Connection,
+    user_id: int,
+    club_id: int,
+) -> int | None:
+    if _table_exists(db, "user_club_members"):
+        row = db.execute(
+            """
+            SELECT ucm.member_id
+            FROM user_club_members ucm
+            LEFT JOIN members m
+              ON m.id = ucm.member_id AND m.club_id = ucm.club_id
+            WHERE ucm.user_id = ? AND ucm.club_id = ?
+              AND (ucm.member_id IS NULL OR m.id IS NOT NULL)
+            """,
+            (user_id, club_id),
+        ).fetchone()
+        if row is not None:
+            return int(row["member_id"]) if row["member_id"] is not None else None
+
+    # Safe legacy fallback: accept users.member_id only when that member belongs
+    # to the active club.  A foreign member ID is treated as no mapping.
+    row = db.execute(
+        """
+        SELECT u.member_id
+        FROM users u
+        JOIN members m ON m.id = u.member_id AND m.club_id = ?
+        WHERE u.id = ?
+        """,
+        (club_id, user_id),
+    ).fetchone()
+    return int(row["member_id"]) if row is not None and row["member_id"] is not None else None
+
+
+def _scoped_user_payload(
+    db: sqlite3.Connection,
+    row: sqlite3.Row,
+    club_id: int,
+) -> dict[str, Any]:
+    user_id = int(row["id"])
+    member_id = _scoped_member_id(db, user_id, club_id)
+    member_name = ""
+    if member_id is not None:
+        member = db.execute(
+            "SELECT name FROM members WHERE id = ? AND club_id = ?",
+            (member_id, club_id),
+        ).fetchone()
+        if member is not None:
+            member_name = str(member["name"] or "")
+
+    club_role = main_app._user_club_access(db, user_id, club_id)
+    if club_role is None:
+        raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
+
+    club = db.execute(
+        """
+        SELECT id, billing_status, billing_suspension_reason
+        FROM clubs
+        WHERE id = ? AND active = 1
+        """,
+        (club_id,),
+    ).fetchone()
+    if club is None:
+        raise HTTPException(status_code=401, detail="Verein nicht gefunden")
+    if str(club["billing_status"] or "active") != "active" and club_role != "super_admin":
+        reason = str(club["billing_suspension_reason"] or "Ausstehende Zahlung")
+        raise HTTPException(status_code=403, detail=f"Verein gesperrt: {reason}")
+
+    item = dict(row)
+    item["member_id"] = member_id
+    item["member_name"] = member_name
+    item["club_role"] = club_role
+    item["current_club_id"] = club_id
+    item["is_super_admin"] = club_role == "super_admin"
+    return main_app._serialize_user(item)
+
+
+_legacy_current_user = main_app.current_user
+_legacy_user_profile = main_app._user_profile
+
+
+def scoped_current_user(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    token = main_app._extract_token(authorization)
+    now = datetime.now(timezone.utc).isoformat()
+    with main_app.connect() as db:
+        row = db.execute(
+            """
+            SELECT u.*, s.active_club_id
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+              AND s.expires_at > ?
+              AND u.active = 1
+            """,
+            (main_app._token_hash(token), now),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="Sitzung ungültig oder abgelaufen")
+        club_id = int(row["active_club_id"] or main_app._instance_club_id(db))
+        return _scoped_user_payload(db, row, club_id)
+
+
+def scoped_user_profile(user_id: int) -> dict[str, Any]:
+    with main_app.connect() as db:
+        club_id = main_app._active_club_id(db)
+        row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
+        return _scoped_user_payload(db, row, club_id)
+
+
+def _rebind_current_user_dependency(dependant: Any) -> None:
+    if getattr(dependant, "call", None) is _legacy_current_user:
+        dependant.call = scoped_current_user
+    for child in getattr(dependant, "dependencies", ()) or ():
+        _rebind_current_user_dependency(child)
+
+
+# Functions such as login() resolve these names dynamically, while FastAPI
+# Depends objects captured the original callable during route registration.
+main_app.current_user = scoped_current_user
+main_app._user_profile = scoped_user_profile
+for _route in app.routes:
+    _dependant = getattr(_route, "dependant", None)
+    if _dependant is not None:
+        _rebind_current_user_dependency(_dependant)
+
+
+def recover_multiclub_state() -> None:
+    try:
+        with main_app.connect() as db:
+            _drop_single_instance_guards(db)
+            _normalize_club_ids(db)
+            _install_member_mapping(db)
+            db.commit()
+    except sqlite3.Error:
+        main_app.logger.exception("Multi-club recovery migration failed")
+        raise
 
 
 @app.on_event("startup")
-async def register_with_platform() -> None:
-    asyncio.create_task(_platform_registration_loop())
+async def run_multiclub_recovery() -> None:
+    # This second pass runs after app.main created/updated every stable table.
+    recover_multiclub_state()
 
 
-def platform_access_state():
-    if not PLATFORM_DB.exists():
+def platform_access_state() -> tuple[str, str]:
+    """Keep Phase-9 external suspension for true one-club pilot instances.
+
+    The recovered FLAPAMAMAKU deployment is an integrated multi-club host and
+    therefore uses the stable per-club billing/suspension model in app.main.
+    Applying one external status to that host would incorrectly suspend every
+    club at once.
+    """
+    if INSTANCE_ID == "flapamamaku" or not PLATFORM_DB.exists():
         return "active", ""
     try:
         db = sqlite3.connect(f"file:{PLATFORM_DB}?mode=ro", uri=True, timeout=2)
@@ -125,125 +477,22 @@ def platform_access_state():
     return str(row["status"]), str(row["suspension_reason"] or "")
 
 
-@app.get("/api/system/platform-clubs")
-def platform_clubs_for_admin(
-    _user: dict = Depends(main_app.require("can_manage_users")),
-):
-    """Return the Phase-9 club registry to an authenticated club administrator."""
-    if not PLATFORM_DB.exists():
-        return []
-    try:
-        db = sqlite3.connect(f"file:{PLATFORM_DB}?mode=ro", uri=True, timeout=2)
-        db.row_factory = sqlite3.Row
-        try:
-            table = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_clubs'"
-            ).fetchone()
-            if not table:
-                return []
-            rows = db.execute(
-                """
-                SELECT id, instance_id, name, api_base_url, status
-                FROM platform_clubs
-                ORDER BY name COLLATE NOCASE ASC, instance_id ASC
-                """
-            ).fetchall()
-        finally:
-            db.close()
-    except sqlite3.Error:
-        return []
-    return [dict(row) for row in rows]
-
-
-def _admin_selector_injection() -> str:
-    return r'''
-<style>
-#platform-club-switcher{display:none;margin:0 auto 18px;max-width:1480px;background:#191b1e;border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
-#platform-club-switcher .row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}#platform-club-switcher label{margin:0;min-width:260px;flex:1}#platform-club-switcher select{margin-top:6px}#platform-club-switcher button{border:0;border-radius:10px;padding:11px 16px;background:#8a101b;color:white;font-weight:800;cursor:pointer}#platform-club-switcher .meta{margin-top:8px}
-</style>
-<script>
-(() => {
-  let lastToken = '';
-  let loading = false;
-  const box = document.createElement('section');
-  box.id = 'platform-club-switcher';
-  box.innerHTML = '<div class="row"><label>Verein auswählen<select id="platform-club-select"><option value="">Verein auswählen …</option></select></label><button type="button" id="platform-club-open">Vereins-Admin öffnen</button></div><div class="meta" id="platform-club-info">Vereine werden geladen …</div>';
-  const main = document.querySelector('main');
-  if (main) main.insertBefore(box, main.firstChild);
-
-  async function refreshClubSelector() {
-    const currentToken = sessionStorage.getItem('flapamamaku_token') || '';
-    if (!currentToken) {
-      lastToken = '';
-      box.style.display = 'none';
-      return;
-    }
-    if (loading || currentToken === lastToken) return;
-    loading = true;
-    try {
-      const response = await fetch('/api/system/platform-clubs', {
-        headers: {Authorization: 'Bearer ' + currentToken},
-        cache: 'no-store'
-      });
-      if (!response.ok) {
-        box.style.display = 'none';
-        return;
-      }
-      const clubs = await response.json();
-      const select = document.getElementById('platform-club-select');
-      select.innerHTML = '<option value="">Verein auswählen …</option>';
-      for (const club of clubs) {
-        const option = document.createElement('option');
-        option.value = club.api_base_url || '';
-        option.textContent = `${club.name || club.instance_id} (${club.instance_id})${club.status === 'suspended' ? ' – gesperrt' : ''}`;
-        option.dataset.instanceId = club.instance_id || '';
-        select.appendChild(option);
-      }
-      document.getElementById('platform-club-info').textContent = clubs.length
-        ? `${clubs.length} Verein(e) verfügbar.`
-        : 'Noch keine Vereine in der Plattform registriert.';
-      box.style.display = 'block';
-      lastToken = currentToken;
-    } catch (_) {
-      box.style.display = 'none';
-    } finally {
-      loading = false;
-    }
-  }
-
-  document.getElementById('platform-club-open').addEventListener('click', () => {
-    const select = document.getElementById('platform-club-select');
-    const option = select.options[select.selectedIndex];
-    if (!option || !select.value) return;
-    const base = select.value.replace(/\/$/, '');
-    window.location.href = base + '/admin';
-  });
-
-  refreshClubSelector();
-  setInterval(refreshClubSelector, 1000);
-})();
-</script>
-'''
-
-
 @app.middleware("http")
-async def platform_access_control(request: Request, call_next):
+async def phase9_pilot_instance_access_control(request: Request, call_next):
+    if INSTANCE_ID == "flapamamaku":
+        return await call_next(request)
     path = request.url.path
     if path == "/api/health" or path.endswith("flapamamaku-icon.png"):
         return await call_next(request)
     status, reason = platform_access_state()
-    if status != "suspended":
-        if path in {"/admin", "/admin/"}:
-            try:
-                html = (main_app.STATIC_DIR / "admin.html").read_text(encoding="utf-8")
-                html = html.replace("</body>", _admin_selector_injection() + "</body>")
-                return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
-            except OSError:
-                return await call_next(request)
+    if status == "active":
         return await call_next(request)
     message = reason or "Dieser Verein ist durch die Plattformverwaltung vorübergehend gesperrt."
     if path.startswith("/api/"):
-        return JSONResponse(status_code=423, content={"detail": message, "club_status": "suspended"})
+        return JSONResponse(
+            status_code=423,
+            content={"detail": message, "club_status": "suspended"},
+        )
     return HTMLResponse(
         status_code=423,
         content=(

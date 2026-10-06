@@ -17,21 +17,6 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int index = 0;
 
-  final pages = const [
-    StartScreen(),
-    NewsScreen(),
-    EventsScreen(),
-    RemoteContentScreen.archiveStyle(
-      section: 'gallery',
-      title: 'Galerie',
-      emptyText: 'Noch keine Fotos oder Alben hinterlegt.',
-      icon: Icons.photo_library_outlined,
-      individualImages: true,
-    ),
-    SizedBox.shrink(),
-    MoreScreen(),
-  ];
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -45,15 +30,80 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  List<_NavEntry> _entries(AppStore store) => [
+        const _NavEntry(
+          route: '/',
+          page: StartScreen(),
+          destination: NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Start',
+          ),
+        ),
+        if (store.showNews)
+          const _NavEntry(
+            route: '/news',
+            page: NewsScreen(),
+            destination: NavigationDestination(
+              icon: Icon(Icons.article_outlined),
+              selectedIcon: Icon(Icons.article_rounded),
+              label: 'News',
+            ),
+          ),
+        if (store.showEvents)
+          const _NavEntry(
+            route: '/events',
+            page: EventsScreen(),
+            destination: NavigationDestination(
+              icon: Icon(Icons.calendar_month_outlined),
+              selectedIcon: Icon(Icons.calendar_month_rounded),
+              label: 'Termine',
+            ),
+          ),
+        if (store.showGallery)
+          const _NavEntry(
+            route: '/gallery',
+            page: RemoteContentScreen.archiveStyle(
+              section: 'gallery',
+              title: 'Galerie',
+              emptyText: 'Noch keine Fotos oder Alben hinterlegt.',
+              icon: Icons.photo_library_outlined,
+              individualImages: true,
+            ),
+            destination: NavigationDestination(
+              icon: Icon(Icons.photo_outlined),
+              selectedIcon: Icon(Icons.photo_rounded),
+              label: 'Galerie',
+            ),
+          ),
+        if (store.showLinks)
+          const _NavEntry(
+            route: '/whatsapp',
+            page: SizedBox.shrink(),
+            isAction: true,
+            destination: NavigationDestination(
+              icon: Icon(Icons.chat_outlined),
+              selectedIcon: Icon(Icons.chat_rounded),
+              label: 'WhatsApp',
+            ),
+          ),
+        const _NavEntry(
+          route: '/more',
+          page: MoreScreen(),
+          destination: NavigationDestination(
+            icon: Icon(Icons.more_horiz),
+            selectedIcon: Icon(Icons.more_horiz_rounded),
+            label: 'Mehr',
+          ),
+        ),
+      ];
+
   void _openPushRoute(String route) {
     if (!mounted) return;
-    final nextIndex = switch (route) {
-      '/news' => 1,
-      '/events' => 2,
-      '/gallery' => 3,
-      '/more' => 5,
-      _ => 0,
-    };
+    final store = AppStoreScope.of(context);
+    final entries = _entries(store);
+    final nextIndex = entries.indexWhere((entry) => entry.route == route);
+    if (nextIndex < 0 || entries[nextIndex].isAction) return;
     if (index != nextIndex) {
       setState(() => index = nextIndex);
     }
@@ -61,6 +111,8 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _openWhatsAppGroup() async {
     final store = AppStoreScope.of(context);
+    if (!store.showLinks) return;
+
     final link = store
         .contentFor('whatsapp')
         .map((item) => item.linkUrl.trim())
@@ -93,51 +145,44 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppStoreScope.of(context);
+    final entries = _entries(store);
+    final safeIndex = index.clamp(0, entries.length - 1);
+    if (safeIndex != index) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => index = safeIndex);
+      });
+    }
+
     return Scaffold(
-      body: SafeArea(top: false, child: pages[index]),
+      body: SafeArea(top: false, child: entries[safeIndex].page),
       bottomNavigationBar: NavigationBar(
         height: 74,
-        selectedIndex: index,
+        selectedIndex: safeIndex,
         onDestinationSelected: (value) {
-          if (value == 4) {
+          final entry = entries[value];
+          if (entry.isAction) {
             _openWhatsAppGroup();
             return;
           }
           setState(() => index = value);
         },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: 'Start',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.article_outlined),
-            selectedIcon: Icon(Icons.article_rounded),
-            label: 'News',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(Icons.calendar_month_rounded),
-            label: 'Termine',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.photo_outlined),
-            selectedIcon: Icon(Icons.photo_rounded),
-            label: 'Galerie',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.chat_outlined),
-            selectedIcon: Icon(Icons.chat_rounded),
-            label: 'WhatsApp',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.more_horiz),
-            selectedIcon: Icon(Icons.more_horiz_rounded),
-            label: 'Mehr',
-          ),
-        ],
+        destinations: entries.map((entry) => entry.destination).toList(),
       ),
     );
   }
+}
+
+class _NavEntry {
+  final String route;
+  final Widget page;
+  final NavigationDestination destination;
+  final bool isAction;
+
+  const _NavEntry({
+    required this.route,
+    required this.page,
+    required this.destination,
+    this.isAction = false,
+  });
 }

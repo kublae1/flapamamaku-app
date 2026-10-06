@@ -54,14 +54,15 @@ class MoreScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
           children: [
             const _SectionLabel('GRUPPE'),
-            _MockupMenuCard(
-              icon: Icons.groups_rounded,
-              title: 'Mitglieder',
-              subtitle: 'Infos, Kontakte und Mitgliederübersicht',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const MembersScreen()),
+            if (store.showMembers)
+              _MockupMenuCard(
+                icon: Icons.groups_rounded,
+                title: 'Mitglieder',
+                subtitle: 'Infos, Kontakte und Mitgliederübersicht',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MembersScreen()),
+                ),
               ),
-            ),
             _MockupMenuCard(
               icon: Icons.info_outline_rounded,
               title: 'Verein & Kontakt',
@@ -72,24 +73,25 @@ class MoreScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const ClubInfoScreen()),
               ),
             ),
-            _MockupMenuCard(
-              icon: Icons.chat_rounded,
-              title: 'WhatsApp-Gruppe beitreten',
-              subtitle: whatsappLink.isEmpty
-                  ? 'Einladungslink ist noch nicht hinterlegt'
-                  : 'Direkt zur ${store.appName}-Gruppe in WhatsApp',
-              onTap: () {
-                if (whatsappLink.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Im Docker-Admin ist noch kein WhatsApp-Einladungslink hinterlegt.'),
-                    ),
-                  );
-                  return;
-                }
-                _openWhatsAppGroup(context, whatsappLink);
-              },
-            ),
+            if (store.showLinks)
+              _MockupMenuCard(
+                icon: Icons.chat_rounded,
+                title: 'WhatsApp-Gruppe beitreten',
+                subtitle: whatsappLink.isEmpty
+                    ? 'Einladungslink ist noch nicht hinterlegt'
+                    : 'Direkt zur ${store.appName}-Gruppe in WhatsApp',
+                onTap: () {
+                  if (whatsappLink.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Im Docker-Admin ist noch kein WhatsApp-Einladungslink hinterlegt.'),
+                      ),
+                    );
+                    return;
+                  }
+                  _openWhatsAppGroup(context, whatsappLink);
+                },
+              ),
             if (store.canAdminister)
               _MockupMenuCard(
                 icon: Icons.admin_panel_settings_rounded,

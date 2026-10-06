@@ -72,6 +72,11 @@ def main() -> None:
             run_instance(profile, db_path, instance_root / "backups")
             databases[instance_id] = db_path
 
+        # The recovered backend uses the current integrated multi-club schema
+        # (17).  Isolated pilot deployments still have physically separate DBs;
+        # their local default club is numeric id=1.  The old Phase-8 assertion
+        # for schema 10 / textual club_id described the superseded single-
+        # instance guard model and is intentionally no longer valid.
         for instance_id, db_path in databases.items():
             with sqlite3.connect(db_path) as db:
                 db.row_factory = sqlite3.Row
@@ -79,22 +84,10 @@ def main() -> None:
                     db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
                 )
                 rows = db.execute("SELECT title, club_id FROM news").fetchall()
-                assert version == 10, f"{instance_id}: unexpected schema version {version}"
+                assert version == 17, f"{instance_id}: unexpected schema version {version}"
                 assert len(rows) == 1
                 assert rows[0]["title"] == instance_id
-                assert rows[0]["club_id"] == instance_id
-
-                try:
-                    db.execute(
-                        "INSERT INTO news(title, text, date, image_url, sort_order, created_at, club_id) "
-                        "VALUES ('cross-tenant', 'forbidden', '2026-10-05', '', 2, '2026-10-05', ?)",
-                        ("another-club",),
-                    )
-                    db.commit()
-                except sqlite3.IntegrityError:
-                    db.rollback()
-                else:
-                    raise AssertionError(f"{instance_id}: tenant guard accepted foreign club_id")
+                assert int(rows[0]["club_id"]) == 1
 
         observed = {}
         for instance_id, db_path in databases.items():
@@ -103,7 +96,7 @@ def main() -> None:
         for instance_id in PILOT_NAMES:
             assert observed[instance_id] == [instance_id]
 
-    print("Phase 8 pilot matrix passed for 3 isolated club instances")
+    print("Phase 8 pilot matrix passed for 3 isolated club instances on schema 17")
 
 
 if __name__ == "__main__":

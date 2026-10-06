@@ -57,6 +57,8 @@ class AppStore extends ChangeNotifier {
   bool pushEnabled = false;
   bool pushAvailable = false;
   Map<String, dynamic>? currentUser;
+  final List<Map<String, dynamic>> accessibleClubs = <Map<String, dynamic>>[];
+  bool clubSelectionRequired = false;
   String? authError;
   int themeColorValue = 0xFF8A101B;
   String appName = const String.fromEnvironment(
@@ -73,6 +75,14 @@ class AppStore extends ChangeNotifier {
   String contactEmail = '';
   String contactPhone = '';
   String clubAddress = '';
+
+  bool showNews = true;
+  bool showEvents = true;
+  bool showMembers = true;
+  bool showGallery = true;
+  bool showPushNotifications = true;
+  bool showCalendar = true;
+  bool showParticipantLists = true;
 
   bool showSujet = true;
   String labelSujet = 'Sujet nächstes Jahr';
@@ -102,6 +112,13 @@ class AppStore extends ChangeNotifier {
         'contact_phone': contactPhone,
         'club_address': clubAddress,
         'theme_color_value': themeColorValue,
+        'show_news': showNews,
+        'show_events': showEvents,
+        'show_members': showMembers,
+        'show_gallery': showGallery,
+        'show_push_notifications': showPushNotifications,
+        'show_calendar': showCalendar,
+        'show_participant_lists': showParticipantLists,
         'show_sujet': showSujet,
         'label_sujet': labelSujet,
         'show_archive': showArchive,
@@ -130,6 +147,13 @@ class AppStore extends ChangeNotifier {
     themeColorValue = value['theme_color_value'] is int
         ? value['theme_color_value'] as int
         : themeColorValue;
+    showNews = value['show_news'] != false;
+    showEvents = value['show_events'] != false;
+    showMembers = value['show_members'] != false;
+    showGallery = value['show_gallery'] != false;
+    showPushNotifications = value['show_push_notifications'] != false;
+    showCalendar = value['show_calendar'] != false;
+    showParticipantLists = value['show_participant_lists'] != false;
     showSujet = value['show_sujet'] != false;
     labelSujet = value['label_sujet']?.toString() ?? labelSujet;
     showArchive = value['show_archive'] != false;
@@ -280,6 +304,13 @@ class AppStore extends ChangeNotifier {
       contactPhone = config['contact_phone']?.toString().trim() ?? '';
       clubAddress = config['club_address']?.toString().trim() ?? '';
 
+      showNews = config['show_news'] != false;
+      showEvents = config['show_events'] != false;
+      showMembers = config['show_members'] != false;
+      showGallery = config['show_gallery'] != false;
+      showPushNotifications = config['show_push_notifications'] != false;
+      showCalendar = config['show_calendar'] != false;
+      showParticipantLists = config['show_participant_lists'] != false;
       showSujet = config['show_sujet'] != false;
       labelSujet = config['label_sujet']?.toString().trim().isNotEmpty == true
           ? config['label_sujet'].toString().trim()
@@ -406,6 +437,8 @@ class AppStore extends ChangeNotifier {
     await _secureStorage.delete(key: 'flapamamaku_token');
 
     currentUser = null;
+    accessibleClubs.clear();
+    clubSelectionRequired = false;
     isAuthenticated = false;
     biometricUnlockPending = false;
     authError = null;
@@ -426,6 +459,69 @@ class AppStore extends ChangeNotifier {
       currentUser?['member_name']?.toString().isNotEmpty == true
           ? currentUser!['member_name'].toString()
           : currentUser?['username']?.toString() ?? '';
+
+  int? get currentClubId {
+    final value = currentUser?['current_club_id'];
+    return value is int ? value : int.tryParse(value?.toString() ?? '');
+  }
+
+  bool get isSuperAdmin => currentUser?['is_super_admin'] == true;
+
+  bool get canSwitchClub => accessibleClubs.length > 1;
+
+  String get currentClubName {
+    final clubId = currentClubId;
+    for (final club in accessibleClubs) {
+      final rawId = club['id'];
+      final id = rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+      if (id == clubId) {
+        return club['name']?.toString() ?? appName;
+      }
+    }
+    return appName;
+  }
+
+  Future<void> _loadAccessibleClubs() async {
+    accessibleClubs
+      ..clear()
+      ..addAll(await api.fetchAccessibleClubs());
+  }
+
+  void _clearClubData() {
+    news.clear();
+    events.clear();
+    members.clear();
+    memberFilters.clear();
+    content.clear();
+    syncError = null;
+    lastSuccessfulSync = null;
+  }
+
+  Future<bool> selectClub(int clubId) async {
+    if (!isAuthenticated || !api.isConfigured) return false;
+    try {
+      await api.switchClub(clubId);
+      currentUser = await api.fetchMe();
+      await _loadAccessibleClubs();
+      clubSelectionRequired = false;
+      _clearClubData();
+      final prefs = await SharedPreferences.getInstance();
+      await _loadRemoteBranding(prefs);
+      await refreshFromServer();
+      if (pushEnabled && showPushNotifications) {
+        await pushService.enable();
+      }
+      notifyListeners();
+      return true;
+    } catch (error) {
+      authError = friendlyErrorMessage(
+        error,
+        fallback: 'Verein konnte nicht gewechselt werden.',
+      );
+      notifyListeners();
+      return false;
+    }
+  }
 
   Future<void> restoreSession() async {
     authReady = false;
@@ -468,8 +564,10 @@ class AppStore extends ChangeNotifier {
       isAuthenticated = true;
       biometricUnlockPending = false;
       authError = null;
+      clubSelectionRequired = false;
+      await _loadAccessibleClubs();
       await refreshFromServer();
-      if (pushEnabled) {
+      if (pushEnabled && showPushNotifications) {
         await pushService.enable();
       }
     } catch (_) {
@@ -559,6 +657,8 @@ class AppStore extends ChangeNotifier {
   Future<void> usePasswordInstead() async {
     api.setToken(null);
     currentUser = null;
+    accessibleClubs.clear();
+    clubSelectionRequired = false;
     isAuthenticated = false;
     biometricUnlockPending = false;
     authError = null;
@@ -620,7 +720,7 @@ class AppStore extends ChangeNotifier {
       }
 
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Biometrische Anmeldung für $appName aktivieren',
+        localizedReason: 'Biometrische Anmeldung für FLAPAMAMAKU aktivieren',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
@@ -662,10 +762,23 @@ class AppStore extends ChangeNotifier {
       currentUser = Map<String, dynamic>.from(
         result['user'] as Map<String, dynamic>,
       );
+      accessibleClubs
+        ..clear()
+        ..addAll(
+          (result['clubs'] as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map((value) => Map<String, dynamic>.from(value)),
+        );
       isAuthenticated = true;
-      await refreshFromServer();
-      if (pushEnabled) {
-        await pushService.enable();
+      clubSelectionRequired = result['requires_club_selection'] == true;
+      if (accessibleClubs.isEmpty) {
+        await _loadAccessibleClubs();
+      }
+      if (!clubSelectionRequired) {
+        await refreshFromServer();
+        if (pushEnabled && showPushNotifications) {
+          await pushService.enable();
+        }
       }
       return true;
     } catch (error) {
@@ -677,6 +790,8 @@ class AppStore extends ChangeNotifier {
             );
       isAuthenticated = false;
       currentUser = null;
+      accessibleClubs.clear();
+      clubSelectionRequired = false;
       return false;
     } finally {
       isAuthenticating = false;
@@ -751,12 +866,20 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final remoteNews = await api.fetchNews();
-      final remoteEvents = await api.fetchEvents();
-      final remoteMembers = await api.fetchMembers();
-      final remoteMemberFilters = await api.fetchMemberFilters();
+      final prefs = await SharedPreferences.getInstance();
+      await _loadRemoteBranding(prefs);
+
+      final remoteNews =
+          showNews ? await api.fetchNews() : <NewsItem>[];
+      final remoteEvents =
+          showEvents ? await api.fetchEvents() : <EventItem>[];
+      final remoteMembers =
+          showMembers ? await api.fetchMembers() : <MemberItem>[];
+      final remoteMemberFilters =
+          showMembers ? await api.fetchMemberFilters() : <MemberFilterItem>[];
       final remoteContent = await api.fetchContent();
-      final remotePolls = await api.fetchPolls();
+      final remotePolls =
+          showPolls ? await api.fetchPolls() : <ContentItem>[];
 
       news
         ..clear()
@@ -772,7 +895,29 @@ class AppStore extends ChangeNotifier {
         ..addAll(remoteMemberFilters);
       content
         ..clear()
-        ..addAll(remoteContent)
+        ..addAll(
+          remoteContent.where((item) {
+            switch (item.section) {
+              case 'gallery':
+                return showGallery;
+              case 'sujet':
+                return showSujet;
+              case 'archive':
+                return showArchive;
+              case 'photos':
+                return showPhotos;
+              case 'documents':
+                return showDocuments;
+              case 'links':
+              case 'whatsapp':
+                return showLinks;
+              case 'polls':
+                return showPolls;
+              default:
+                return true;
+            }
+          }),
+        )
         ..addAll(remotePolls);
 
       _sortNews();
