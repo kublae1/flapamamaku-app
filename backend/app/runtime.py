@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from . import main as main_app
 from .masterplan_extensions import install_masterplan_extensions
@@ -17,9 +17,24 @@ PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db")
 PUBLIC_URL = os.getenv("FLAPAMAMAKU_PUBLIC_URL", "").strip().rstrip("/")
 RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", main_app.API_VERSION).strip() or main_app.API_VERSION
 
-# Add Masterplan functionality around the proven integrated multi-club core.
-# The extension keeps numeric club ownership and migrates legacy Sujet media.
-install_masterplan_extensions()
+# FastAPI requires a body-less response class for HTTP 204 routes. The recovery
+# extension intentionally re-registers the event registration POST as 204, so
+# patch only that decorator case while the extension is being installed. JSON
+# routes keep FastAPI's normal response class.
+_original_post = app.post
+
+
+def _recovery_post(path: str, *args, **kwargs):
+    if kwargs.get("status_code") == 204 and "response_class" not in kwargs:
+        kwargs["response_class"] = Response
+    return _original_post(path, *args, **kwargs)
+
+
+app.post = _recovery_post
+try:
+    install_masterplan_extensions()
+finally:
+    app.post = _original_post
 
 # Runtime only adds Phase-9 registration/suspension around the proven integrated
 # multi-club backend. Club switching and admin rendering stay exclusively in
