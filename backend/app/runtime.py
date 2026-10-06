@@ -17,44 +17,50 @@ PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db")
 PUBLIC_URL = os.getenv("FLAPAMAMAKU_PUBLIC_URL", "").strip().rstrip("/")
 RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", main_app.API_VERSION).strip() or main_app.API_VERSION
 
-# FastAPI 0.116 rejects a decorated 204 route before we can attach the correct
-# empty response class when the function annotation is inferred as a body model.
-# Register only such POST routes temporarily as 200, then immediately convert the
-# generated APIRoute to 204 + Response. All other extension routes are untouched.
+# FastAPI 0.116 rejects decorated 204 routes when it infers a response body from
+# the Python annotation. Register only those routes temporarily as 200, then
+# immediately convert the generated APIRoute to 204 + an empty Response class.
+# This is restricted to extension installation and does not change normal JSON
+# routes or the stable multi-club API.
 _original_post = app.post
+_original_delete = app.delete
 
 
-def _recovery_post(path: str, *args, **kwargs):
-    requested_status = kwargs.get("status_code")
-    if requested_status != 204:
-        return _original_post(path, *args, **kwargs)
+def _bodyless_204_wrapper(original_decorator, method: str):
+    def wrapped(path: str, *args, **kwargs):
+        if kwargs.get("status_code") != 204:
+            return original_decorator(path, *args, **kwargs)
 
-    registration_kwargs = dict(kwargs)
-    registration_kwargs["status_code"] = 200
+        registration_kwargs = dict(kwargs)
+        registration_kwargs["status_code"] = 200
 
-    def decorator(func):
-        registered = _original_post(path, *args, **registration_kwargs)(func)
-        for route in reversed(app.router.routes):
-            if getattr(route, "path", None) != path:
-                continue
-            methods = getattr(route, "methods", set()) or set()
-            if "POST" not in methods or getattr(route, "endpoint", None) is not func:
-                continue
-            route.status_code = 204
-            route.response_class = Response
-            route.response_model = None
-            route.response_field = None
-            break
-        return registered
+        def decorator(func):
+            registered = original_decorator(path, *args, **registration_kwargs)(func)
+            for route in reversed(app.router.routes):
+                if getattr(route, "path", None) != path:
+                    continue
+                methods = getattr(route, "methods", set()) or set()
+                if method not in methods or getattr(route, "endpoint", None) is not func:
+                    continue
+                route.status_code = 204
+                route.response_class = Response
+                route.response_model = None
+                route.response_field = None
+                break
+            return registered
 
-    return decorator
+        return decorator
+
+    return wrapped
 
 
-app.post = _recovery_post
+app.post = _bodyless_204_wrapper(_original_post, "POST")
+app.delete = _bodyless_204_wrapper(_original_delete, "DELETE")
 try:
     install_masterplan_extensions()
 finally:
     app.post = _original_post
+    app.delete = _original_delete
 
 # Runtime only adds Phase-9 registration/suspension around the proven integrated
 # multi-club backend. Club switching and admin rendering stay exclusively in
