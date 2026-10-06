@@ -19,6 +19,7 @@ class PushService {
   String? _registeredToken;
   String? _pendingRoute;
   bool _initialized = false;
+  String? lastError;
   void Function(String route)? onRoute;
 
   static const _apiKey = String.fromEnvironment('FIREBASE_API_KEY');
@@ -37,7 +38,19 @@ class PushService {
       _projectId.isNotEmpty;
 
   Future<bool> enable() async {
-    if (!isConfigured || !api.isConfigured || !api.hasToken) return false;
+    lastError = null;
+    if (!isConfigured) {
+      lastError = 'Firebase-Konfiguration fehlt in diesem App-Build.';
+      return false;
+    }
+    if (!api.isConfigured) {
+      lastError = 'Der Vereinsserver ist nicht konfiguriert.';
+      return false;
+    }
+    if (!api.hasToken) {
+      lastError = 'Für Push ist zuerst eine gültige Anmeldung erforderlich.';
+      return false;
+    }
 
     try {
       if (!_initialized) {
@@ -81,17 +94,22 @@ class PushService {
       }
 
       final messaging = FirebaseMessaging.instance;
+      await messaging.setAutoInitEnabled(true);
       final settings = await messaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        lastError = 'Die Android-Berechtigung für Benachrichtigungen wurde abgelehnt.';
         return false;
       }
 
       final token = await messaging.getToken();
-      if (token == null || token.isEmpty) return false;
+      if (token == null || token.isEmpty) {
+        lastError = 'Firebase hat kein Geräte-Token geliefert.';
+        return false;
+      }
       await _register(token);
 
       final initialMessage = await messaging.getInitialMessage();
@@ -151,8 +169,10 @@ class PushService {
           await _register(newToken);
         } catch (_) {}
       });
+      lastError = null;
       return true;
-    } catch (_) {
+    } catch (error) {
+      lastError = 'Push-Initialisierung fehlgeschlagen: $error';
       return false;
     }
   }

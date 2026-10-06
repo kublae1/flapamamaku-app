@@ -654,9 +654,10 @@ class AppStore extends ChangeNotifier {
     pushAvailable = pushService.isConfigured;
 
     try {
-      biometricAvailable =
-          await _localAuth.canCheckBiometrics &&
-          await _localAuth.isDeviceSupported();
+      biometricAvailable = await _localAuth.isDeviceSupported();
+      if (!biometricAvailable) {
+        biometricAvailable = await _localAuth.canCheckBiometrics;
+      }
     } catch (_) {
       biometricAvailable = false;
     }
@@ -675,8 +676,19 @@ class AppStore extends ChangeNotifier {
       return;
     }
 
-    // A valid secure session token keeps the member signed in until
-    // they explicitly log out or an administrator revokes the session.
+    // When device authentication is enabled, never restore the secured
+    // session before the user has unlocked this app instance.
+    if (biometricEnabled && biometricAvailable) {
+      biometricUnlockPending = true;
+      isAuthenticated = false;
+      currentUser = null;
+      authReady = true;
+      notifyListeners();
+      return;
+    }
+
+    // Without the optional device lock, a valid secure session token keeps
+    // the member signed in until logout or server-side session revocation.
     biometricUnlockPending = false;
     await _restoreWithToken(token);
   }
@@ -791,9 +803,10 @@ class AppStore extends ChangeNotifier {
     if (isBiometricAuthenticating) return false;
 
     try {
-      biometricAvailable =
-          await _localAuth.canCheckBiometrics &&
-          await _localAuth.isDeviceSupported();
+      biometricAvailable = await _localAuth.isDeviceSupported();
+      if (!biometricAvailable) {
+        biometricAvailable = await _localAuth.canCheckBiometrics;
+      }
     } catch (_) {
       biometricAvailable = false;
     }
@@ -850,8 +863,8 @@ class AppStore extends ChangeNotifier {
 
     final ok = await pushService.enable();
     if (!ok) {
-      authError =
-          'Push-Benachrichtigungen konnten nicht aktiviert werden. Bitte Berechtigung prüfen.';
+      authError = pushService.lastError ??
+          'Push-Benachrichtigungen konnten nicht aktiviert werden.';
       notifyListeners();
       return false;
     }

@@ -152,29 +152,27 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               subtitle: Text(
-                store.biometricAvailable
-                    ? 'App beim nächsten Start mit Fingerabdruck, Gesichtserkennung oder Geräte-PIN entsperren'
-                    : 'Auf diesem Gerät ist keine biometrische Entsperrung verfügbar',
+                store.biometricEnabled
+                    ? 'Beim nächsten App-Start ist die Geräteauthentifizierung vorgeschaltet'
+                    : 'Fingerabdruck, Gesichtserkennung oder Geräte-PIN beim App-Start verwenden',
                 style: const TextStyle(color: Colors.white60),
               ),
-              value: store.biometricEnabled && store.biometricAvailable,
+              value: store.biometricEnabled,
               activeThumbColor: Colors.white,
               activeTrackColor: store.themeColor,
-              onChanged: store.biometricAvailable
-                  ? (value) async {
-                      final ok = await store.setBiometricEnabled(value);
-                      if (!ok && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              store.authError ??
-                                  'Biometrische Anmeldung konnte nicht geändert werden.',
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  : null,
+              onChanged: (value) async {
+                final ok = await store.setBiometricEnabled(value);
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        store.authError ??
+                            'Biometrische Anmeldung konnte nicht geändert werden.',
+                      ),
+                    ),
+                  );
+                }
+              },
             ),
           ),
           const SizedBox(height: 10),
@@ -279,29 +277,27 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               subtitle: Text(
-                store.pushAvailable
-                    ? 'Neue News sowie neue oder geänderte Termine auf dem Handy anzeigen'
-                    : 'Push-Dienst wird vorbereitet und nach Firebase-Einrichtung verfügbar',
+                store.pushEnabled
+                    ? 'Push ist auf diesem Gerät aktiviert'
+                    : 'Beim Einschalten werden Firebase, Android-Berechtigung und Serverregistrierung geprüft',
                 style: const TextStyle(color: Colors.white60),
               ),
               value: store.pushEnabled,
               activeThumbColor: Colors.white,
               activeTrackColor: store.themeColor,
-              onChanged: store.pushAvailable
-                  ? (value) async {
-                      final ok = await store.setPushEnabled(value);
-                      if (!ok && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              store.authError ??
-                                  'Push-Benachrichtigungen konnten nicht geändert werden.',
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  : null,
+              onChanged: (value) async {
+                final ok = await store.setPushEnabled(value);
+                if (!ok && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        store.authError ??
+                            'Push-Benachrichtigungen konnten nicht geändert werden.',
+                      ),
+                    ),
+                  );
+                }
+              },
             ),
           ),
           const SizedBox(height: 22),
