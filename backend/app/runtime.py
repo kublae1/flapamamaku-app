@@ -8,6 +8,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import main as main_app
+from .masterplan_extensions import install_masterplan_extensions
 
 app = main_app.app
 INSTANCE_ID = main_app.INSTANCE_ID
@@ -15,6 +16,10 @@ DB_PATH = main_app.DB_PATH
 PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db"))
 PUBLIC_URL = os.getenv("FLAPAMAMAKU_PUBLIC_URL", "").strip().rstrip("/")
 RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", main_app.API_VERSION).strip() or main_app.API_VERSION
+
+# Add Masterplan functionality around the proven integrated multi-club core.
+# The extension keeps numeric club ownership and migrates legacy Sujet media.
+install_masterplan_extensions()
 
 # Runtime only adds Phase-9 registration/suspension around the proven integrated
 # multi-club backend. Club switching and admin rendering stay exclusively in
