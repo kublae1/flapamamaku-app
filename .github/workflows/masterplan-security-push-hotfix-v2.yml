@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/masterplan-on-recovered-20261006
-      - name: Apply hotfix script
+      - name: Apply corrected hotfix script
         run: python3 tools/masterplan_push_biometric_hotfix.py
       - name: Commit patched app files
         run: |
