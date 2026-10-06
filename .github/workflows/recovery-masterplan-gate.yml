@@ -109,3 +109,5 @@ jobs:
         run: flutter analyze
       - name: Test
         run: flutter test
+      - name: Recovery baseline marker
+        run: echo "stable-175c23b-masterplan-recovery"
