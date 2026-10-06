@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FLAPAMAMAKU Plattformverwaltung</title>
+<link rel="stylesheet" href="/platform.css">
+</head>
+<body>
+<header><h1>FLAPAMAMAKU · Plattformverwaltung</h1><button id="logout" hidden>Abmelden</button></header>
+<main>
+<section id="auth" class="card auth">
+<h2 id="authTitle">Superuser anmelden</h2><div id="authMsg"></div>
+<label>Benutzername</label><input id="user" autocomplete="username">
+<label>Passwort</label><input id="pass" type="password" autocomplete="current-password">
+<div class="actions"><button id="loginBtn">Anmelden</button><button id="bootstrapBtn" class="secondary" hidden>Ersten Superuser erstellen</button></div>
+<p class="muted">Die Ersteinrichtung ist nur möglich, solange noch kein Plattform-Superuser existiert.</p>
+</section>
+<section id="app" hidden>
+<div class="card">
+<h3>Vereinsverwaltung öffnen</h3>
+<p class="muted">Verein auswählen und direkt dessen Docker-Administration öffnen.</p>
+<div class="form">
+<label>Verein<select id="clubSelector"><option value="">Verein auswählen …</option></select></label>
+</div>
+<div class="actions"><button id="openClubAdmin" disabled>Vereins-Admin öffnen</button></div>
+<div id="clubSelectorInfo" class="muted"></div>
+</div>
+<div id="metrics" class="metrics"></div>
+<nav><button data-tab="clubs" class="active">Vereine</button><button data-tab="invoices">Rechnungen</button><button data-tab="audit">Protokoll</button></nav>
+<div id="msg"></div>
+<section id="clubs" class="panel active">
+<div class="card"><h3>Verein erfassen / bearbeiten</h3><div class="form">
+<label>Name<input id="cName"></label><label>Instanz-ID<input id="cInstance"></label>
+<label>API-Adresse<input id="cApi"></label><label>Abrechnungs-E-Mail<input id="cMail" type="email"></label>
+<label>Monatsgebühr CHF<input id="cFee" type="number" min="0" step="0.05" value="0"></label>
+<label>Rechnungstag<input id="cDay" type="number" min="1" max="28" value="1"></label>
+<label>Zahlungsziel Tage<input id="cDue" type="number" min="1" max="180" value="30"></label>
+<label>Auto-Sperre<select id="cAuto"><option value="false">Nein</option><option value="true">Ja</option></select></label>
+</div><div class="actions"><button id="saveClub">Speichern</button><button id="cancelClub" class="secondary">Neu</button></div></div>
+<table><thead><tr><th>Verein</th><th>Instanz</th><th>Status</th><th>Gebühr</th><th>Abrechnung</th><th>Aktionen</th></tr></thead><tbody id="clubRows"></tbody></table>
+</section>
+<section id="invoices" class="panel"><div class="actions"><button id="runBilling">Abrechnung jetzt ausführen</button></div><table><thead><tr><th>Nr.</th><th>Verein</th><th>Periode</th><th>Fällig</th><th>Betrag</th><th>Status</th><th>Aktionen</th></tr></thead><tbody id="invoiceRows"></tbody></table></section>
+<section id="audit" class="panel"><table><thead><tr><th>Zeit</th><th>Aktion</th><th>Typ</th><th>ID</th><th>Details</th></tr></thead><tbody id="auditRows"></tbody></table></section>
+</section>
+</main>
+<script src="/platform.js"></script>
+</body></html>
