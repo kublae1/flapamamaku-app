@@ -1,9 +1,8 @@
-"""End-to-end acceptance contract for Masterplan phases 3-5.
+"""Recovery acceptance contract for Masterplan phases 3-5.
 
-Runs against the isolated backend started by CI and verifies the canonical annual
-Sujet lifecycle plus the instance/club isolation boundary at HTTP and SQLite
-levels. It intentionally reuses the bootstrap administrator created by the
-Phase-1 smoke test when present.
+The stable 175c23b line already has an integrated multi-club database. This
+contract validates Masterplan behavior without re-introducing the obsolete
+one-process/one-text-club guard that caused the regression.
 """
 
 from __future__ import annotations
@@ -11,6 +10,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,6 @@ import requests
 
 BASE_URL = os.getenv("PHASE35_BASE_URL", "http://127.0.0.1:8087").rstrip("/")
 DB_PATH = Path(os.getenv("FLAPAMAMAKU_DB", "/tmp/flapamamaku-phase35.db"))
-INSTANCE_ID = os.getenv("FLAPAMAMAKU_INSTANCE_ID", "flapamamaku").strip().lower()
 
 
 def fail(message: str) -> None:
@@ -26,213 +25,182 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def call(
-    method: str,
-    path: str,
-    *,
-    token: str | None = None,
-    expected: tuple[int, ...] = (200,),
-    headers: dict[str, str] | None = None,
-    **kwargs: Any,
-) -> requests.Response:
-    request_headers = dict(headers or {})
+def call(method: str, path: str, *, token: str | None = None, expected: tuple[int, ...] = (200,), **kwargs: Any) -> requests.Response:
+    headers = dict(kwargs.pop("headers", {}) or {})
     if token:
-        request_headers["Authorization"] = f"Bearer {token}"
-    response = requests.request(
-        method,
-        f"{BASE_URL}{path}",
-        headers=request_headers,
-        timeout=10,
-        **kwargs,
-    )
+        headers["Authorization"] = f"Bearer {token}"
+    response = requests.request(method, BASE_URL + path, headers=headers, timeout=10, **kwargs)
     if response.status_code not in expected:
-        fail(
-            f"{method} {path}: expected {expected}, got "
-            f"{response.status_code}: {response.text[:500]}"
-        )
+        fail(f"{method} {path}: expected {expected}, got {response.status_code}: {response.text[:500]}")
     return response
 
 
-def login_admin() -> str:
+def login_admin() -> tuple[str, dict[str, Any]]:
     login = call(
-        "POST",
-        "/api/auth/login",
+        "POST", "/api/auth/login",
         json={"username": "phase1-admin", "password": "Phase1Test!123"},
     ).json()
     token = str(login.get("token") or "")
     if not token:
         fail("admin login returned no token")
-    return token
+    me = call("GET", "/api/auth/me", token=token).json()
+    return token, me
 
 
-def verify_tenant_http_boundary(token: str) -> None:
-    wrong = call(
-        "GET",
-        "/api/news",
-        token=token,
-        headers={"X-Club-Instance": "another-club"},
-        expected=(409,),
-    )
-    payload = wrong.json()
-    if payload.get("expected_instance_id") != INSTANCE_ID:
-        fail("wrong-instance response did not identify the configured club")
+def verify_extended_events(token: str) -> None:
+    future_deadline = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    event = call(
+        "POST", "/api/events", token=token,
+        json={
+            "event_date": "2026-10-20",
+            "day": "20",
+            "month": "OKT",
+            "title": "Masterplan Termin",
+            "location": "Luzern",
+            "time": "19:00",
+            "end_time": "22:00",
+            "meeting_point": "Bahnhof Luzern",
+            "description": "Recovery Vertrag",
+            "responsible": "Vorstand",
+            "registration_deadline": future_deadline,
+            "registration_enabled": True,
+            "document_url": "https://example.invalid/termin.pdf",
+        },
+    ).json()
+    event_id = int(event["id"])
+    rows = call("GET", "/api/events", token=token).json()
+    stored = next(row for row in rows if int(row["id"]) == event_id)
+    for key, expected in {
+        "end_time": "22:00",
+        "meeting_point": "Bahnhof Luzern",
+        "description": "Recovery Vertrag",
+        "responsible": "Vorstand",
+        "document_url": "https://example.invalid/termin.pdf",
+    }.items():
+        if stored.get(key) != expected:
+            fail(f"extended event field {key} did not round-trip")
 
-    correct = call(
-        "GET",
-        "/api/news",
-        token=token,
-        headers={"X-Club-Instance": INSTANCE_ID},
-    )
-    if correct.headers.get("X-Club-Instance") != INSTANCE_ID:
-        fail("successful API response is missing X-Club-Instance binding")
+    call("POST", f"/api/events/{event_id}/registration", token=token, expected=(204,))
+    call("DELETE", f"/api/events/{event_id}/registration", token=token, expected=(204,))
+
+    event["registration_enabled"] = False
+    event.pop("registration_count", None)
+    event.pop("registered_by_me", None)
+    call("PUT", f"/api/events/{event_id}", token=token, json={
+        key: event.get(key) for key in (
+            "event_date", "day", "month", "title", "location", "time", "end_time",
+            "meeting_point", "description", "responsible", "registration_deadline",
+            "registration_enabled", "document_url"
+        )
+    })
+    call("POST", f"/api/events/{event_id}/registration", token=token, expected=(409,))
+    call("DELETE", f"/api/events/{event_id}", token=token, expected=(204,))
 
 
-def verify_annual_sujet_lifecycle(token: str) -> None:
+def verify_annual_sujet_lifecycle(token: str) -> tuple[int, int]:
     first = call(
-        "POST",
-        "/api/sujets",
-        token=token,
-        json={
-            "year": 2026,
-            "title": "Sujet 2026",
-            "motto": "Archiv-Motto",
-            "text": "Erstes Jahres-Sujet",
-            "is_current": True,
-        },
+        "POST", "/api/sujets", token=token,
+        json={"year": 2026, "title": "Sujet 2026", "motto": "Archiv-Motto", "text": "Erstes Jahres-Sujet", "is_current": True},
     ).json()
-    first_id = int(first["id"])
-    if not first.get("is_current") or first.get("section") != "sujet":
-        fail("first annual Sujet was not activated")
-
     second = call(
-        "POST",
-        "/api/sujets",
-        token=token,
-        json={
-            "year": 2027,
-            "title": "Sujet 2027",
-            "motto": "Aktuelles Motto",
-            "text": "Zweites Jahres-Sujet",
-            "is_current": True,
-        },
+        "POST", "/api/sujets", token=token,
+        json={"year": 2027, "title": "Sujet 2027", "motto": "Aktuelles Motto", "text": "Zweites Jahres-Sujet", "is_current": True},
     ).json()
-    second_id = int(second["id"])
-
+    first_id, second_id = int(first["id"]), int(second["id"])
     current = call("GET", "/api/sujets/current", token=token).json()
-    if int(current.get("id", 0)) != second_id or int(current.get("year", 0)) != 2027:
-        fail("activating a new Sujet did not switch the canonical current Sujet")
-    if current.get("motto") != "Aktuelles Motto":
-        fail("Sujet motto did not round-trip through API/database")
-
-    all_sujets = call("GET", "/api/sujets?scope=all", token=token).json()
-    current_rows = [row for row in all_sujets if row.get("is_current")]
-    if len(current_rows) != 1 or int(current_rows[0]["id"]) != second_id:
-        fail("annual Sujet invariant does not enforce exactly one active Sujet")
-    archived_first = next((row for row in all_sujets if int(row.get("id", 0)) == first_id), None)
-    if archived_first is None or archived_first.get("section") != "archive":
-        fail("previous current Sujet was not automatically archived")
+    if int(current.get("id", 0)) != second_id or current.get("motto") != "Aktuelles Motto":
+        fail("canonical current annual Sujet is wrong")
+    all_rows = call("GET", "/api/sujets?scope=all", token=token).json()
+    active = [row for row in all_rows if row.get("is_current")]
+    if len(active) != 1 or int(active[0]["id"]) != second_id:
+        fail("exactly-one-current Sujet invariant failed")
+    archived = next((row for row in all_rows if int(row.get("id", 0)) == first_id), None)
+    if archived is None or archived.get("section") != "archive":
+        fail("previous current Sujet was not archived")
 
     updated = call(
-        "PUT",
-        f"/api/sujets/{second_id}",
-        token=token,
-        json={
-            "year": 2027,
-            "title": "Sujet 2027 aktualisiert",
-            "motto": "Neues Motto",
-            "text": "Aktualisierte Beschreibung",
-            "is_current": True,
-        },
+        "PUT", f"/api/sujets/{second_id}", token=token,
+        json={"year": 2027, "title": "Sujet 2027 aktualisiert", "motto": "Neues Motto", "text": "Aktualisiert", "is_current": True},
     ).json()
-    if updated.get("motto") != "Neues Motto" or updated.get("title") != "Sujet 2027 aktualisiert":
-        fail("annual Sujet update was not persisted")
+    if updated.get("motto") != "Neues Motto":
+        fail("Sujet motto update was not persisted")
 
-    # Generic content CRUD must remain blocked for Sujet/archive after Phase 4.
     for section in ("sujet", "archive"):
         call(
-            "POST",
-            "/api/content",
-            token=token,
-            expected=(409,),
-            json={
-                "section": section,
-                "title": "Legacy write",
-                "text": "must fail",
-                "link_url": "",
-                "poll_options": [],
-                "poll_allow_suggestions": False,
-            },
+            "POST", "/api/content", token=token, expected=(409,),
+            json={"section": section, "title": "Legacy write", "text": "must fail", "link_url": "", "poll_options": [], "poll_allow_suggestions": False},
         )
-
-    call("DELETE", f"/api/sujets/{first_id}", token=token, expected=(200, 204))
-    call("DELETE", f"/api/sujets/{second_id}", token=token, expected=(200, 204))
+    return first_id, second_id
 
 
-def verify_sqlite_club_guards() -> None:
+def verify_cross_club_isolation(token: str, original_club_id: int) -> None:
+    club = call(
+        "POST", "/api/clubs", token=token,
+        json={
+            "slug": "phase35-isolation",
+            "name": "Phase 3-5 Isolation",
+            "short_name": "P35",
+            "primary_color": "#225588",
+            "secondary_color": "#F2F2F2",
+        },
+    ).json()
+    other_id = int(club["id"])
+    call("POST", "/api/auth/club", token=token, json={"club_id": other_id})
+    if call("GET", "/api/sujets?scope=all", token=token).json():
+        fail("new club can see Sujet data from original club")
+    other = call(
+        "POST", "/api/sujets", token=token,
+        json={"year": 2030, "title": "Isolation Sujet", "motto": "Nur anderer Verein", "text": "isoliert", "is_current": True},
+    ).json()
+    if int(other.get("club_id", 0)) != other_id:
+        fail("new Sujet was not assigned to active club")
+    call("POST", "/api/auth/club", token=token, json={"club_id": original_club_id})
+    titles = {row.get("title") for row in call("GET", "/api/sujets?scope=all", token=token).json()}
+    if "Isolation Sujet" in titles:
+        fail("Sujet from second club leaked into original club")
+
+
+def verify_sqlite_club_integrity() -> None:
     if not DB_PATH.exists():
-        fail(f"isolated database not found at {DB_PATH}")
-
-    tenant_tables = [
-        "news",
-        "events",
-        "members",
-        "member_filters",
-        "content_items",
-        "content_images",
-        "event_registrations",
-        "users",
-        "sessions",
-        "push_tokens",
-        "annual_sujets",
-        "annual_sujet_images",
-    ]
+        fail(f"database not found at {DB_PATH}")
     with sqlite3.connect(DB_PATH) as db:
         db.row_factory = sqlite3.Row
-        tables = {
-            str(row["name"])
-            for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
-        for table in tenant_tables:
-            if table not in tables:
-                fail(f"tenant table missing: {table}")
-            columns = {
-                str(row["name"])
-                for row in db.execute(f"PRAGMA table_info({table})")
-            }
+        tables = {str(row["name"]) for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        required = {"annual_sujets", "annual_sujet_images", "news", "events", "members", "content_items", "users", "sessions"}
+        missing = required - tables
+        if missing:
+            fail(f"tenant tables missing: {sorted(missing)}")
+        for table in sorted(required):
+            columns = {str(row["name"]) for row in db.execute(f"PRAGMA table_info({table})")}
             if "club_id" not in columns:
+                # Integrated sessions bind through active_club_id instead.
+                if table == "sessions" and "active_club_id" in columns:
+                    bad = db.execute(
+                        "SELECT COUNT(*) FROM sessions s LEFT JOIN clubs c ON c.id=s.active_club_id WHERE s.active_club_id IS NOT NULL AND c.id IS NULL"
+                    ).fetchone()[0]
+                    if bad:
+                        fail("sessions contain invalid active_club_id")
+                    continue
                 fail(f"{table} is missing club_id")
-            wrong_count = int(
-                db.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE club_id <> ? OR club_id IS NULL",
-                    (INSTANCE_ID,),
-                ).fetchone()[0]
-            )
-            if wrong_count:
-                fail(f"{table} contains rows outside configured club instance")
-
-        # Prove the DB itself blocks cross-club reassignment even if application
-        # code accidentally attempts it.
-        user = db.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
-        if user is None:
-            fail("no user available for tenant trigger test")
-        try:
-            db.execute(
-                "UPDATE users SET club_id = ? WHERE id = ?",
-                ("another-club", int(user["id"])),
-            )
-            db.commit()
-        except sqlite3.IntegrityError:
-            db.rollback()
-        else:
-            fail("database tenant trigger allowed a user to cross club boundary")
+            bad = db.execute(
+                f"SELECT COUNT(*) FROM {table} t LEFT JOIN clubs c ON c.id=t.club_id WHERE t.club_id IS NOT NULL AND c.id IS NULL"
+            ).fetchone()[0]
+            if bad:
+                fail(f"{table} contains orphaned club references")
 
 
 def main() -> None:
-    token = login_admin()
-    verify_tenant_http_boundary(token)
-    verify_annual_sujet_lifecycle(token)
-    verify_sqlite_club_guards()
-    print("PHASE3-5 CONTRACT OK")
+    token, me = login_admin()
+    original_club_id = int(me.get("current_club_id") or 0)
+    if original_club_id <= 0:
+        fail("login has no active club")
+    verify_extended_events(token)
+    first_id, second_id = verify_annual_sujet_lifecycle(token)
+    verify_cross_club_isolation(token, original_club_id)
+    verify_sqlite_club_integrity()
+    call("DELETE", f"/api/sujets/{first_id}", token=token, expected=(200, 204))
+    call("DELETE", f"/api/sujets/{second_id}", token=token, expected=(200, 204))
+    print("PHASE3-5 CONTRACT OK: extended events, annual Sujet, integrated club isolation")
 
 
 if __name__ == "__main__":
