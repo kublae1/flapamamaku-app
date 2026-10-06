@@ -8,7 +8,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from . import main as main_app
-from .masterplan_extensions import install_masterplan_extensions
+from . import masterplan_extensions
 
 app = main_app.app
 INSTANCE_ID = main_app.INSTANCE_ID
@@ -16,6 +16,37 @@ DB_PATH = main_app.DB_PATH
 PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db"))
 PUBLIC_URL = os.getenv("FLAPAMAMAKU_PUBLIC_URL", "").strip().rstrip("/")
 RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", main_app.API_VERSION).strip() or main_app.API_VERSION
+
+# Some production databases still contain a legacy tenant trigger that rejects
+# annual-Sujet migration writes with the exact SQLite error "wrong club_id".
+# Keep the migration isolated in a savepoint so such a legacy guard cannot make
+# the whole backend fail at startup. Existing content is left untouched and all
+# unrelated integrity failures still abort normally.
+_original_migrate_legacy_sujets = masterplan_extensions._migrate_legacy_sujets
+
+
+def _safe_migrate_legacy_sujets(db: sqlite3.Connection) -> None:
+    savepoint = "runtime_legacy_sujet_migration"
+    db.execute(f"SAVEPOINT {savepoint}")
+    try:
+        _original_migrate_legacy_sujets(db)
+    except sqlite3.IntegrityError as exc:
+        db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+        if "wrong club_id" not in str(exc).lower():
+            db.execute(f"RELEASE SAVEPOINT {savepoint}")
+            raise
+    finally:
+        # RELEASE is valid both after a successful migration and after
+        # ROLLBACK TO; guard against a prior explicit release on re-raise.
+        try:
+            db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        except sqlite3.OperationalError as exc:
+            if "no such savepoint" not in str(exc).lower():
+                raise
+
+
+masterplan_extensions._migrate_legacy_sujets = _safe_migrate_legacy_sujets
+install_masterplan_extensions = masterplan_extensions.install_masterplan_extensions
 
 # FastAPI 0.116 rejects decorated 204 routes when it infers a response body from
 # the Python annotation. Register only those routes temporarily as 200, then
