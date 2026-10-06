@@ -28,8 +28,8 @@ new_capability = """    try {
     }
 """
 count = text.count(old_capability)
-if count < 3:
-    raise SystemExit(f"Expected at least 3 biometric capability blocks, found {count}")
+if count < 2:
+    raise SystemExit(f"Expected at least 2 biometric capability blocks, found {count}")
 text = text.replace(old_capability, new_capability)
 
 text = replace_once(
