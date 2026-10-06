@@ -54,14 +54,16 @@ class PushService {
 
     try {
       if (!_initialized) {
-        await Firebase.initializeApp(
-          options: const FirebaseOptions(
-            apiKey: _apiKey,
-            appId: _appId,
-            messagingSenderId: _senderId,
-            projectId: _projectId,
-          ),
-        );
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp(
+            options: const FirebaseOptions(
+              apiKey: _apiKey,
+              appId: _appId,
+              messagingSenderId: _senderId,
+              projectId: _projectId,
+            ),
+          );
+        }
         const androidSettings =
             AndroidInitializationSettings('ic_stat_flapamamaku');
         const darwinSettings = DarwinInitializationSettings();

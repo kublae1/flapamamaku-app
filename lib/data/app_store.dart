@@ -458,6 +458,7 @@ class AppStore extends ChangeNotifier {
   );
 
   bool get serverConfigured => api.isConfigured;
+  String? get pushDiagnostic => pushService.lastError;
   String get serverUrl => api.baseUrl;
   bool get canChangeServer => _allowServerChange;
 

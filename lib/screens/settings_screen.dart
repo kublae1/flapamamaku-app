@@ -280,8 +280,14 @@ class SettingsScreen extends StatelessWidget {
               subtitle: Text(
                 store.pushEnabled
                     ? 'Push ist auf diesem Gerät aktiviert'
-                    : 'Beim Einschalten werden Firebase, Android-Berechtigung und Serverregistrierung geprüft',
-                style: const TextStyle(color: Colors.white60),
+                    : (store.pushDiagnostic?.isNotEmpty == true
+                        ? store.pushDiagnostic!
+                        : 'Beim Einschalten werden Firebase, Android-Berechtigung, FCM-Token und Serverregistrierung geprüft'),
+                style: TextStyle(
+                  color: store.pushDiagnostic?.isNotEmpty == true
+                      ? Colors.orangeAccent
+                      : Colors.white60,
+                ),
               ),
               value: store.pushEnabled,
               activeThumbColor: Colors.white,
