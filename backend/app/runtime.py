@@ -17,17 +17,37 @@ PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db")
 PUBLIC_URL = os.getenv("FLAPAMAMAKU_PUBLIC_URL", "").strip().rstrip("/")
 RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", main_app.API_VERSION).strip() or main_app.API_VERSION
 
-# FastAPI requires a body-less response class for HTTP 204 routes. The recovery
-# extension intentionally re-registers the event registration POST as 204, so
-# patch only that decorator case while the extension is being installed. JSON
-# routes keep FastAPI's normal response class.
+# FastAPI 0.116 rejects a decorated 204 route before we can attach the correct
+# empty response class when the function annotation is inferred as a body model.
+# Register only such POST routes temporarily as 200, then immediately convert the
+# generated APIRoute to 204 + Response. All other extension routes are untouched.
 _original_post = app.post
 
 
 def _recovery_post(path: str, *args, **kwargs):
-    if kwargs.get("status_code") == 204 and "response_class" not in kwargs:
-        kwargs["response_class"] = Response
-    return _original_post(path, *args, **kwargs)
+    requested_status = kwargs.get("status_code")
+    if requested_status != 204:
+        return _original_post(path, *args, **kwargs)
+
+    registration_kwargs = dict(kwargs)
+    registration_kwargs["status_code"] = 200
+
+    def decorator(func):
+        registered = _original_post(path, *args, **registration_kwargs)(func)
+        for route in reversed(app.router.routes):
+            if getattr(route, "path", None) != path:
+                continue
+            methods = getattr(route, "methods", set()) or set()
+            if "POST" not in methods or getattr(route, "endpoint", None) is not func:
+                continue
+            route.status_code = 204
+            route.response_class = Response
+            route.response_model = None
+            route.response_field = None
+            break
+        return registered
+
+    return decorator
 
 
 app.post = _recovery_post
