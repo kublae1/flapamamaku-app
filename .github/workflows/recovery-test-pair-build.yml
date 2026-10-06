@@ -1,0 +1,73 @@
+name: Recovery Test Pair Build
+
+on:
+  push:
+    branches:
+      - recovery/masterplan-on-175c23b-20261006
+    paths:
+      - .github/workflows/recovery-test-pair-build.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push recovery backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/kublae1/flapamamaku-backend:recovery-581-masterplan-test
+            ghcr.io/kublae1/flapamamaku-backend:recovery-${{ github.sha }}
+          build-args: |
+            FLAPAMAMAKU_BUILD_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android platform files if missing
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name flapamamaku_app .
+          fi
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      - name: Build recovery APK
+        run: |
+          flutter build apk --release \
+            --dart-define=API_BASE_URL=https://flapamamaku.kublaecloud.synology.me \
+            --dart-define=CLUB_INSTANCE_ID=flapamamaku \
+            --dart-define=APP_DISPLAY_NAME=FLAPAMAMAKU \
+            --dart-define=APP_DISPLAY_SUBTITLE="Fasnachtsgruppe Luzern" \
+            --dart-define=ALLOW_SERVER_CHANGE=false
+      - name: Upload recovery APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: flapamamaku-recovery-581-masterplan-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
