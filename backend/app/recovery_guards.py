@@ -64,6 +64,82 @@ def _valid_default_club_id(db: sqlite3.Connection) -> int:
     return int(row["id"])
 
 
+def _install_live_compatibility_triggers(db: sqlite3.Connection) -> None:
+    """Keep legacy club_id columns valid for rows created after startup."""
+    if _table_exists(db, "user_clubs") and _table_exists(db, "users"):
+        if "club_id" in _columns(db, "users"):
+            db.execute("DROP TRIGGER IF EXISTS user_clubs_compat_user_club_insert")
+            db.execute("DROP TRIGGER IF EXISTS user_clubs_compat_user_club_update")
+            db.execute(
+                """
+                CREATE TRIGGER user_clubs_compat_user_club_insert
+                AFTER INSERT ON user_clubs
+                WHEN NEW.active = 1
+                BEGIN
+                    UPDATE users
+                    SET club_id = NEW.club_id
+                    WHERE id = NEW.user_id
+                      AND (
+                          club_id IS NULL OR
+                          NOT EXISTS (
+                              SELECT 1 FROM clubs c
+                              WHERE c.id = CAST(users.club_id AS INTEGER)
+                          )
+                      );
+                END
+                """
+            )
+            db.execute(
+                """
+                CREATE TRIGGER user_clubs_compat_user_club_update
+                AFTER UPDATE OF club_id, active ON user_clubs
+                WHEN NEW.active = 1
+                BEGIN
+                    UPDATE users
+                    SET club_id = NEW.club_id
+                    WHERE id = NEW.user_id
+                      AND (
+                          club_id IS NULL OR
+                          NOT EXISTS (
+                              SELECT 1 FROM clubs c
+                              WHERE c.id = CAST(users.club_id AS INTEGER)
+                          )
+                      );
+                END
+                """
+            )
+
+    if _table_exists(db, "sessions"):
+        cols = _columns(db, "sessions")
+        if {"club_id", "active_club_id"}.issubset(cols):
+            db.execute("DROP TRIGGER IF EXISTS sessions_compat_club_insert")
+            db.execute("DROP TRIGGER IF EXISTS sessions_compat_club_update")
+            db.execute(
+                """
+                CREATE TRIGGER sessions_compat_club_insert
+                AFTER INSERT ON sessions
+                WHEN NEW.active_club_id IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM clubs c WHERE c.id = NEW.active_club_id)
+                BEGIN
+                    UPDATE sessions SET club_id = NEW.active_club_id
+                    WHERE token_hash = NEW.token_hash;
+                END
+                """
+            )
+            db.execute(
+                """
+                CREATE TRIGGER sessions_compat_club_update
+                AFTER UPDATE OF active_club_id ON sessions
+                WHEN NEW.active_club_id IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM clubs c WHERE c.id = NEW.active_club_id)
+                BEGIN
+                    UPDATE sessions SET club_id = NEW.active_club_id
+                    WHERE token_hash = NEW.token_hash;
+                END
+                """
+            )
+
+
 def _repair_compatibility_club_ids() -> None:
     """Ensure every Phase-4/5 compatibility club_id references a real club."""
     try:
@@ -72,9 +148,6 @@ def _repair_compatibility_club_ids() -> None:
                 return
             default_club_id = _valid_default_club_id(db)
 
-            # Users are canonically related to clubs through user_clubs. Keep
-            # users.club_id valid for legacy/Phase-4/5 code by projecting the
-            # first active membership, preferring the default club when present.
             if _table_exists(db, "users") and "club_id" in _columns(db, "users"):
                 db.execute(
                     """
@@ -99,7 +172,6 @@ def _repair_compatibility_club_ids() -> None:
                     (default_club_id, default_club_id),
                 )
 
-            # Sessions have an explicit active_club_id in the integrated model.
             if _table_exists(db, "sessions") and "club_id" in _columns(db, "sessions"):
                 session_columns = _columns(db, "sessions")
                 if "active_club_id" in session_columns:
@@ -121,9 +193,6 @@ def _repair_compatibility_club_ids() -> None:
                         (default_club_id,),
                     )
 
-            # User-owned compatibility tables can derive their club from the
-            # user's first active membership. This is only a legacy projection;
-            # current endpoints still use their canonical per-club fields.
             for table in ("push_tokens", "gallery_snapshots"):
                 if not _table_exists(db, table):
                     continue
@@ -155,9 +224,6 @@ def _repair_compatibility_club_ids() -> None:
                     (default_club_id, default_club_id),
                 )
 
-            # Remaining Phase-4/5-only tables have no better legacy relation.
-            # Existing valid IDs are preserved; only null/orphan textual IDs are
-            # projected to the local default club.
             for table in (
                 "annual_sujets",
                 "annual_sujet_images",
@@ -181,6 +247,7 @@ def _repair_compatibility_club_ids() -> None:
                     (default_club_id,),
                 )
 
+            _install_live_compatibility_triggers(db)
             db.commit()
     except sqlite3.Error:
         main_app.logger.exception("Compatibility club-id recovery failed")
@@ -203,8 +270,6 @@ def install_recovery_guards() -> None:
         if callable(original):
             dependant.call = _guard_content_write(original)
 
-    # Append after app.main + phase45 startup handlers. At this point both the
-    # integrated schema and Phase-4/5 compatibility columns exist.
     if _repair_compatibility_club_ids not in main_app.app.router.on_startup:
         main_app.app.router.on_startup.append(_repair_compatibility_club_ids)
 
