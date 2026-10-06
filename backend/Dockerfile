@@ -13,4 +13,4 @@ ENV FLAPAMAMAKU_DB=/data/flapamamaku.db
 ENV FLAPAMAMAKU_BUILD_SHA=$FLAPAMAMAKU_BUILD_SHA
 EXPOSE 8000
 
-CMD ["uvicorn", "app.runtime:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.push_runtime:app", "--host", "0.0.0.0", "--port", "8000"]
