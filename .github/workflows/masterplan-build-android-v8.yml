@@ -1,0 +1,244 @@
+name: Masterplan Build Android APK V8
+
+on:
+  push:
+    branches:
+      - feature/masterplan-on-recovered-20261006
+    paths:
+      - "lib/**"
+      - "assets/**"
+      - "pubspec.yaml"
+      - ".github/workflows/masterplan-build-android-v8.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_APPLICATION_ID: ch.flapamamaku.app
+      API_BASE_URL: https://flapamamaku.kublaecloud.synology.me
+      CLUB_INSTANCE_ID: flapamamaku
+      APP_DISPLAY_NAME: FLAPAMAMAKU
+      APP_DISPLAY_SUBTITLE: Fasnachtsgruppe Luzern
+      FIREBASE_API_KEY_VALUE: ${{ secrets.FLAPAMAMAKU_FIREBASE_API_KEY }}
+      FIREBASE_APP_ID_VALUE: ${{ secrets.FLAPAMAMAKU_FIREBASE_APP_ID }}
+      FIREBASE_MESSAGING_SENDER_ID_VALUE: ${{ secrets.FLAPAMAMAKU_FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_PROJECT_ID_VALUE: ${{ secrets.FLAPAMAMAKU_FIREBASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform
+        run: flutter create --platforms=android --project-name flapamamaku_app .
+
+      - name: Configure Android application ID
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          app_id = os.environ['ANDROID_APPLICATION_ID']
+          gradle = Path('android/app/build.gradle.kts')
+          text = gradle.read_text()
+          text = re.sub(r'namespace\s*=\s*"[^"]+"', f'namespace = "{app_id}"', text, count=1)
+          text = re.sub(r'applicationId\s*=\s*"[^"]+"', f'applicationId = "{app_id}"', text, count=1)
+          gradle.write_text(text)
+          activity = next(Path('android/app/src/main').rglob('MainActivity.kt'))
+          activity_text = activity.read_text()
+          activity_text = re.sub(r'^package\s+[A-Za-z0-9_.]+', f'package {app_id}', activity_text, count=1, flags=re.MULTILINE)
+          target = Path('android/app/src/main/kotlin') / Path(*app_id.split('.')) / 'MainActivity.kt'
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(activity_text)
+          if activity.resolve() != target.resolve():
+              activity.unlink()
+          PY
+
+      - name: Configure native Firebase Android resources
+        shell: bash
+        run: |
+          if [ -z "$FIREBASE_API_KEY_VALUE" ] || [ -z "$FIREBASE_APP_ID_VALUE" ] || [ -z "$FIREBASE_MESSAGING_SENDER_ID_VALUE" ] || [ -z "$FIREBASE_PROJECT_ID_VALUE" ]; then
+            echo "::error::Firebase Android secrets are incomplete"
+            exit 1
+          fi
+          mkdir -p android/app/src/main/res/values
+          cat > android/app/src/main/res/values/firebase_generated.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="google_app_id" translatable="false">$FIREBASE_APP_ID_VALUE</string>
+              <string name="gcm_defaultSenderId" translatable="false">$FIREBASE_MESSAGING_SENDER_ID_VALUE</string>
+              <string name="project_id" translatable="false">$FIREBASE_PROJECT_ID_VALUE</string>
+              <string name="google_api_key" translatable="false">$FIREBASE_API_KEY_VALUE</string>
+          </resources>
+          EOF
+
+      - name: Configure Android permissions and biometric activity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          kts = Path('android/app/build.gradle.kts')
+          text = kts.read_text()
+          if 'isCoreLibraryDesugaringEnabled = true' not in text:
+              text = re.sub(r'(compileOptions\s*\{)', r'\1\n        isCoreLibraryDesugaringEnabled = true', text, count=1)
+          if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' not in text:
+              if re.search(r'(?m)^dependencies\s*\{', text):
+                  text = re.sub(r'(?m)^dependencies\s*\{', 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")', text, count=1)
+              else:
+                  text += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+          kts.write_text(text)
+          PY
+
+          mkdir -p android/app/src/main/res/drawable
+          cat > android/app/src/main/res/drawable/ic_stat_flapamamaku.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M5,4 L19,4 L19,7 L9,7 L9,10 L17,10 L17,13 L9,13 L9,20 L5,20 Z"/>
+          </vector>
+          EOF
+
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET"/>' "$MANIFEST"; fi
+          if ! grep -q 'android.permission.USE_BIOMETRIC' "$MANIFEST"; then sed -i '/<manifest/a\    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>' "$MANIFEST"; fi
+          if ! grep -q 'android.permission.POST_NOTIFICATIONS' "$MANIFEST"; then sed -i '/<manifest/a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' "$MANIFEST"; fi
+          if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"; fi
+          if ! grep -q 'com.google.firebase.messaging.default_notification_icon' "$MANIFEST"; then
+            sed -i '/<\/application>/i\        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_flapamamaku" />' "$MANIFEST"
+          fi
+          MAIN_ACTIVITY=$(find android/app/src/main -name MainActivity.kt | head -n 1)
+          sed -i 's/import io.flutter.embedding.android.FlutterActivity/import io.flutter.embedding.android.FlutterFragmentActivity/' "$MAIN_ACTIVITY"
+          sed -i 's/: FlutterActivity()/: FlutterFragmentActivity()/' "$MAIN_ACTIVITY"
+
+      - name: Configure permanent release signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FLAPAMAMAKU_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FLAPAMAMAKU_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.FLAPAMAMAKU_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.FLAPAMAMAKU_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Permanent Android release signing secrets are required"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          compact = ''.join(os.environ['KEYSTORE_BASE64'].strip().replace('\ufeff', '').split())
+          Path('android/app/flapamamaku-release.jks').write_bytes(base64.b64decode(compact, validate=True))
+          PY
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=flapamamaku-release.jks
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          kts = Path('android/app/build.gradle.kts')
+          text = kts.read_text()
+          prefix = '''import java.util.Properties
+          import java.io.FileInputStream
+
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          '''
+          if 'val keystoreProperties = Properties()' not in text:
+              text = prefix + text
+          signing = '''android {
+              signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+          '''
+          if 'create("release")' not in text:
+              text = text.replace('android {', signing, 1)
+          text = text.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
+          kts.write_text(text)
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Generate launcher icon
+        run: dart run flutter_launcher_icons
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          APP_VERSION=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path('pubspec.yaml').read_text()
+          print(re.search(r'^version:\s*([^+\s]+)', text, re.MULTILINE).group(1))
+          PY
+          )
+          APP_BUILD_NUMBER=$(python3 - <<'PY'
+          import os
+          from datetime import datetime, timezone
+          date_code = int(datetime.now(timezone.utc).strftime('%y%m%d'))
+          run_suffix = int(os.environ['GITHUB_RUN_NUMBER']) % 1000
+          print(date_code * 1000 + run_suffix)
+          PY
+          )
+          APK_FILE="flapamamaku-${APP_VERSION}-${APP_BUILD_NUMBER}.apk"
+          echo "name=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "number=$APP_BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "apk_file=$APK_FILE" >> "$GITHUB_OUTPUT"
+          echo "Release version: $APP_VERSION+$APP_BUILD_NUMBER"
+
+      - name: Build signed updatable APK
+        env:
+          APP_VERSION: ${{ steps.version.outputs.name }}
+          APP_BUILD_NUMBER: ${{ steps.version.outputs.number }}
+        run: |
+          flutter build apk --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$APP_BUILD_NUMBER" \
+            --dart-define=API_BASE_URL="$API_BASE_URL" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=APP_BUILD_NUMBER="$APP_BUILD_NUMBER" \
+            --dart-define=APP_NAME="$APP_DISPLAY_NAME" \
+            --dart-define=APP_SUBTITLE="$APP_DISPLAY_SUBTITLE" \
+            --dart-define=CLUB_INSTANCE_ID="$CLUB_INSTANCE_ID" \
+            --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY_VALUE" \
+            --dart-define=FIREBASE_APP_ID="$FIREBASE_APP_ID_VALUE" \
+            --dart-define=FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID_VALUE" \
+            --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID_VALUE"
+
+      - name: Verify signature and package APK
+        env:
+          APK_FILE: ${{ steps.version.outputs.apk_file }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/$APK_FILE"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --print-certs "build/app/outputs/flutter-apk/$APK_FILE"
+          sha256sum "build/app/outputs/flutter-apk/$APK_FILE" > build/app/outputs/flutter-apk/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flapamamaku-${{ steps.version.outputs.name }}-build-${{ steps.version.outputs.number }}
+          path: |
+            build/app/outputs/flutter-apk/${{ steps.version.outputs.apk_file }}
+            build/app/outputs/flutter-apk/SHA256SUMS.txt
