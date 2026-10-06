@@ -77,6 +77,11 @@ class PollSuggestion {
 class ContentItem {
   final int? id;
   final String section;
+  final bool annualSujet;
+  final int? year;
+  final bool isCurrent;
+  final String motto;
+  final String logoUrl;
   final String title;
   final String text;
   final String linkUrl;
@@ -108,6 +113,11 @@ class ContentItem {
   const ContentItem({
     this.id,
     required this.section,
+    this.annualSujet = false,
+    this.year,
+    this.isCurrent = false,
+    this.motto = '',
+    this.logoUrl = '',
     required this.title,
     this.text = '',
     this.linkUrl = '',
@@ -165,6 +175,11 @@ class ContentItem {
     return ContentItem(
       id: json['id'] as int?,
       section: json['section']?.toString() ?? '',
+      annualSujet: json['annual_sujet'] == true,
+      year: json['year'] is int ? json['year'] as int : int.tryParse(json['year']?.toString() ?? ''),
+      isCurrent: json['is_current'] == true,
+      motto: json['motto']?.toString() ?? '',
+      logoUrl: json['logo_url']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       text: json['text']?.toString() ?? '',
       linkUrl: json['link_url']?.toString() ?? '',
@@ -259,6 +274,13 @@ class EventItem {
   final String title;
   final String location;
   final String time;
+  final String endTime;
+  final String meetingPoint;
+  final String description;
+  final String responsible;
+  final String registrationDeadline;
+  final bool registrationEnabled;
+  final String documentUrl;
   final int registrationCount;
   final bool registeredByMe;
   final String imageUrl;
@@ -271,6 +293,13 @@ class EventItem {
     this.time, {
     this.id,
     this.eventDate = '',
+    this.endTime = '',
+    this.meetingPoint = '',
+    this.description = '',
+    this.responsible = '',
+    this.registrationDeadline = '',
+    this.registrationEnabled = true,
+    this.documentUrl = '',
     this.registrationCount = 0,
     this.registeredByMe = false,
     this.imageUrl = '',
@@ -293,6 +322,13 @@ class EventItem {
       json['time']?.toString() ?? '',
       id: json['id'] as int?,
       eventDate: json['event_date']?.toString() ?? '',
+      endTime: json['end_time']?.toString() ?? '',
+      meetingPoint: json['meeting_point']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      responsible: json['responsible']?.toString() ?? '',
+      registrationDeadline: json['registration_deadline']?.toString() ?? '',
+      registrationEnabled: json['registration_enabled'] != false && json['registration_enabled'] != 0,
+      documentUrl: json['document_url']?.toString() ?? '',
       registrationCount: json['registration_count'] as int? ?? 0,
       registeredByMe: json['registered_by_me'] == true,
       imageUrl: json['image_url']?.toString() ?? '',
