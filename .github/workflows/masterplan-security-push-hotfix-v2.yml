@@ -1,0 +1,29 @@
+name: Masterplan Push Biometric Hotfix V2
+
+on:
+  push:
+    branches:
+      - feature/masterplan-on-recovered-20261006
+    paths:
+      - .github/workflows/masterplan-security-push-hotfix-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/masterplan-on-recovered-20261006
+      - name: Apply hotfix script
+        run: python3 tools/masterplan_push_biometric_hotfix.py
+      - name: Commit patched app files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/data/app_store.dart lib/data/push_service.dart lib/screens/settings_screen.dart
+          git diff --cached --check
+          git commit -m "Masterplan: fix push and biometric runtime behavior"
+          git push origin HEAD:feature/masterplan-on-recovered-20261006
