@@ -134,6 +134,51 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _SettingsCard(
+            child: SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 4,
+              ),
+              secondary: const Icon(
+                Icons.fingerprint_rounded,
+                color: FlapBrand.gold,
+                size: 29,
+              ),
+              title: const Text(
+                'Biometrische Anmeldung',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: Text(
+                store.biometricAvailable
+                    ? 'App beim nächsten Start mit Fingerabdruck, Gesichtserkennung oder Geräte-PIN entsperren'
+                    : 'Auf diesem Gerät ist keine biometrische Entsperrung verfügbar',
+                style: const TextStyle(color: Colors.white60),
+              ),
+              value: store.biometricEnabled && store.biometricAvailable,
+              activeThumbColor: Colors.white,
+              activeTrackColor: store.themeColor,
+              onChanged: store.biometricAvailable
+                  ? (value) async {
+                      final ok = await store.setBiometricEnabled(value);
+                      if (!ok && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              store.authError ??
+                                  'Biometrische Anmeldung konnte nicht geändert werden.',
+                            ),
+                          ),
+                        );
+                      }
+                    }
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _SettingsCard(
             child: ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: const Icon(
