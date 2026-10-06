@@ -1,9 +1,9 @@
-name: Recovery Publish Backend Image
+name: Masterplan Publish Backend Image
 
 on:
   push:
     branches:
-      - recovery/app581-on-masterplan-20261006
+      - feature/masterplan-on-recovered-20261006
     paths:
       - "backend/**"
       - ".github/workflows/recovery-publish-backend-image.yml"
@@ -36,8 +36,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha,prefix=recovery-app581-sha-
-      - name: Build and push recovery backend image
+            type=sha,prefix=masterplan-recovered-sha-
+      - name: Build and push Masterplan backend image
         uses: docker/build-push-action@v6
         with:
           context: ./backend
