@@ -374,7 +374,8 @@ def install_masterplan_extensions() -> None:
                         raise HTTPException(status_code=409, detail="Der Anmeldeschluss ist abgelaufen")
                 except ValueError:
                     pass
-            return registration_endpoint(row_id, user)
+            registration_endpoint(row_id, user)
+            return Response(status_code=204)
 
     @main_app.app.get("/api/sujets")
     def list_sujets(
