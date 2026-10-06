@@ -22,6 +22,9 @@ class FlapamamakuApp extends StatefulWidget {
 class _FlapamamakuAppState extends State<FlapamamakuApp> {
   final AppStore store = AppStore();
   bool _minimumSplashElapsed = false;
+  bool _biometricStartupStateCaptured = false;
+  bool _biometricRequiredAtStartup = false;
+  bool _biometricUnlockedForProcess = false;
 
   @override
   void initState() {
@@ -38,11 +41,22 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
     super.dispose();
   }
 
+  void _markBiometricUnlocked() {
+    if (_biometricUnlockedForProcess || !mounted) return;
+    setState(() => _biometricUnlockedForProcess = true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        if (store.authReady && !_biometricStartupStateCaptured) {
+          _biometricStartupStateCaptured = true;
+          _biometricRequiredAtStartup =
+              store.biometricEnabled && store.biometricAvailable;
+        }
+
         return AppStoreScope(
           store: store,
           child: MaterialApp(
@@ -111,7 +125,19 @@ class _FlapamamakuAppState extends State<FlapamamakuApp> {
                   );
                 }
                 if (store.serverConfigured && store.biometricUnlockPending) {
-                  return const BiometricLockScreen();
+                  return BiometricLockScreen(
+                    onUnlocked: _markBiometricUnlocked,
+                  );
+                }
+                if (store.serverConfigured &&
+                    store.isAuthenticated &&
+                    store.biometricEnabled &&
+                    store.biometricAvailable &&
+                    _biometricRequiredAtStartup &&
+                    !_biometricUnlockedForProcess) {
+                  return BiometricLockScreen(
+                    onUnlocked: _markBiometricUnlocked,
+                  );
                 }
                 if (!store.serverConfigured || !store.isAuthenticated) {
                   return const LoginScreen();
