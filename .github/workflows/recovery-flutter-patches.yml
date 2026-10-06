@@ -1,0 +1,70 @@
+name: Recovery Flutter Patches
+
+on:
+  push:
+    branches:
+      - recovery/masterplan-on-175c23b-20261006
+    paths:
+      - .github/workflows/recovery-flutter-patches.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: recovery/masterplan-on-175c23b-20261006
+      - name: Backport annual Sujet and extended event models safely
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'missing anchor: {label}')
+              return text.replace(old, new, 1)
+
+          path = Path('lib/models/app_data.dart')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(text,
+              '''  final String section;\n  final String title;\n''',
+              '''  final String section;\n  final bool annualSujet;\n  final int? year;\n  final bool isCurrent;\n  final String motto;\n  final String logoUrl;\n  final String title;\n''', 'content annual fields')
+          text = replace_once(text,
+              '''    required this.section,\n    required this.title,\n''',
+              '''    required this.section,\n    this.annualSujet = false,\n    this.year,\n    this.isCurrent = false,\n    this.motto = '',\n    this.logoUrl = '',\n    required this.title,\n''', 'content annual ctor')
+          text = replace_once(text,
+              '''      section: json['section']?.toString() ?? '',\n      title: json['title']?.toString() ?? '',\n''',
+              '''      section: json['section']?.toString() ?? '',\n      annualSujet: json['annual_sujet'] == true,\n      year: json['year'] is int ? json['year'] as int : int.tryParse(json['year']?.toString() ?? ''),\n      isCurrent: json['is_current'] == true,\n      motto: json['motto']?.toString() ?? '',\n      logoUrl: json['logo_url']?.toString() ?? '',\n      title: json['title']?.toString() ?? '',\n''', 'content annual parse')
+
+          text = replace_once(text,
+              '''  final String time;\n  final int registrationCount;\n''',
+              '''  final String time;\n  final String endTime;\n  final String meetingPoint;\n  final String description;\n  final String responsible;\n  final String registrationDeadline;\n  final bool registrationEnabled;\n  final String documentUrl;\n  final int registrationCount;\n''', 'event fields')
+          text = replace_once(text,
+              '''    this.eventDate = '',\n    this.registrationCount = 0,\n''',
+              '''    this.eventDate = '',\n    this.endTime = '',\n    this.meetingPoint = '',\n    this.description = '',\n    this.responsible = '',\n    this.registrationDeadline = '',\n    this.registrationEnabled = true,\n    this.documentUrl = '',\n    this.registrationCount = 0,\n''', 'event ctor')
+          text = replace_once(text,
+              '''      eventDate: json['event_date']?.toString() ?? '',\n      registrationCount: json['registration_count'] as int? ?? 0,\n''',
+              '''      eventDate: json['event_date']?.toString() ?? '',\n      endTime: json['end_time']?.toString() ?? '',\n      meetingPoint: json['meeting_point']?.toString() ?? '',\n      description: json['description']?.toString() ?? '',\n      responsible: json['responsible']?.toString() ?? '',\n      registrationDeadline: json['registration_deadline']?.toString() ?? '',\n      registrationEnabled: json['registration_enabled'] != false && json['registration_enabled'] != 0,\n      documentUrl: json['document_url']?.toString() ?? '',\n      registrationCount: json['registration_count'] as int? ?? 0,\n''', 'event parse')
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('lib/data/api_service.dart')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(text,
+              '''    final imageUrl = json['image_url']?.toString() ?? '';\n    json['image_url'] = absolute(imageUrl);\n\n    final documentUrl = json['document_url']?.toString() ?? '';\n''',
+              '''    final imageUrl = json['image_url']?.toString() ?? '';\n    json['image_url'] = absolute(imageUrl);\n\n    final logoUrl = json['logo_url']?.toString() ?? '';\n    json['logo_url'] = absolute(logoUrl);\n\n    final documentUrl = json['document_url']?.toString() ?? '';\n''', 'absolute sujet logo')
+          text = replace_once(text,
+              '''      'location': item.location,\n      'time': item.time,\n    });\n''',
+              '''      'location': item.location,\n      'time': item.time,\n      'end_time': item.endTime,\n      'meeting_point': item.meetingPoint,\n      'description': item.description,\n      'responsible': item.responsible,\n      'registration_deadline': item.registrationDeadline,\n      'registration_enabled': item.registrationEnabled,\n      'document_url': item.documentUrl,\n    });\n''', 'event save fields')
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit Flutter backport
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/models/app_data.dart lib/data/api_service.dart
+          git commit -m "Recovery: backport annual Sujet and extended event app models"
+          git push origin HEAD:recovery/masterplan-on-175c23b-20261006
