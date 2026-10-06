@@ -17,6 +17,8 @@ jobs:
   regression:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      PYTHONPATH: backend
     steps:
       - uses: actions/checkout@v4
 
