@@ -2,7 +2,7 @@
 
 Keep the recovered integrated multi-club core and the later Phase 4/5
 extensions active for every import path, including direct ``app.main:app``
-starts used by CI.  Importing runtime afterwards applies the compatibility
+starts used by CI. Importing runtime afterwards applies the compatibility
 recovery that removes obsolete single-instance guards and scopes member
 identity to the active club.
 """
@@ -20,8 +20,12 @@ install_phase45(
     is_production=_main.IS_PRODUCTION,
 )
 
-# Runtime is imported for its compatibility/recovery hooks.  It reuses the same
+# Runtime is imported for its compatibility/recovery hooks. It reuses the same
 # FastAPI app object and is intentionally imported only after Phase 4/5 is
 # installed, so its initializer wrapper can reconcile the recovered multi-club
 # schema after the Phase 4/5 migrations run.
 from . import runtime as _runtime  # noqa: E402,F401
+
+# Patch legacy content handlers that are registered before the annual-sujet
+# routes so the later domain model keeps its original write contract.
+from . import recovery_guards as _recovery_guards  # noqa: E402,F401
