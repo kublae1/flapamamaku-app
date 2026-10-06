@@ -3,7 +3,7 @@ name: Recovery Masterplan Gate
 on:
   push:
     branches:
-      - recovery/masterplan-on-175c23b-20261006
+      - feature/masterplan-on-recovered-20261006
   workflow_dispatch:
 
 permissions:
@@ -110,4 +110,4 @@ jobs:
       - name: Test
         run: flutter test
       - name: Recovery baseline marker
-        run: echo "stable-175c23b-masterplan-recovery"
+        run: echo "recovered-app581-masterplan"
