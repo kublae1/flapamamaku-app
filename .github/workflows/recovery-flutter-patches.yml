@@ -17,54 +17,47 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: recovery/masterplan-on-175c23b-20261006
-      - name: Backport annual Sujet and extended event models safely
+      - name: Backport extended event admin and detail UI
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(text, old, new, label):
+          def rep(text, old, new, label):
               if old not in text:
                   raise SystemExit(f'missing anchor: {label}')
               return text.replace(old, new, 1)
 
-          path = Path('lib/models/app_data.dart')
+          path = Path('lib/screens/admin_screen.dart')
           text = path.read_text(encoding='utf-8')
-          text = replace_once(text,
-              '''  final String section;\n  final String title;\n''',
-              '''  final String section;\n  final bool annualSujet;\n  final int? year;\n  final bool isCurrent;\n  final String motto;\n  final String logoUrl;\n  final String title;\n''', 'content annual fields')
-          text = replace_once(text,
-              '''    required this.section,\n    required this.title,\n''',
-              '''    required this.section,\n    this.annualSujet = false,\n    this.year,\n    this.isCurrent = false,\n    this.motto = '',\n    this.logoUrl = '',\n    required this.title,\n''', 'content annual ctor')
-          text = replace_once(text,
-              '''      section: json['section']?.toString() ?? '',\n      title: json['title']?.toString() ?? '',\n''',
-              '''      section: json['section']?.toString() ?? '',\n      annualSujet: json['annual_sujet'] == true,\n      year: json['year'] is int ? json['year'] as int : int.tryParse(json['year']?.toString() ?? ''),\n      isCurrent: json['is_current'] == true,\n      motto: json['motto']?.toString() ?? '',\n      logoUrl: json['logo_url']?.toString() ?? '',\n      title: json['title']?.toString() ?? '',\n''', 'content annual parse')
-
-          text = replace_once(text,
-              '''  final String time;\n  final int registrationCount;\n''',
-              '''  final String time;\n  final String endTime;\n  final String meetingPoint;\n  final String description;\n  final String responsible;\n  final String registrationDeadline;\n  final bool registrationEnabled;\n  final String documentUrl;\n  final int registrationCount;\n''', 'event fields')
-          text = replace_once(text,
-              '''    this.eventDate = '',\n    this.registrationCount = 0,\n''',
-              '''    this.eventDate = '',\n    this.endTime = '',\n    this.meetingPoint = '',\n    this.description = '',\n    this.responsible = '',\n    this.registrationDeadline = '',\n    this.registrationEnabled = true,\n    this.documentUrl = '',\n    this.registrationCount = 0,\n''', 'event ctor')
-          text = replace_once(text,
-              '''      eventDate: json['event_date']?.toString() ?? '',\n      registrationCount: json['registration_count'] as int? ?? 0,\n''',
-              '''      eventDate: json['event_date']?.toString() ?? '',\n      endTime: json['end_time']?.toString() ?? '',\n      meetingPoint: json['meeting_point']?.toString() ?? '',\n      description: json['description']?.toString() ?? '',\n      responsible: json['responsible']?.toString() ?? '',\n      registrationDeadline: json['registration_deadline']?.toString() ?? '',\n      registrationEnabled: json['registration_enabled'] != false && json['registration_enabled'] != 0,\n      documentUrl: json['document_url']?.toString() ?? '',\n      registrationCount: json['registration_count'] as int? ?? 0,\n''', 'event parse')
+          text = rep(text,
+              '''    final location = TextEditingController(text: existing?.location ?? '');\n    final time = TextEditingController(text: existing?.time ?? '');\n    XFile? selectedImage;\n''',
+              '''    final location = TextEditingController(text: existing?.location ?? '');\n    final time = TextEditingController(text: existing?.time ?? '');\n    final endTime = TextEditingController(text: existing?.endTime ?? '');\n    final meetingPoint = TextEditingController(text: existing?.meetingPoint ?? '');\n    final description = TextEditingController(text: existing?.description ?? '');\n    final responsible = TextEditingController(text: existing?.responsible ?? '');\n    final registrationDeadline = TextEditingController(text: existing?.registrationDeadline ?? '');\n    final documentUrl = TextEditingController(text: existing?.documentUrl ?? '');\n    var registrationEnabled = existing?.registrationEnabled ?? true;\n    XFile? selectedImage;\n''', 'event controllers')
+          text = rep(text,
+              '''                TextField(\n                  controller: time,\n                  decoration: const InputDecoration(labelText: 'Zeit'),\n                ),\n                const SizedBox(height: 14),\n''',
+              '''                TextField(\n                  controller: time,\n                  decoration: const InputDecoration(labelText: 'Beginn'),\n                ),\n                TextField(\n                  controller: endTime,\n                  decoration: const InputDecoration(labelText: 'Ende (optional)'),\n                ),\n                TextField(\n                  controller: meetingPoint,\n                  decoration: const InputDecoration(labelText: 'Treffpunkt'),\n                ),\n                TextField(\n                  controller: responsible,\n                  decoration: const InputDecoration(labelText: 'Verantwortliche Person'),\n                ),\n                TextField(\n                  controller: registrationDeadline,\n                  decoration: const InputDecoration(\n                    labelText: 'Anmeldeschluss',\n                    hintText: 'YYYY-MM-DDTHH:MM:SS',\n                  ),\n                ),\n                SwitchListTile(\n                  contentPadding: EdgeInsets.zero,\n                  title: const Text('Anmeldung möglich'),\n                  value: registrationEnabled,\n                  onChanged: (value) => setDialogState(() => registrationEnabled = value),\n                ),\n                TextField(\n                  controller: description,\n                  minLines: 3,\n                  maxLines: 6,\n                  decoration: const InputDecoration(labelText: 'Beschreibung'),\n                ),\n                TextField(\n                  controller: documentUrl,\n                  keyboardType: TextInputType.url,\n                  decoration: const InputDecoration(labelText: 'Dokument-Link'),\n                ),\n                const SizedBox(height: 14),\n''', 'event fields')
+          text = rep(text,
+              '''      id: existing?.id,\n      eventDate: eventDate.text.trim(),\n      imageUrl: existing?.imageUrl ?? '',\n''',
+              '''      id: existing?.id,\n      eventDate: eventDate.text.trim(),\n      endTime: endTime.text.trim(),\n      meetingPoint: meetingPoint.text.trim(),\n      description: description.text.trim(),\n      responsible: responsible.text.trim(),\n      registrationDeadline: registrationDeadline.text.trim(),\n      registrationEnabled: registrationEnabled,\n      documentUrl: documentUrl.text.trim(),\n      imageUrl: existing?.imageUrl ?? '',\n''', 'event item')
           path.write_text(text, encoding='utf-8')
 
-          path = Path('lib/data/api_service.dart')
+          path = Path('lib/screens/content_detail_screens.dart')
           text = path.read_text(encoding='utf-8')
-          text = replace_once(text,
-              '''    final imageUrl = json['image_url']?.toString() ?? '';\n    json['image_url'] = absolute(imageUrl);\n\n    final documentUrl = json['document_url']?.toString() ?? '';\n''',
-              '''    final imageUrl = json['image_url']?.toString() ?? '';\n    json['image_url'] = absolute(imageUrl);\n\n    final logoUrl = json['logo_url']?.toString() ?? '';\n    json['logo_url'] = absolute(logoUrl);\n\n    final documentUrl = json['document_url']?.toString() ?? '';\n''', 'absolute sujet logo')
-          text = replace_once(text,
-              '''      'location': item.location,\n      'time': item.time,\n    });\n''',
-              '''      'location': item.location,\n      'time': item.time,\n      'end_time': item.endTime,\n      'meeting_point': item.meetingPoint,\n      'description': item.description,\n      'responsible': item.responsible,\n      'registration_deadline': item.registrationDeadline,\n      'registration_enabled': item.registrationEnabled,\n      'document_url': item.documentUrl,\n    });\n''', 'event save fields')
+          text = rep(text,
+              '''                      _DarkInfoRow(\n                        icon: Icons.location_on_outlined,\n                        text: event.location,\n                      ),\n                    ],\n''',
+              '''                      _DarkInfoRow(\n                        icon: Icons.location_on_outlined,\n                        text: event.location,\n                      ),\n                      if (event.endTime.isNotEmpty) ...[\n                        const _DarkDivider(),\n                        _DarkInfoRow(icon: Icons.schedule_rounded, text: 'Ende: ${event.endTime}'),\n                      ],\n                      if (event.meetingPoint.isNotEmpty) ...[\n                        const _DarkDivider(),\n                        _DarkInfoRow(icon: Icons.place_outlined, text: 'Treffpunkt: ${event.meetingPoint}'),\n                      ],\n                      if (event.responsible.isNotEmpty) ...[\n                        const _DarkDivider(),\n                        _DarkInfoRow(icon: Icons.person_outline, text: 'Verantwortlich: ${event.responsible}'),\n                      ],\n                      if (event.registrationDeadline.isNotEmpty) ...[\n                        const _DarkDivider(),\n                        _DarkInfoRow(icon: Icons.timer_outlined, text: 'Anmeldeschluss: ${event.registrationDeadline}'),\n                      ],\n                    ],\n''', 'event detail info')
+          text = rep(text,
+              '''                const SizedBox(height: 16),\n                Row(\n                  children: [\n''',
+              '''                if (event.description.isNotEmpty) ...[\n                  const SizedBox(height: 16),\n                  _DarkPanel(\n                    child: Padding(\n                      padding: const EdgeInsets.all(16),\n                      child: Text(event.description, style: const TextStyle(color: Colors.white70, height: 1.5)),\n                    ),\n                  ),\n                ],\n                if (event.location.isNotEmpty || event.documentUrl.isNotEmpty) ...[\n                  const SizedBox(height: 12),\n                  Wrap(\n                    spacing: 10,\n                    alignment: WrapAlignment.center,\n                    children: [\n                      if (event.location.isNotEmpty)\n                        OutlinedButton.icon(\n                          onPressed: () {\n                            final uri = Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': event.location});\n                            launchUrl(uri, mode: LaunchMode.externalApplication);\n                          },\n                          icon: const Icon(Icons.map_outlined),\n                          label: const Text('Karte'),\n                        ),\n                      if (event.documentUrl.isNotEmpty)\n                        OutlinedButton.icon(\n                          onPressed: () {\n                            final uri = Uri.tryParse(event.documentUrl);\n                            if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);\n                          },\n                          icon: const Icon(Icons.description_outlined),\n                          label: const Text('Dokument'),\n                        ),\n                    ],\n                  ),\n                ],\n                const SizedBox(height: 16),\n                Row(\n                  children: [\n''', 'event detail description')
+          text = rep(text,
+              '''                        onPressed: _register,\n''',
+              '''                        onPressed: event.registrationEnabled ? _register : null,\n''', 'registration toggle')
           path.write_text(text, encoding='utf-8')
           PY
-      - name: Commit Flutter backport
+      - name: Commit Flutter UI backport
         run: |
           if git diff --quiet; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib/models/app_data.dart lib/data/api_service.dart
-          git commit -m "Recovery: backport annual Sujet and extended event app models"
+          git add lib/screens/admin_screen.dart lib/screens/content_detail_screens.dart
+          git commit -m "Recovery: backport extended event UI while preserving images"
           git push origin HEAD:recovery/masterplan-on-175c23b-20261006
