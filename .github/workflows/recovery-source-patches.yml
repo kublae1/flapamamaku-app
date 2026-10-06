@@ -17,28 +17,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: recovery/masterplan-on-175c23b-20261006
-      - name: Patch guarded event registration to explicit 204
+      - name: Patch Phase 3-5 integrity test for integrated user memberships
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('backend/app/masterplan_extensions.py')
+          path = Path('backend/tests/phase3_5_contract.py')
           text = path.read_text(encoding='utf-8')
-          old = '            return registration_endpoint(row_id, user)\n'
-          new = '            registration_endpoint(row_id, user)\n            return Response(status_code=204)\n'
+          old = '''            if "club_id" not in columns:\n                # Integrated sessions bind through active_club_id instead.\n                if table == "sessions" and "active_club_id" in columns:\n                    bad = db.execute(\n                        "SELECT COUNT(*) FROM sessions s LEFT JOIN clubs c ON c.id=s.active_club_id WHERE s.active_club_id IS NOT NULL AND c.id IS NULL"\n                    ).fetchone()[0]\n                    if bad:\n                        fail("sessions contain invalid active_club_id")\n                    continue\n                fail(f"{table} is missing club_id")\n'''
+          new = '''            if "club_id" not in columns:\n                # Integrated sessions bind through active_club_id. Users are\n                # intentionally many-to-many through user_clubs, not a single\n                # club_id column. Both references must remain valid.\n                if table == "sessions" and "active_club_id" in columns:\n                    bad = db.execute(\n                        "SELECT COUNT(*) FROM sessions s LEFT JOIN clubs c ON c.id=s.active_club_id WHERE s.active_club_id IS NOT NULL AND c.id IS NULL"\n                    ).fetchone()[0]\n                    if bad:\n                        fail("sessions contain invalid active_club_id")\n                    continue\n                if table == "users" and "user_clubs" in tables:\n                    bad = db.execute(\n                        "SELECT COUNT(*) FROM user_clubs uc LEFT JOIN users u ON u.id=uc.user_id LEFT JOIN clubs c ON c.id=uc.club_id WHERE u.id IS NULL OR c.id IS NULL"\n                    ).fetchone()[0]\n                    if bad:\n                        fail("user_clubs contains invalid user/club references")\n                    continue\n                fail(f"{table} is missing club_id")\n'''
           if old not in text:
-              raise SystemExit('event registration return anchor not found')
-          text = text.replace(old, new, 1)
-          path.write_text(text, encoding='utf-8')
+              raise SystemExit('integrity-test anchor not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
       - name: Commit source patch
         shell: bash
         run: |
-          if git diff --quiet; then
-            exit 0
-          fi
+          if git diff --quiet; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/app/masterplan_extensions.py
-          git commit -m "Recovery: return HTTP 204 for guarded event registration"
+          git add backend/tests/phase3_5_contract.py
+          git commit -m "Recovery: validate users through user_clubs memberships"
           git push origin HEAD:recovery/masterplan-on-175c23b-20261006
