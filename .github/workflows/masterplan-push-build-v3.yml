@@ -1,0 +1,29 @@
+name: Masterplan Push Build V3 Patch
+
+on:
+  push:
+    branches:
+      - feature/masterplan-on-recovered-20261006
+    paths:
+      - .github/workflows/masterplan-push-build-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/masterplan-on-recovered-20261006
+      - name: Apply push and build hardening
+        run: python3 tools/masterplan_push_build_v3.py
+      - name: Commit patched files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/recovery-build-android.yml lib/data/app_store.dart lib/data/push_service.dart lib/screens/settings_screen.dart
+          git diff --cached --check
+          git commit -m "Masterplan: harden push and Android updates"
+          git push origin HEAD:feature/masterplan-on-recovered-20261006
