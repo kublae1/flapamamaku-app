@@ -6,6 +6,7 @@ import 'news_screen.dart';
 import 'events_screen.dart';
 import 'remote_content_screen.dart';
 import 'more_screen.dart';
+import 'messages_screen.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -100,6 +101,12 @@ class _HomeShellState extends State<HomeShell> {
 
   void _openPushRoute(String route) {
     if (!mounted) return;
+    if (route == '/messages') {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const MessagesScreen()),
+      );
+      return;
+    }
     final store = AppStoreScope.of(context);
     final entries = _entries(store);
     final nextIndex = entries.indexWhere((entry) => entry.route == route);
