@@ -677,19 +677,10 @@ class AppStore extends ChangeNotifier {
       return;
     }
 
-    // When device authentication is enabled, never restore the secured
-    // session before the user has unlocked this app instance.
-    if (biometricEnabled && biometricAvailable) {
-      biometricUnlockPending = true;
-      isAuthenticated = false;
-      currentUser = null;
-      authReady = true;
-      notifyListeners();
-      return;
-    }
-
-    // Without the optional device lock, a valid secure session token keeps
-    // the member signed in until logout or server-side session revocation.
+    // A valid secure session token always keeps the member signed in until
+    // explicit logout or server-side revocation. Enabling biometrics must not
+    // turn normal app startup into a second login step. Biometrics remains an
+    // optional helper for login-related actions, not a per-start app lock.
     biometricUnlockPending = false;
     await _restoreWithToken(token);
   }
