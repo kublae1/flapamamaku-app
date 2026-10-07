@@ -1,0 +1,22 @@
+services:
+  flapamamaku-backend:
+    image: ghcr.io/kublae1/flapamamaku-backend:masterplan-phase9-rc-sha-af77311ec5a642030bdc72622992179a9ab9fb70
+    pull_policy: always
+    container_name: flapamamaku-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8087:8000"
+    environment:
+      FLAPAMAMAKU_DB: /data/flapamamaku.db
+      FLAPAMAMAKU_ENV: production
+      FLAPAMAMAKU_ALLOWED_ORIGINS: ${FLAPAMAMAKU_ALLOWED_ORIGINS}
+    volumes:
+      # Bestehenden produktiven Datenpfad verwenden. Nicht löschen oder neu anlegen,
+      # wenn auf der Synology bereits /volume1/docker/flapamamaku/data genutzt wird.
+      - /volume1/docker/flapamamaku/data:/data
+
+# Finaler Masterplan Phase-0-9 RC fuer den Synology/Portainer-Praxistest.
+# Quellstand: af77311ec5a642030bdc72622992179a9ab9fb70
+# Stable-Referenz: stable/masterplan-20261007-af77311
+# Wichtig: Kein docker volume rm, kein docker system prune --volumes,
+# keine Datenbankloeschung und keine Loeschung von flapamamaku-data/platform-data.
