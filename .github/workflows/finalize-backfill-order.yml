@@ -1,0 +1,31 @@
+name: Finalize Scoped Backfill Order
+
+on:
+  push:
+    branches:
+      - finalize/masterplan-phase9-20261007
+    paths:
+      - tools/fix_scoped_member_backfill_order.py
+      - .github/workflows/finalize-backfill-order.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix backfill migration order
+        run: python tools/fix_scoped_member_backfill_order.py
+      - name: Compile backend
+        run: python -m py_compile backend/app/main.py
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/main.py
+          git diff --cached --quiet && exit 0
+          git commit -m "Masterplan: migrate scoped member mapping after club columns"
+          git push
