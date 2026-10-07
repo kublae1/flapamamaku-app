@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'data/app_store.dart';
+import 'data/biometric_app_store.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'screens/password_change_screen.dart';
@@ -19,7 +20,7 @@ class FlapamamakuApp extends StatefulWidget {
 }
 
 class _FlapamamakuAppState extends State<FlapamamakuApp> {
-  final AppStore store = AppStore();
+  final AppStore store = BiometricAppStore();
   bool _minimumSplashElapsed = false;
 
   @override
