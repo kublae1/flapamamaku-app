@@ -17,11 +17,13 @@ PLATFORM_DB = Path(os.getenv("FLAPAMAMAKU_PLATFORM_DB", "/platform/platform.db")
 PUBLIC_URL = os.getenv("FLAPAMAMAKU_PUBLIC_URL", "").strip().rstrip("/")
 RUNTIME_VERSION = os.getenv("FLAPAMAMAKU_API_VERSION", main_app.API_VERSION).strip() or main_app.API_VERSION
 
-# Some production databases still contain a legacy tenant trigger that rejects
-# annual-Sujet migration writes with the exact SQLite error "wrong club_id".
-# Keep the migration isolated in a savepoint so such a legacy guard cannot make
-# the whole backend fail at startup. Existing content is left untouched and all
-# unrelated integrity failures still abort normally.
+# Some production databases still contain legacy tenant guards from older
+# masterplan builds. Two known variants can reject the one-time annual-Sujet
+# migration: the exact trigger error "wrong club_id", and an obsolete global
+# UNIQUE rule reported by SQLite as "UNIQUE constraint failed:
+# annual_sujets.is_current". Keep the migration isolated in a savepoint so
+# either legacy guard cannot make the whole backend fail at startup. Existing
+# content is left untouched and all unrelated integrity failures still abort.
 _original_migrate_legacy_sujets = masterplan_extensions._migrate_legacy_sujets
 
 
@@ -32,7 +34,12 @@ def _safe_migrate_legacy_sujets(db: sqlite3.Connection) -> None:
         _original_migrate_legacy_sujets(db)
     except sqlite3.IntegrityError as exc:
         db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-        if "wrong club_id" not in str(exc).lower():
+        message = str(exc).lower()
+        known_legacy_guard = (
+            "wrong club_id" in message
+            or "unique constraint failed: annual_sujets.is_current" in message
+        )
+        if not known_legacy_guard:
             db.execute(f"RELEASE SAVEPOINT {savepoint}")
             raise
     finally:
