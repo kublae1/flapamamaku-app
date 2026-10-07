@@ -7,6 +7,8 @@ on:
       - release/masterplan-phase9-rc-20261007
     paths:
       - ".github/workflows/masterplan-release-build.yml"
+      - ".github/workflows/masterplan-gate.yml"
+      - ".github/workflows/release-candidate-gate.yml"
   workflow_dispatch:
 
 permissions:
