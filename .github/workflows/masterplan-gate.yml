@@ -11,6 +11,7 @@ on:
       - "test/**"
       - "pubspec.yaml"
       - ".github/workflows/masterplan-gate.yml"
+      - ".github/workflows/masterplan-release-build.yml"
   workflow_dispatch:
 
 permissions:
