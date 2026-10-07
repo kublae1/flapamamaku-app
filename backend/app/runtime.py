@@ -100,6 +100,11 @@ finally:
     app.post = _original_post
     app.delete = _original_delete
 
+# Register the post-masterplan message centre only after the proven extension
+# routes have been installed. This module adds non-destructive read-state data,
+# tenant-scoped message endpoints and stronger FCM channel routing.
+from . import message_center as message_center  # noqa: E402,F401
+
 # Runtime only adds Phase-9 registration/suspension around the proven integrated
 # multi-club backend. Club switching and admin rendering stay exclusively in
 # app.main so normal club administrators never receive a platform selector.
