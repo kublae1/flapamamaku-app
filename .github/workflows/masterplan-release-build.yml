@@ -5,6 +5,7 @@ on:
     branches:
       - feature/masterplan-on-recovered-20261006
       - release/masterplan-phase9-rc-20261007
+      - feature/messages-push-v1
     paths:
       - ".github/workflows/masterplan-release-build.yml"
       - ".github/workflows/masterplan-gate.yml"
@@ -39,7 +40,7 @@ jobs:
           file: ./backend/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/kublae1/flapamamaku-backend:masterplan-phase9-rc-sha-${{ github.sha }}
+          tags: ghcr.io/kublae1/flapamamaku-backend:messages-push-v1-rc-sha-${{ github.sha }}
           build-args: |
             FLAPAMAMAKU_BUILD_SHA=${{ github.sha }}
           cache-from: type=gha
