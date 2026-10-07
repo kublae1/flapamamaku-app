@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
+import '../data/message_api.dart';
 import '../theme/flap_brand.dart';
 import 'admin_screen.dart';
 import 'club_info_screen.dart';
 import 'members_screen.dart';
+import 'messages_screen.dart';
 import 'remote_content_screen.dart';
 import 'settings_screen.dart';
 
@@ -54,6 +56,27 @@ class MoreScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
           children: [
             const _SectionLabel('GRUPPE'),
+            if (store.serverConfigured && store.isAuthenticated)
+              FutureBuilder<int>(
+                future: MessageApi(store.api).unreadCount(),
+                builder: (context, snapshot) {
+                  final unread = snapshot.data ?? 0;
+                  return _MockupMenuCard(
+                    color: unread > 0 ? store.themeColor : null,
+                    icon: unread > 0
+                        ? Icons.notifications_active_rounded
+                        : Icons.notifications_rounded,
+                    title: 'Mitteilungen',
+                    subtitle: unread > 0
+                        ? '$unread ungelesene ${unread == 1 ? 'Mitteilung' : 'Mitteilungen'}'
+                        : 'Vereinsmitteilungen und wichtige Hinweise',
+                    badge: unread > 0 ? unread.toString() : null,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const MessagesScreen()),
+                    ),
+                  );
+                },
+              ),
             if (store.showMembers)
               _MockupMenuCard(
                 icon: Icons.groups_rounded,
@@ -181,7 +204,7 @@ class MoreScreen extends StatelessWidget {
                     CircleAvatar(
                       backgroundColor: store.themeColor,
                       foregroundColor: Colors.white,
-                      child: Icon(Icons.person_rounded),
+                      child: const Icon(Icons.person_rounded),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -284,6 +307,7 @@ class _MockupMenuCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
+  final String? badge;
   final VoidCallback onTap;
 
   const _MockupMenuCard({
@@ -291,6 +315,7 @@ class _MockupMenuCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.badge,
     required this.onTap,
   });
 
@@ -308,14 +333,41 @@ class _MockupMenuCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
             child: Row(
               children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: color ?? Theme.of(context).colorScheme.primary,
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Icon(icon, color: Colors.white, size: 27),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: color ?? Theme.of(context).colorScheme.primary,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Icon(icon, color: Colors.white, size: 27),
+                    ),
+                    if (badge != null)
+                      Positioned(
+                        right: -7,
+                        top: -7,
+                        child: Container(
+                          constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: FlapBrand.gold,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            badge!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(width: 14),
                 Expanded(
