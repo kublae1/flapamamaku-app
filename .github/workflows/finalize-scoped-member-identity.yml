@@ -6,6 +6,7 @@ on:
       - finalize/masterplan-phase9-20261007
     paths:
       - tools/apply_scoped_member_identity_fix.py
+      - .github/workflows/finalize-scoped-member-identity.yml
   workflow_dispatch:
 
 permissions:
