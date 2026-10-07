@@ -2613,19 +2613,6 @@ def init_db() -> None:
             (membership_now, membership_now),
         )
 
-        db.execute(
-            """
-            INSERT OR IGNORE INTO user_club_members (user_id, club_id, member_id)
-            SELECT u.id, m.club_id, m.id
-            FROM users u
-            JOIN members m ON m.id = u.member_id
-            JOIN user_clubs uc
-              ON uc.user_id = u.id
-             AND uc.club_id = m.club_id
-            WHERE u.member_id IS NOT NULL
-            """
-        )
-
         # Repair memberships created by the previous legacy migration.
         # Normal club accounts are single-tenant accounts in the app. If a
         # non-super-admin has any active membership in an external club, an
@@ -2836,6 +2823,19 @@ def init_db() -> None:
         )
         for table in (*direct_club_tables, *relation_club_tables):
             _ensure_club_column(db, table)
+
+        db.execute(
+            """
+            INSERT OR IGNORE INTO user_club_members (user_id, club_id, member_id)
+            SELECT u.id, m.club_id, m.id
+            FROM users u
+            JOIN members m ON m.id = u.member_id
+            JOIN user_clubs uc
+              ON uc.user_id = u.id
+             AND uc.club_id = m.club_id
+            WHERE u.member_id IS NOT NULL
+            """
+        )
 
         # Keep current FLAPAMAMAKU appearance/configuration as the source of truth
         # while introducing the central clubs row. Nothing in the app reads these
