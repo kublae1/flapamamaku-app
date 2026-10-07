@@ -1,0 +1,63 @@
+name: Masterplan Session Persistence Fix
+
+on:
+  push:
+    branches:
+      - feature/masterplan-on-recovered-20261006
+    paths:
+      - ".github/workflows/masterplan-session-persistence-fix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/masterplan-on-recovered-20261006
+      - name: Patch persistent session behavior
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          store_path = Path('lib/data/app_store.dart')
+          text = store_path.read_text()
+
+          old = '''    // When device authentication is enabled, never restore the secured\n    // session before the user has unlocked this app instance.\n    if (biometricEnabled && biometricAvailable) {\n      biometricUnlockPending = true;\n      isAuthenticated = false;\n      currentUser = null;\n      authReady = true;\n      notifyListeners();\n      return;\n    }\n\n    // Without the optional device lock, a valid secure session token keeps\n    // the member signed in until logout or server-side session revocation.\n    biometricUnlockPending = false;\n    await _restoreWithToken(token);\n'''
+          new = '''    // A valid secure session token always keeps the member signed in until\n    // explicit logout or server-side revocation. Enabling biometrics must not\n    // turn normal app startup into a second login step. Biometrics remains an\n    // optional helper for login-related actions, not a per-start app lock.\n    biometricUnlockPending = false;\n    await _restoreWithToken(token);\n'''
+          if old not in text:
+              raise SystemExit('restoreSession startup biometric block not found')
+          text = text.replace(old, new, 1)
+          store_path.write_text(text)
+
+          main_path = Path('lib/main.dart')
+          main = main_path.read_text()
+          old_fields = '''  bool _biometricStartupStateCaptured = false;\n  bool _biometricRequiredAtStartup = false;\n  bool _biometricUnlockedForProcess = false;\n'''
+          main = main.replace(old_fields, '', 1)
+          old_method = '''  void _markBiometricUnlocked() {\n    if (_biometricUnlockedForProcess || !mounted) return;\n    setState(() => _biometricUnlockedForProcess = true);\n  }\n\n'''
+          main = main.replace(old_method, '', 1)
+          old_capture = '''        if (store.authReady && !_biometricStartupStateCaptured) {\n          _biometricStartupStateCaptured = true;\n          _biometricRequiredAtStartup =\n              store.biometricEnabled && store.biometricAvailable;\n        }\n\n'''
+          main = main.replace(old_capture, '', 1)
+          old_routes = '''                if (store.serverConfigured && store.biometricUnlockPending) {\n                  return BiometricLockScreen(\n                    onUnlocked: _markBiometricUnlocked,\n                  );\n                }\n                if (store.serverConfigured &&\n                    store.isAuthenticated &&\n                    store.biometricEnabled &&\n                    store.biometricAvailable &&\n                    _biometricRequiredAtStartup &&\n                    !_biometricUnlockedForProcess) {\n                  return BiometricLockScreen(\n                    onUnlocked: _markBiometricUnlocked,\n                  );\n                }\n'''
+          if old_routes not in main:
+              raise SystemExit('main startup biometric routes not found')
+          main = main.replace(old_routes, '', 1)
+          main = main.replace("import 'screens/biometric_lock_screen.dart';\n", '', 1)
+          main_path.write_text(main)
+          PY
+      - name: Validate patch
+        run: |
+          grep -q "A valid secure session token always keeps the member signed in" lib/data/app_store.dart
+          ! grep -q "_biometricRequiredAtStartup" lib/main.dart
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/data/app_store.dart lib/main.dart
+          git commit -m "Masterplan: keep session active across app restarts"
+          git push origin HEAD:feature/masterplan-on-recovered-20261006
