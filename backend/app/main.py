@@ -4274,7 +4274,13 @@ def _serialize_content(
                     COALESCE(NULLIF(TRIM(m.name), ''), u.username) AS voter_name
                 FROM poll_votes pv
                 JOIN users u ON u.id = pv.user_id
-                LEFT JOIN members m ON m.id = u.member_id
+                JOIN content_items poll ON poll.id = pv.poll_id
+                LEFT JOIN user_club_members ucm
+                  ON ucm.user_id = u.id
+                 AND ucm.club_id = poll.club_id
+                LEFT JOIN members m
+                  ON m.id = ucm.member_id
+                 AND m.club_id = poll.club_id
                 WHERE pv.poll_id = ?
                 ORDER BY voter_name COLLATE NOCASE ASC, u.id ASC
                 """,
@@ -4288,7 +4294,13 @@ def _serialize_content(
                     COALESCE(NULLIF(TRIM(m.name), ''), u.username) AS member_name
                 FROM poll_suggestions ps
                 JOIN users u ON u.id = ps.user_id
-                LEFT JOIN members m ON m.id = u.member_id
+                JOIN content_items poll ON poll.id = ps.poll_id
+                LEFT JOIN user_club_members ucm
+                  ON ucm.user_id = u.id
+                 AND ucm.club_id = poll.club_id
+                LEFT JOIN members m
+                  ON m.id = ucm.member_id
+                 AND m.club_id = poll.club_id
                 WHERE ps.poll_id = ?
                 ORDER BY ps.created_at ASC, ps.user_id ASC
                 """,
@@ -7081,8 +7093,11 @@ async def post_gallery_snapshot(
             SELECT gs.*, u.username, m.name AS member_name
             FROM gallery_snapshots gs
             JOIN users u ON u.id = gs.user_id
+            LEFT JOIN user_club_members ucm
+              ON ucm.user_id = u.id
+             AND ucm.club_id = gs.club_id
             LEFT JOIN members m
-              ON m.id = u.member_id
+              ON m.id = ucm.member_id
              AND m.club_id = gs.club_id
             WHERE gs.id = ? AND gs.club_id = ?
             """,
@@ -7601,7 +7616,12 @@ def get_content(
                 SELECT gs.*, u.username, m.name AS member_name
                 FROM gallery_snapshots gs
                 JOIN users u ON u.id = gs.user_id
-                LEFT JOIN members m ON m.id = u.member_id
+                LEFT JOIN user_club_members ucm
+                  ON ucm.user_id = u.id
+                 AND ucm.club_id = gs.club_id
+                LEFT JOIN members m
+                  ON m.id = ucm.member_id
+                 AND m.club_id = gs.club_id
                 WHERE gs.expires_at > ? AND gs.club_id = ?
                 ORDER BY gs.created_at DESC, gs.id DESC
                 """,
@@ -8661,7 +8681,12 @@ def get_event_registrations(
             SELECT COALESCE(NULLIF(m.name, ''), u.username) AS name
             FROM event_registrations r
             JOIN users u ON u.id = r.user_id
-            LEFT JOIN members m ON m.id = u.member_id
+            LEFT JOIN user_club_members ucm
+              ON ucm.user_id = u.id
+             AND ucm.club_id = r.club_id
+            LEFT JOIN members m
+              ON m.id = ucm.member_id
+             AND m.club_id = r.club_id
             WHERE r.event_id = ?
               AND r.club_id = ?
               AND u.active = 1
