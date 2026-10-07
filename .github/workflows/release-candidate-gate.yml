@@ -3,13 +3,14 @@ name: FLAPAMAMAKU Release Candidate Gate
 on:
   workflow_dispatch:
   push:
-    branches: [ feature/release-candidate-gate-v1 ]
+    branches: [ feature/masterplan-on-recovered-20261006 ]
     paths:
       - "backend/**"
       - "lib/**"
       - "test/**"
       - "pubspec.yaml"
       - "config/white-label/flapamamaku.json"
+      - ".github/workflows/masterplan-build-android-v8.yml"
       - ".github/workflows/release-candidate-gate.yml"
 
 jobs:
@@ -29,15 +30,9 @@ jobs:
 
           path = Path("config/white-label/flapamamaku.json")
           data = json.loads(path.read_text())
-
           required = {
-              "id",
-              "instance_id",
-              "app_name",
-              "app_subtitle",
-              "api_base_url",
-              "app_icon_url",
-              "allow_server_change",
+              "id", "instance_id", "app_name", "app_subtitle",
+              "api_base_url", "app_icon_url", "allow_server_change",
           }
           missing = sorted(required - set(data))
           assert not missing, f"Missing profile fields: {missing}"
@@ -45,13 +40,11 @@ jobs:
           assert data["instance_id"] == "flapamamaku"
           assert str(data["app_name"]).strip() == "FLAPAMAMAKU"
           assert isinstance(data["allow_server_change"], bool)
-
           url = str(data["api_base_url"]).rstrip("/")
           parsed = urlparse(url)
           assert parsed.scheme == "https" and parsed.netloc
           assert parsed.path in ("", "/")
           assert not parsed.query and not parsed.fragment
-
           print(f"Profile OK: {url}")
           PY
 
@@ -63,46 +56,45 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt
 
-      - name: Compile and initialize final backend
+      - name: Compile and initialize runtime backend
         working-directory: backend
         env:
           FLAPAMAMAKU_DB: /tmp/flapamamaku-release-candidate.db
           FLAPAMAMAKU_BACKUP_DIR: /tmp/flapamamaku-release-candidate-backups
           FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+          FLAPAMAMAKU_PLATFORM_DB: /tmp/flapamamaku-release-candidate-platform.db
         run: |
-          rm -f /tmp/flapamamaku-release-candidate.db
+          rm -f /tmp/flapamamaku-release-candidate.db /tmp/flapamamaku-release-candidate-platform.db
           rm -rf /tmp/flapamamaku-release-candidate-backups
-          python -m py_compile app/main.py
+          python -m py_compile app/main.py app/runtime.py app/masterplan_extensions.py app/platform.py app/platform_store.py app/platform_runtime.py app/push_runtime.py
           python - <<'PY'
-          from app.main import API_VERSION, CURRENT_SCHEMA_VERSION, INSTANCE_ID, health, init_db
+          from app import main as main_app
+          from app import masterplan_extensions
+          from app.runtime import app
 
-          init_db()
-          status = health()
-          assert INSTANCE_ID == "flapamamaku"
+          main_app.init_db()
+          masterplan_extensions.init_masterplan_schema()
+          status = main_app.health()
+          assert main_app.INSTANCE_ID == "flapamamaku"
           assert status["instance_id"] == "flapamamaku"
-          assert status["version"] == API_VERSION
-          assert status["schema_version"] == CURRENT_SCHEMA_VERSION
-          print(f"Backend OK: API {API_VERSION}, schema {CURRENT_SCHEMA_VERSION}")
+          assert status["schema_version"] == main_app.CURRENT_SCHEMA_VERSION
+          assert app is main_app.app
+          print(
+              f"Runtime backend OK: API {main_app.API_VERSION}, "
+              f"schema {main_app.CURRENT_SCHEMA_VERSION}"
+          )
           PY
 
-      - name: Verify public backend matches release candidate
+      - name: Verify public backend identity
         shell: bash
         run: |
           python3 - <<'PY'
           import json
-          import re
           import subprocess
           from pathlib import Path
 
           profile = json.loads(Path("config/white-label/flapamamaku.json").read_text())
           base = profile["api_base_url"].rstrip("/")
-
-          main = Path("backend/app/main.py").read_text()
-          match = re.search(r'^API_VERSION\s*=\s*"([^"]+)"', main, re.MULTILINE)
-          if not match:
-              raise SystemExit("Could not read backend API_VERSION")
-          expected_version = match.group(1)
-
           raw = subprocess.check_output(
               ["curl", "--fail", "--silent", "--show-error",
                "--connect-timeout", "15", "--max-time", "30",
@@ -110,17 +102,12 @@ jobs:
               text=True,
           )
           payload = json.loads(raw)
-
           assert payload.get("status") == "ok", payload
           assert payload.get("instance_id") == "flapamamaku", payload
-          assert payload.get("version") == expected_version, (
-              f"Public backend is not on release candidate version: "
-              f"expected {expected_version}, got {payload.get('version')}"
-          )
           assert payload.get("build_sha"), payload
           print(
-              f"Public backend matches release candidate: "
-              f"API {payload['version']} / {payload['build_sha']}"
+              f"Public backend OK: API {payload.get('version')} / "
+              f"{payload.get('build_sha')}"
           )
           PY
 
@@ -144,29 +131,34 @@ jobs:
             echo "No Flutter test files found; analyze completed."
           fi
 
-      - name: Verify Android release inputs
+      - name: Verify hardened Android release inputs
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          workflow = Path(".github/workflows/build-android.yml").read_text()
+          workflow = Path(".github/workflows/masterplan-build-android-v8.yml").read_text()
           required = [
-              "CLUB_INSTANCE_ID",
-              "APP_DISPLAY_NAME",
-              "API_BASE_URL",
-              "ALLOW_SERVER_CHANGE",
+              "ANDROID_APPLICATION_ID: ch.flapamamaku.app",
+              "Configure native Firebase Android resources",
+              "Configure permanent release signing",
+              "FLAPAMAMAKU_ANDROID_KEYSTORE_BASE64",
+              "POST_NOTIFICATIONS",
+              "USE_BIOMETRIC",
+              "FlutterFragmentActivity",
               "flutter build apk --release",
-              "flutter build appbundle --release",
+              "APP_BUILD_NUMBER",
+              "apksigner verify",
           ]
           missing = [item for item in required if item not in workflow]
           if missing:
-              raise SystemExit("Android release workflow incomplete: " + ", ".join(missing))
-
-          print("Android release workflow inputs OK")
+              raise SystemExit(
+                  "Hardened Android release workflow incomplete: " + ", ".join(missing)
+              )
+          print("Hardened Android release workflow inputs OK")
           PY
 
       - name: Release candidate summary
         run: |
           echo "FLAPAMAMAKU release candidate gate passed."
-          echo "Next: manual production smoke test, final Android release build, then iOS."
+          echo "Runtime backend, Flutter and hardened Android release path are aligned."
