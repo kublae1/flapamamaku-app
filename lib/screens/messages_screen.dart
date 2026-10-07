@@ -54,6 +54,108 @@ class _MessagesScreenState extends State<MessagesScreen> {
     return '$d.$m.${local.year} · $h:$min';
   }
 
+  Future<void> _compose() async {
+    final title = TextEditingController();
+    final body = TextEditingController();
+    var urgent = false;
+    final send = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Mitteilung senden'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment<bool>(
+                      value: false,
+                      icon: Icon(Icons.notifications_rounded),
+                      label: Text('Vereinsmitteilung'),
+                    ),
+                    ButtonSegment<bool>(
+                      value: true,
+                      icon: Icon(Icons.priority_high_rounded),
+                      label: Text('Dringend'),
+                    ),
+                  ],
+                  selected: {urgent},
+                  onSelectionChanged: (value) {
+                    setDialogState(() => urgent = value.first);
+                  },
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: title,
+                  autofocus: true,
+                  maxLength: 200,
+                  decoration: const InputDecoration(labelText: 'Titel'),
+                ),
+                TextField(
+                  controller: body,
+                  minLines: 4,
+                  maxLines: 8,
+                  maxLength: 500,
+                  decoration: const InputDecoration(labelText: 'Nachricht'),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  urgent
+                      ? 'Dringend: maximale Benachrichtigungspriorität, Ton, Vibration und Heads-up (soweit Android-Einstellungen dies erlauben).'
+                      : 'Vereinsmitteilung: hohe Priorität mit Ton, Vibration und Heads-up.',
+                  style: TextStyle(
+                    color: urgent ? Colors.redAccent : Colors.white60,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                if (title.text.trim().isEmpty) return;
+                Navigator.of(dialogContext).pop(true);
+              },
+              icon: const Icon(Icons.send_rounded),
+              label: const Text('Senden'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (send != true) return;
+    try {
+      await _api.sendMessage(
+        title: title.text.trim(),
+        body: body.text.trim(),
+        urgent: urgent,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            urgent
+                ? 'Dringende Mitteilung wurde zur Zustellung eingereiht.'
+                : 'Vereinsmitteilung wurde zur Zustellung eingereiht.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Mitteilung konnte nicht gesendet werden: $error')),
+      );
+    }
+  }
+
   Future<void> _open(ClubMessage message) async {
     if (!message.read) {
       try {
@@ -150,6 +252,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppStoreScope.of(context);
     final unread = _messages.where((item) => !item.read).length;
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
@@ -160,10 +263,16 @@ class _MessagesScreenState extends State<MessagesScreen> {
         ),
         actions: [
           if (unread > 0)
-            TextButton.icon(
+            IconButton(
+              tooltip: 'Alle gelesen',
               onPressed: _markAll,
               icon: const Icon(Icons.done_all_rounded),
-              label: const Text('Alle gelesen'),
+            ),
+          if (store.canManageUsers)
+            IconButton(
+              tooltip: 'Mitteilung senden',
+              onPressed: _compose,
+              icon: const Icon(Icons.add_alert_rounded),
             ),
         ],
       ),
