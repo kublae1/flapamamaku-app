@@ -4,9 +4,17 @@ import '../data/app_store.dart';
 import '../theme/flap_brand.dart';
 import 'password_change_screen.dart';
 
-// Validation marker for the push/biometric recovery build.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  static const String appVersion = String.fromEnvironment(
+    'APP_VERSION',
+    defaultValue: '0.8.19',
+  );
+  static const String buildNumber = String.fromEnvironment(
+    'APP_BUILD_NUMBER',
+    defaultValue: '34',
+  );
 
   Future<void> _chooseClub(BuildContext context) async {
     final store = AppStoreScope.of(context);
@@ -78,15 +86,6 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
-  static const String appVersion = String.fromEnvironment(
-    'APP_VERSION',
-    defaultValue: '0.8.19',
-  );
-  static const String buildNumber = String.fromEnvironment(
-    'APP_BUILD_NUMBER',
-    defaultValue: '34',
-  );
-
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
@@ -102,15 +101,7 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
         children: [
-          const Text(
-            'SICHERHEIT',
-            style: TextStyle(
-              color: FlapBrand.gold,
-              fontWeight: FontWeight.w900,
-              fontSize: 11,
-              letterSpacing: 1.5,
-            ),
-          ),
+          const _SectionTitle('SICHERHEIT'),
           const SizedBox(height: 10),
           const _SettingsCard(
             child: ListTile(
@@ -136,10 +127,7 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 10),
           _SettingsCard(
             child: SwitchListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 4,
-              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               secondary: const Icon(
                 Icons.fingerprint_rounded,
                 color: FlapBrand.gold,
@@ -147,15 +135,12 @@ class SettingsScreen extends StatelessWidget {
               ),
               title: const Text(
                 'Biometrische Anmeldung',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
               ),
               subtitle: Text(
                 store.biometricEnabled
-                    ? 'Beim nächsten App-Start ist die Geräteauthentifizierung vorgeschaltet'
-                    : 'Fingerabdruck, Gesichtserkennung oder Geräte-PIN beim App-Start verwenden',
+                    ? 'Biometrische Wiederanmeldung ist auf diesem Gerät aktiviert'
+                    : 'Fingerabdruck, Gesichtserkennung oder Geräte-PIN verwenden',
                 style: const TextStyle(color: Colors.white60),
               ),
               value: store.biometricEnabled,
@@ -187,10 +172,7 @@ class SettingsScreen extends StatelessWidget {
               ),
               title: const Text(
                 'Passwort ändern',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
               ),
               subtitle: const Text(
                 'Eigenes Passwort jederzeit ändern · mindestens 8 Zeichen',
@@ -198,30 +180,17 @@ class SettingsScreen extends StatelessWidget {
               ),
               trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const PasswordChangeScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const PasswordChangeScreen()),
               ),
             ),
           ),
           if (store.canSwitchClub) ...[
             const SizedBox(height: 22),
-            const Text(
-              'VEREIN',
-              style: TextStyle(
-                color: FlapBrand.gold,
-                fontWeight: FontWeight.w900,
-                fontSize: 11,
-                letterSpacing: 1.5,
-              ),
-            ),
+            const _SectionTitle('VEREIN'),
             const SizedBox(height: 10),
             _SettingsCard(
               child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 leading: const Icon(
                   Icons.groups_rounded,
                   color: FlapBrand.gold,
@@ -229,10 +198,7 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 title: Text(
                   store.currentClubName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
                 ),
                 subtitle: Text(
                   store.isSuperAdmin
@@ -240,31 +206,17 @@ class SettingsScreen extends StatelessWidget {
                       : 'Verein wechseln',
                   style: const TextStyle(color: Colors.white60),
                 ),
-                trailing: const Icon(
-                  Icons.swap_horiz_rounded,
-                  color: Colors.white70,
-                ),
+                trailing: const Icon(Icons.swap_horiz_rounded, color: Colors.white70),
                 onTap: () => _chooseClub(context),
               ),
             ),
           ],
           const SizedBox(height: 22),
-          const Text(
-            'BENACHRICHTIGUNGEN',
-            style: TextStyle(
-              color: FlapBrand.gold,
-              fontWeight: FontWeight.w900,
-              fontSize: 11,
-              letterSpacing: 1.5,
-            ),
-          ),
+          const _SectionTitle('BENACHRICHTIGUNGEN'),
           const SizedBox(height: 10),
           _SettingsCard(
             child: SwitchListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 4,
-              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               secondary: const Icon(
                 Icons.notifications_active_rounded,
                 color: FlapBrand.gold,
@@ -272,10 +224,7 @@ class SettingsScreen extends StatelessWidget {
               ),
               title: const Text(
                 'Push-Benachrichtigungen',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
               ),
               subtitle: Text(
                 store.pushEnabled
@@ -307,35 +256,36 @@ class SettingsScreen extends StatelessWidget {
               },
             ),
           ),
-          const SizedBox(height: 22),
-          const Text(
-            'APP-INFORMATION',
-            style: TextStyle(
-              color: FlapBrand.gold,
-              fontWeight: FontWeight.w900,
-              fontSize: 11,
-              letterSpacing: 1.5,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const _SettingsCard(
-            child: Column(
-              children: [
-                _InfoRow(
-                  icon: Icons.info_outline_rounded,
-                  title: 'App-Version',
-                  value: appVersion,
-                ),
-                Divider(height: 1, color: Color(0x22FFFFFF)),
-                _InfoRow(
-                  icon: Icons.tag_rounded,
-                  title: 'APK-Build',
-                  value: buildNumber,
-                ),
-              ],
+          const SizedBox(height: 26),
+          Center(
+            child: Text(
+              'Version $appVersion',
+              style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  const _SectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: FlapBrand.gold,
+        fontWeight: FontWeight.w900,
+        fontSize: 11,
+        letterSpacing: 1.5,
       ),
     );
   }
@@ -354,39 +304,6 @@ class _SettingsCard extends StatelessWidget {
         border: Border.all(color: const Color(0x18FFFFFF)),
       ),
       child: child,
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String value;
-
-  const _InfoRow({
-    required this.icon,
-    required this.title,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon, color: FlapBrand.gold),
-      title: Text(
-        title,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-      trailing: Text(
-        value,
-        style: const TextStyle(
-          color: Colors.white70,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
     );
   }
 }
