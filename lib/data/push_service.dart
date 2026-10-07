@@ -31,11 +31,44 @@ class PushService {
     defaultValue: 'FLAPAMAMAKU',
   );
 
+  // New IDs are intentional. Android persists a channel's importance after it
+  // has been created, so reusing the old channel would not reliably make push
+  // more noticeable on phones that already installed an earlier app build.
+  static const normalChannelId = 'club_messages_v2';
+  static const urgentChannelId = 'urgent_messages_v2';
+
   bool get isConfigured =>
       _apiKey.isNotEmpty &&
       _appId.isNotEmpty &&
       _senderId.isNotEmpty &&
       _projectId.isNotEmpty;
+
+  Future<void> _createAndroidChannels() async {
+    final android = _localNotifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return;
+
+    final normal = AndroidNotificationChannel(
+      normalChannelId,
+      '$_appName Vereinsmitteilungen',
+      description: 'Vereinsmitteilungen, News und Termine',
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+      showBadge: true,
+    );
+    final urgent = AndroidNotificationChannel(
+      urgentChannelId,
+      '$_appName Dringende Mitteilungen',
+      description: 'Dringende Mitteilungen des Vereins',
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+      showBadge: true,
+    );
+    await android.createNotificationChannel(normal);
+    await android.createNotificationChannel(urgent);
+  }
 
   Future<bool> enable() async {
     lastError = null;
@@ -80,16 +113,7 @@ class PushService {
         );
 
         if (Platform.isAndroid) {
-          final channel = AndroidNotificationChannel(
-            'flapamamaku_push',
-            '$_appName Benachrichtigungen',
-            description: 'News, Termine und neue Vereinsinhalte',
-            importance: Importance.high,
-          );
-          await _localNotifications
-              .resolvePlatformSpecificImplementation<
-                  AndroidFlutterLocalNotificationsPlugin>()
-              ?.createNotificationChannel(channel);
+          await _createAndroidChannels();
         }
 
         _initialized = true;
@@ -137,13 +161,25 @@ class PushService {
             message.data['body']?.toString() ??
             '';
         final route = message.data['route']?.toString() ?? '';
+        final urgent =
+            message.data['urgency']?.toString() == 'urgent' ||
+            message.data['kind']?.toString() == 'manual_urgent';
+        final channelId = urgent ? urgentChannelId : normalChannelId;
+        final channelName = urgent
+            ? '$_appName Dringende Mitteilungen'
+            : '$_appName Vereinsmitteilungen';
 
         final androidDetails = AndroidNotificationDetails(
-          'flapamamaku_push',
-          '$_appName Benachrichtigungen',
-          channelDescription: 'News, Termine und neue Vereinsinhalte',
-          importance: Importance.high,
-          priority: Priority.high,
+          channelId,
+          channelName,
+          channelDescription: urgent
+              ? 'Dringende Mitteilungen des Vereins'
+              : 'Vereinsmitteilungen, News und Termine',
+          importance: urgent ? Importance.max : Importance.high,
+          priority: urgent ? Priority.max : Priority.high,
+          playSound: true,
+          enableVibration: true,
+          visibility: NotificationVisibility.public,
           icon: 'ic_stat_flapamamaku',
           largeIcon: const DrawableResourceAndroidBitmap('ic_launcher'),
         );
