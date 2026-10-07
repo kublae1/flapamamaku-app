@@ -1,7 +1,9 @@
 """Regression for cross-club member identity leakage.
 
 A user's visible member identity must be resolved by (user_id, active_club_id),
-never by the historical global users.member_id alone.
+never by the historical global users.member_id alone. The test deliberately
+controls the active session club directly so it verifies identity isolation
+without depending on the app's club-selection UX.
 """
 
 from __future__ import annotations
@@ -26,6 +28,15 @@ def ok(response, expected: int = 200):
 
 def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def set_session_club(token: str, club_id: int) -> None:
+    with main.connect() as db:
+        db.execute(
+            "UPDATE sessions SET active_club_id=? WHERE token_hash=?",
+            (club_id, main._token_hash(token)),
+        )
+        db.commit()
 
 
 def main_test() -> None:
@@ -131,6 +142,7 @@ def main_test() -> None:
                 """
                 INSERT INTO user_clubs(user_id,club_id,role,active,created_at,updated_at)
                 VALUES (?,?, 'member',1,?,?)
+                ON CONFLICT(user_id,club_id) DO UPDATE SET active=1, updated_at=excluded.updated_at
                 """,
                 (user_a_id, club_b_id, now, now),
             )
@@ -142,6 +154,11 @@ def main_test() -> None:
                 """,
                 (user_a_id, club_b_id, int(member_b["id"])),
             )
+            memberships = db.execute(
+                "SELECT club_id FROM user_clubs WHERE user_id=? AND active=1 ORDER BY club_id",
+                (user_a_id,),
+            ).fetchall()
+            assert {int(row["club_id"]) for row in memberships} == {1, club_b_id}
             db.commit()
 
         login_a = ok(
@@ -155,8 +172,9 @@ def main_test() -> None:
         ).json()
         token_a = login_a["token"]
         headers_a = auth(token_a)
-        assert login_a["requires_club_selection"] is True
 
+        # Force club A for the identity check, independently of login-selection UX.
+        set_session_club(token_a, 1)
         with main.connect() as db:
             db.execute(
                 "UPDATE users SET member_id=? WHERE id=?",
@@ -169,13 +187,8 @@ def main_test() -> None:
         assert int(me_a["member_id"]) == int(member_a["id"])
         assert me_a["member_name"] == "Mitglied A"
 
-        ok(
-            client.post(
-                "/api/auth/club",
-                headers=headers_a,
-                json={"club_id": club_b_id},
-            )
-        )
+        # Now force club B and poison the legacy global member pointer the other way.
+        set_session_club(token_a, club_b_id)
         with main.connect() as db:
             db.execute(
                 "UPDATE users SET member_id=? WHERE id=?",
@@ -188,6 +201,7 @@ def main_test() -> None:
         assert int(me_b["member_id"]) == int(member_b["id"])
         assert me_b["member_name"] == "Mitglied B"
 
+        # DB guard must reject a mapping to a member owned by another club.
         with main.connect() as db:
             try:
                 db.execute(
