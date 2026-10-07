@@ -1,9 +1,9 @@
-name: Recovery Masterplan Gate
+name: Masterplan Phase 0-9 Gate
 
 on:
   push:
     branches:
-      - feature/masterplan-on-recovered-20261006
+      - finalize/masterplan-phase9-20261007
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 jobs:
   backend-masterplan:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       PYTHONPATH: backend
     steps:
@@ -24,15 +24,30 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt httpx
-      - name: Compile stable backend and Masterplan extensions
-        run: python -m py_compile backend/app/main.py backend/app/runtime.py backend/app/masterplan_extensions.py backend/app/platform.py backend/app/platform_store.py backend/app/platform_runtime.py
+      - name: Compile backend and Masterplan runtime
+        run: python -m py_compile backend/app/main.py backend/app/runtime.py backend/app/push_runtime.py backend/app/masterplan_extensions.py backend/app/platform.py backend/app/platform_store.py backend/app/platform_runtime.py
       - name: Verify CMS contract
         run: python backend/tests/admin_cms_contract.py
       - name: Verify Phase 6 operations
         run: python backend/tests/phase6_8_operations.py
       - name: Verify Phase 8 pilot matrix
         run: python backend/tests/phase8_pilot_matrix.py
-      - name: Diagnose extended runtime startup
+      - name: Verify legacy push trigger cleanup
+        env:
+          FLAPAMAMAKU_DB: /tmp/push-trigger-contract.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/push-trigger-contract-backups
+          FLAPAMAMAKU_INSTANCE_ID: push-contract
+          FLAPAMAMAKU_ENV: development
+        run: python backend/tests/push_legacy_trigger_contract.py
+      - name: Verify tenant member identity isolation
+        env:
+          FLAPAMAMAKU_DB: /tmp/tenant-member-identity.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/tenant-member-identity-backups
+          FLAPAMAMAKU_INSTANCE_ID: flapamamaku
+          FLAPAMAMAKU_ENV: development
+          FLAPAMAMAKU_PLATFORM_DB: /tmp/nonexistent-platform.db
+        run: python backend/tests/tenant_member_identity_regression.py
+      - name: Diagnose production runtime startup
         env:
           FLAPAMAMAKU_DB: /tmp/runtime-diagnostic.db
           FLAPAMAMAKU_BACKUP_DIR: /tmp/runtime-diagnostic-backups
@@ -41,9 +56,10 @@ jobs:
           FLAPAMAMAKU_PLATFORM_DB: /tmp/nonexistent-platform.db
         run: |
           rm -f /tmp/runtime-diagnostic.db /tmp/runtime-diagnostic.log
+          rm -rf /tmp/runtime-diagnostic-backups
           mkdir -p /tmp/runtime-diagnostic-backups
           cd backend
-          python -m uvicorn app.runtime:app --host 127.0.0.1 --port 8092 >/tmp/runtime-diagnostic.log 2>&1 &
+          python -m uvicorn app.push_runtime:app --host 127.0.0.1 --port 8092 >/tmp/runtime-diagnostic.log 2>&1 &
           PID=$!
           sleep 2
           if ! kill -0 "$PID" 2>/dev/null; then
@@ -60,38 +76,38 @@ jobs:
           python tests/platform_club_selector_contract.py
       - name: Start integrated multi-club Masterplan runtime
         env:
-          FLAPAMAMAKU_DB: /tmp/recovery-masterplan.db
-          FLAPAMAMAKU_BACKUP_DIR: /tmp/recovery-masterplan-backups
+          FLAPAMAMAKU_DB: /tmp/masterplan-phase9.db
+          FLAPAMAMAKU_BACKUP_DIR: /tmp/masterplan-phase9-backups
           FLAPAMAMAKU_INSTANCE_ID: flapamamaku
           FLAPAMAMAKU_ENV: development
           FLAPAMAMAKU_ALLOWED_ORIGINS: '*'
           FLAPAMAMAKU_BACKUP_INTERVAL_SECONDS: '86400'
         run: |
-          rm -f /tmp/recovery-masterplan.db
-          rm -rf /tmp/recovery-masterplan-backups
-          mkdir -p /tmp/recovery-masterplan-backups
+          rm -f /tmp/masterplan-phase9.db
+          rm -rf /tmp/masterplan-phase9-backups
+          mkdir -p /tmp/masterplan-phase9-backups
           cd backend
-          nohup python -m uvicorn app.runtime:app --host 127.0.0.1 --port 8087 >/tmp/recovery-masterplan.log 2>&1 &
-          echo $! >/tmp/recovery-masterplan.pid
+          nohup python -m uvicorn app.push_runtime:app --host 127.0.0.1 --port 8087 >/tmp/masterplan-phase9.log 2>&1 &
+          echo $! >/tmp/masterplan-phase9.pid
       - name: Verify Phase 1 baseline
         env:
-          FLAPAMAMAKU_DB: /tmp/recovery-masterplan.db
+          FLAPAMAMAKU_DB: /tmp/masterplan-phase9.db
           FLAPAMAMAKU_INSTANCE_ID: flapamamaku
         run: python backend/tests/phase1_contract_smoke.py
       - name: Verify Phase 3-5 contract
         env:
-          FLAPAMAMAKU_DB: /tmp/recovery-masterplan.db
+          FLAPAMAMAKU_DB: /tmp/masterplan-phase9.db
           FLAPAMAMAKU_INSTANCE_ID: flapamamaku
         run: python backend/tests/phase3_5_contract.py
       - name: Show backend log on failure
         if: failure()
         run: |
           cat /tmp/runtime-diagnostic.log || true
-          cat /tmp/recovery-masterplan.log || true
+          cat /tmp/masterplan-phase9.log || true
 
   flutter-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -105,9 +121,9 @@ jobs:
           fi
       - name: Install dependencies
         run: flutter pub get
+      - name: Verify persistent session contract
+        run: python tools/session_persistence_contract.py
       - name: Analyze
         run: flutter analyze
       - name: Test
         run: flutter test
-      - name: Recovery baseline marker
-        run: echo "recovered-app581-masterplan"
