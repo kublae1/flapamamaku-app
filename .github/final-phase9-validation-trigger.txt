@@ -1,1 +1,1 @@
-Validate the current finalized Phase 0-9 source head including scoped member identity, scoped relation names, push compatibility, persistent sessions, and Flutter regressions.
+Validate the current finalized Phase 0-9 source head after scoped member identity, scoped relation names, legacy push compatibility, persistent sessions, and the legacy-database migration-order fix.
