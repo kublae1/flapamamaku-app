@@ -5,6 +5,7 @@ on:
     branches:
       - feature/masterplan-on-recovered-20261006
       - release/masterplan-phase9-rc-20261007
+      - feature/messages-push-v1
     paths:
       - "backend/**"
       - "lib/**"
@@ -33,7 +34,7 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt httpx
       - name: Compile backend and Masterplan runtime
-        run: python -m py_compile backend/app/main.py backend/app/runtime.py backend/app/push_runtime.py backend/app/masterplan_extensions.py backend/app/platform.py backend/app/platform_store.py backend/app/platform_runtime.py
+        run: python -m py_compile backend/app/main.py backend/app/runtime.py backend/app/push_runtime.py backend/app/masterplan_extensions.py backend/app/message_center.py backend/app/platform.py backend/app/platform_store.py backend/app/platform_runtime.py
       - name: Verify legacy tenant trigger cleanup
         run: python backend/tests/legacy_tenant_trigger_cleanup.py
       - name: Verify CMS contract
