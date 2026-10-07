@@ -148,7 +148,8 @@ jobs:
               "FlutterFragmentActivity",
               "flutter build apk --release",
               "APP_BUILD_NUMBER",
-              "apksigner verify",
+              "APKSIGNER",
+              "verify --print-certs",
           ]
           missing = [item for item in required if item not in workflow]
           if missing:
