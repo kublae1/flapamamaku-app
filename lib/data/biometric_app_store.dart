@@ -1,7 +1,9 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 
+import 'api_service.dart';
 import 'app_store.dart';
+import 'superadmin_api_service.dart';
 
 /// AppStore extension that keeps an explicit server logout intact while still
 /// allowing a later biometric re-login.
@@ -12,7 +14,11 @@ import 'app_store.dart';
 /// after successful device authentication and are removed immediately when the
 /// user disables biometric login.
 class BiometricAppStore extends AppStore {
-  BiometricAppStore({super.api, super.initialize});
+  BiometricAppStore({ApiService? api, bool initialize = true})
+      : super(
+          api: api ?? SuperAdminApiService(),
+          initialize: initialize,
+        );
 
   static const _usernameKey = 'flapamamaku_biometric_username';
   static const _passwordKey = 'flapamamaku_biometric_password';
