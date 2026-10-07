@@ -6,6 +6,7 @@ on:
       - finalize/masterplan-phase9-20261007
     paths:
       - tools/apply_scoped_member_identity_fix.py
+      - tools/apply_scoped_member_identity_fix_v2.py
       - .github/workflows/finalize-scoped-member-identity.yml
   workflow_dispatch:
 
@@ -18,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Apply scoped member identity patch
-        run: python tools/apply_scoped_member_identity_fix.py
+        run: python tools/apply_scoped_member_identity_fix_v2.py
       - name: Compile patched backend
         run: python -m py_compile backend/app/main.py
       - name: Commit patch
