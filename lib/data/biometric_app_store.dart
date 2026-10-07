@@ -14,11 +14,8 @@ import 'superadmin_api_service.dart';
 /// after successful device authentication and are removed immediately when the
 /// user disables biometric login.
 class BiometricAppStore extends AppStore {
-  BiometricAppStore({ApiService? api, bool initialize = true})
-      : super(
-          api: api ?? SuperAdminApiService(),
-          initialize: initialize,
-        );
+  BiometricAppStore({ApiService? api, super.initialize = true})
+      : super(api: api ?? SuperAdminApiService());
 
   static const _usernameKey = 'flapamamaku_biometric_username';
   static const _passwordKey = 'flapamamaku_biometric_password';
