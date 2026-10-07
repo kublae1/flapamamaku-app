@@ -3,7 +3,9 @@ name: FLAPAMAMAKU Release Candidate Gate
 on:
   workflow_dispatch:
   push:
-    branches: [ feature/masterplan-on-recovered-20261006 ]
+    branches:
+      - feature/masterplan-on-recovered-20261006
+      - release/masterplan-phase9-rc-20261007
     paths:
       - "backend/**"
       - "lib/**"
@@ -11,6 +13,7 @@ on:
       - "pubspec.yaml"
       - "config/white-label/flapamamaku.json"
       - ".github/workflows/masterplan-build-android-v8.yml"
+      - ".github/workflows/masterplan-release-build.yml"
       - ".github/workflows/release-candidate-gate.yml"
 
 jobs:
