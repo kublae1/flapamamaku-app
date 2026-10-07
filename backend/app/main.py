@@ -2361,6 +2361,50 @@ def init_db() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS user_club_members (
+                user_id INTEGER NOT NULL,
+                club_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                PRIMARY KEY (user_id, club_id),
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(club_id) REFERENCES clubs(id),
+                FOREIGN KEY(member_id) REFERENCES members(id)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_club_members_member_id "
+            "ON user_club_members(member_id)"
+        )
+        db.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_user_club_members_insert_scope
+            BEFORE INSERT ON user_club_members
+            WHEN NOT EXISTS (
+                SELECT 1 FROM members m
+                WHERE m.id = NEW.member_id AND m.club_id = NEW.club_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'member_id belongs to another club');
+            END
+            """
+        )
+        db.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_user_club_members_update_scope
+            BEFORE UPDATE OF club_id, member_id ON user_club_members
+            WHEN NOT EXISTS (
+                SELECT 1 FROM members m
+                WHERE m.id = NEW.member_id AND m.club_id = NEW.club_id
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'member_id belongs to another club');
+            END
+            """
+        )
+
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS security_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_type TEXT NOT NULL,
@@ -2567,6 +2611,19 @@ def init_db() -> None:
             )
             """,
             (membership_now, membership_now),
+        )
+
+        db.execute(
+            """
+            INSERT OR IGNORE INTO user_club_members (user_id, club_id, member_id)
+            SELECT u.id, m.club_id, m.id
+            FROM users u
+            JOIN members m ON m.id = u.member_id
+            JOIN user_clubs uc
+              ON uc.user_id = u.id
+             AND uc.club_id = m.club_id
+            WHERE u.member_id IS NOT NULL
+            """
         )
 
         # Repair memberships created by the previous legacy migration.
@@ -3508,14 +3565,18 @@ def _user_profile(user_id: int) -> dict[str, Any]:
             """
             SELECT
                 u.*,
+                ucm.member_id AS scoped_member_id,
                 m.name AS member_name
             FROM users u
+            LEFT JOIN user_club_members ucm
+              ON ucm.user_id = u.id
+             AND ucm.club_id = ?
             LEFT JOIN members m
-              ON m.id = u.member_id
+              ON m.id = ucm.member_id
              AND m.club_id = ?
             WHERE u.id = ?
             """,
-            (club_id, user_id),
+            (club_id, club_id, user_id),
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=401, detail="Benutzer nicht gefunden")
@@ -3523,6 +3584,7 @@ def _user_profile(user_id: int) -> dict[str, Any]:
         if club_role is None:
             raise HTTPException(status_code=401, detail="Kein Zugriff auf diesen Verein")
         item = dict(row)
+        item["member_id"] = item.pop("scoped_member_id", None)
         item["club_role"] = club_role
         item["current_club_id"] = club_id
         item["is_super_admin"] = _is_super_admin(db, int(row["id"]))
@@ -3692,11 +3754,18 @@ def current_user(
     with connect() as db:
         row = db.execute(
             """
-            SELECT u.*, s.active_club_id, m.name AS member_name
+            SELECT
+                u.*,
+                s.active_club_id,
+                ucm.member_id AS scoped_member_id,
+                m.name AS member_name
             FROM sessions s
             JOIN users u ON u.id = s.user_id
+            LEFT JOIN user_club_members ucm
+              ON ucm.user_id = u.id
+             AND ucm.club_id = s.active_club_id
             LEFT JOIN members m
-              ON m.id = u.member_id
+              ON m.id = ucm.member_id
              AND m.club_id = s.active_club_id
             WHERE s.token_hash = ?
               AND s.expires_at > ?
@@ -3727,6 +3796,7 @@ def current_user(
             )
 
         item = dict(row)
+        item["member_id"] = item.pop("scoped_member_id", None)
         item["club_role"] = club_role
         item["current_club_id"] = club_id
         item["is_super_admin"] = _is_super_admin(db, int(row["id"]))
@@ -6648,6 +6718,7 @@ def get_users(
             """
             SELECT
                 u.*,
+                ucm.member_id AS scoped_member_id,
                 m.name AS member_name,
                 uc.role AS club_role,
                 uc.club_id AS current_club_id
@@ -6656,8 +6727,11 @@ def get_users(
               ON uc.user_id = u.id
              AND uc.club_id = ?
              AND uc.active = 1
+            LEFT JOIN user_club_members ucm
+              ON ucm.user_id = u.id
+             AND ucm.club_id = uc.club_id
             LEFT JOIN members m
-              ON m.id = u.member_id
+              ON m.id = ucm.member_id
              AND m.club_id = uc.club_id
             ORDER BY u.username COLLATE NOCASE
             """,
@@ -6667,6 +6741,7 @@ def get_users(
     with connect() as db:
         for row in rows:
             item = dict(row)
+            item["member_id"] = item.pop("scoped_member_id", None)
             item["is_super_admin"] = _is_super_admin(db, int(row["id"]))
             result.append(_serialize_user(item))
     return result
@@ -6693,6 +6768,17 @@ def post_user(
     now = datetime.now(timezone.utc).isoformat()
 
     with connect() as db:
+        club_id = _active_club_id(db)
+        if payload.member_id is not None:
+            member = db.execute(
+                "SELECT id FROM members WHERE id = ? AND club_id = ?",
+                (payload.member_id, club_id),
+            ).fetchone()
+            if member is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Mitglied gehört nicht zum aktiven Verein",
+                )
         try:
             cursor = db.execute(
                 f"""
@@ -6724,13 +6810,23 @@ def post_user(
                 """,
                 (
                     user_id,
-                    _active_club_id(db),
+                    club_id,
                     club_role,
                     int(payload.active),
                     now,
                     now,
                 ),
             )
+            if payload.member_id is not None:
+                db.execute(
+                    """
+                    INSERT INTO user_club_members (user_id, club_id, member_id)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, club_id)
+                    DO UPDATE SET member_id = excluded.member_id
+                    """,
+                    (user_id, club_id, payload.member_id),
+                )
             db.commit()
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Benutzername bereits vorhanden")
@@ -6815,6 +6911,16 @@ def put_user(
         ).fetchone()
         if target is None:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        if payload.member_id is not None:
+            member = db.execute(
+                "SELECT id FROM members WHERE id = ? AND club_id = ?",
+                (payload.member_id, club_id),
+            ).fetchone()
+            if member is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Mitglied gehört nicht zum aktiven Verein",
+                )
         target_role = db.execute(
             """
             SELECT role
@@ -6840,6 +6946,21 @@ def put_user(
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+            if payload.member_id is None:
+                db.execute(
+                    "DELETE FROM user_club_members WHERE user_id = ? AND club_id = ?",
+                    (user_id, club_id),
+                )
+            else:
+                db.execute(
+                    """
+                    INSERT INTO user_club_members (user_id, club_id, member_id)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, club_id)
+                    DO UPDATE SET member_id = excluded.member_id
+                    """,
+                    (user_id, club_id, payload.member_id),
+                )
             if password_changed:
                 db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
             db.commit()
