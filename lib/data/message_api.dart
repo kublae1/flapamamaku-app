@@ -96,4 +96,28 @@ class MessageApi {
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
   }
+
+  Future<void> sendMessage({
+    required String title,
+    required String body,
+    required bool urgent,
+    String route = '/messages',
+  }) async {
+    final response = await http
+        .post(
+          _uri('/api/push/admin/send-v2'),
+          headers: {
+            'Content-Type': 'application/json',
+            ...api.authHeaders,
+          },
+          body: jsonEncode({
+            'title': title,
+            'body': body,
+            'route': route,
+            'urgency': urgent ? 'urgent' : 'normal',
+          }),
+        )
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
 }
