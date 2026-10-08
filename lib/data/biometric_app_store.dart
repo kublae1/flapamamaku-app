@@ -9,10 +9,10 @@ import 'superadmin_api_service.dart';
 /// allowing a later biometric re-login.
 ///
 /// The server session token is deliberately deleted by [AppStore.logout]. When
-/// biometrics are enabled, the last successfully verified username/password are
-/// therefore kept separately in Android/iOS secure storage. They are only read
-/// after successful device authentication and are removed immediately when the
-/// user disables biometric login.
+/// biometrics are enabled, the last successfully verified non-superadmin
+/// username/password are therefore kept separately in Android/iOS secure
+/// storage. They are only read after successful device authentication and are
+/// removed immediately when the user disables biometric login.
 class BiometricAppStore extends AppStore {
   BiometricAppStore({ApiService? api, super.initialize = true})
       : super(api: api ?? SuperAdminApiService());
@@ -43,11 +43,26 @@ class BiometricAppStore extends AppStore {
     await _biometricStorage.delete(key: _passwordKey);
   }
 
+  Future<void> _removeLegacySuperAdminCredentials(String username) async {
+    final storedUsername = await _biometricStorage.read(key: _usernameKey);
+    if (storedUsername != null &&
+        storedUsername.trim().toLowerCase() == username.trim().toLowerCase()) {
+      await _clearBiometricCredentials();
+    }
+  }
+
   @override
   Future<bool> login(String username, String password) async {
     final ok = await super.login(username, password);
     if (ok && isAuthenticated && !mustChangePassword) {
-      await _saveBiometricCredentials(username, password);
+      if (isSuperAdmin) {
+        // A temporary platform/superadmin login must never replace the member
+        // account selected for biometric re-login. Older builds did overwrite
+        // it, so clean up that legacy value when it points at this superadmin.
+        await _removeLegacySuperAdminCredentials(username);
+      } else {
+        await _saveBiometricCredentials(username, password);
+      }
     }
     return ok;
   }
@@ -83,7 +98,7 @@ class BiometricAppStore extends AppStore {
         password == null ||
         password.isEmpty) {
       authError =
-          'Bitte nach diesem Update einmal mit Benutzername und Passwort anmelden. Danach funktioniert die biometrische Anmeldung auch nach dem Abmelden.';
+          'Bitte einmal mit deinem normalen Benutzername und Passwort anmelden. Danach funktioniert die biometrische Anmeldung auch nach dem Abmelden.';
       notifyListeners();
       return false;
     }
@@ -103,7 +118,19 @@ class BiometricAppStore extends AppStore {
       );
       if (!authenticated) return false;
 
-      return await super.login(username, password);
+      final ok = await super.login(username, password);
+      if (ok && isSuperAdmin) {
+        // Defensive migration guard: biometrics must never keep logging into a
+        // superadmin account, even if such credentials were saved by an older
+        // app version.
+        await _clearBiometricCredentials();
+        await super.logout();
+        authError =
+            'Biometrie war noch mit dem Superuser verknüpft. Bitte einmal mit deinem normalen Benutzer anmelden.';
+        notifyListeners();
+        return false;
+      }
+      return ok;
     } catch (_) {
       authError = 'Biometrische Anmeldung konnte nicht verwendet werden.';
       notifyListeners();
@@ -129,7 +156,7 @@ class BiometricAppStore extends AppStore {
     String newPassword,
   ) async {
     final ok = await super.changePassword(currentPassword, newPassword);
-    if (ok && biometricEnabled) {
+    if (ok && biometricEnabled && !isSuperAdmin) {
       final username = await _biometricStorage.read(key: _usernameKey);
       if (username != null && username.trim().isNotEmpty) {
         await _biometricStorage.write(
