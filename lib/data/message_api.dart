@@ -106,7 +106,7 @@ class MessageApi {
 
   Future<int> deleteReadMessages() async {
     final response = await http
-        .delete(_uri('/api/messages/read'), headers: api.authHeaders)
+        .delete(_uri('/api/messages/bulk/read'), headers: api.authHeaders)
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
     final value = jsonDecode(response.body) as Map<String, dynamic>;

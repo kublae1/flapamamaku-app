@@ -269,6 +269,7 @@ def delete_message_for_user(
 
 
 @app.delete("/api/messages/read")
+@app.delete("/api/messages/bulk/read")
 def delete_read_messages_for_user(
     user: dict[str, Any] = Depends(main_app.current_user),
 ) -> dict[str, int | bool]:
