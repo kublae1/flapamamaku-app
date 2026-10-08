@@ -4,7 +4,14 @@ import '../data/app_store.dart';
 import '../theme/flap_brand.dart';
 
 class ClubSelectionScreen extends StatefulWidget {
-  const ClubSelectionScreen({super.key});
+  final bool returnAfterSelection;
+  final bool allowBack;
+
+  const ClubSelectionScreen({
+    super.key,
+    this.returnAfterSelection = false,
+    this.allowBack = false,
+  });
 
   @override
   State<ClubSelectionScreen> createState() => _ClubSelectionScreenState();
@@ -18,16 +25,23 @@ class _ClubSelectionScreenState extends State<ClubSelectionScreen> {
     setState(() => _loadingClubId = clubId);
     final store = AppStoreScope.of(context);
     final ok = await store.selectClub(clubId);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            store.authError ?? 'Verein konnte nicht geöffnet werden.',
-          ),
-        ),
-      );
-      setState(() => _loadingClubId = null);
+    if (!mounted) return;
+
+    if (ok) {
+      if (widget.returnAfterSelection && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(true);
+      }
+      return;
     }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          store.authError ?? 'Verein konnte nicht geöffnet werden.',
+        ),
+      ),
+    );
+    setState(() => _loadingClubId = null);
   }
 
   @override
@@ -38,25 +52,28 @@ class _ClubSelectionScreenState extends State<ClubSelectionScreen> {
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
       appBar: AppBar(
-        automaticallyImplyLeading: false,
+        automaticallyImplyLeading: widget.allowBack,
         title: const Text(
           'Verein auswählen',
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Abmelden',
-            onPressed: _loadingClubId == null ? store.logout : null,
-            icon: const Icon(Icons.logout_rounded),
-          ),
+          if (!widget.allowBack)
+            IconButton(
+              tooltip: 'Abmelden',
+              onPressed: _loadingClubId == null ? store.logout : null,
+              icon: const Icon(Icons.logout_rounded),
+            ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
         children: [
-          const Text(
-            'Du bist mehreren Vereinen zugeordnet. Wähle den Verein, den du jetzt öffnen möchtest.',
-            style: TextStyle(
+          Text(
+            widget.returnAfterSelection
+                ? 'Aktuell geöffnet: ${store.currentClubName}. Wähle einen anderen Verein.'
+                : 'Du bist mehreren Vereinen zugeordnet. Wähle den Verein, den du jetzt öffnen möchtest.',
+            style: const TextStyle(
               color: Colors.white70,
               fontSize: 16,
               height: 1.4,
@@ -66,14 +83,10 @@ class _ClubSelectionScreenState extends State<ClubSelectionScreen> {
           for (final club in clubs) ...[
             _ClubCard(
               club: club,
-              loading: _loadingClubId ==
-                  (club['id'] is int
-                      ? club['id'] as int
-                      : int.tryParse(club['id']?.toString() ?? '')),
+              current: _clubId(club) == store.currentClubId,
+              loading: _loadingClubId == _clubId(club),
               onTap: () {
-                final rawId = club['id'];
-                final id =
-                    rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+                final id = _clubId(club);
                 if (id != null) _selectClub(id);
               },
             ),
@@ -83,15 +96,22 @@ class _ClubSelectionScreenState extends State<ClubSelectionScreen> {
       ),
     );
   }
+
+  int? _clubId(Map<String, dynamic> club) {
+    final rawId = club['id'];
+    return rawId is int ? rawId : int.tryParse(rawId?.toString() ?? '');
+  }
 }
 
 class _ClubCard extends StatelessWidget {
   final Map<String, dynamic> club;
+  final bool current;
   final bool loading;
   final VoidCallback onTap;
 
   const _ClubCard({
     required this.club,
+    required this.current,
     required this.loading,
     required this.onTap,
   });
@@ -145,6 +165,18 @@ class _ClubCard extends StatelessWidget {
                         club['short_name'].toString(),
                         style: const TextStyle(color: Colors.white54),
                       ),
+                    if (current)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Aktuell geöffnet',
+                          style: TextStyle(
+                            color: FlapBrand.gold,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -153,6 +185,12 @@ class _ClubCard extends StatelessWidget {
                   width: 24,
                   height: 24,
                   child: CircularProgressIndicator(strokeWidth: 2.5),
+                )
+              else if (current)
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: FlapBrand.gold,
+                  size: 27,
                 )
               else
                 const Icon(
