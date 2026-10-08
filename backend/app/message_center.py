@@ -13,7 +13,7 @@ from . import main as main_app
 app = main_app.app
 
 NORMAL_CHANNEL_ID = "club_messages_v2"
-URGENT_CHANNEL_ID = "urgent_messages_v2"
+URGENT_CHANNEL_ID = "urgent_messages_v3"
 NORMAL_RETENTION_DAYS = 90
 URGENT_RETENTION_DAYS = 180
 
