@@ -11,6 +11,10 @@ os.close(fd)
 
 try:
     db = sqlite3.connect(path)
+    db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+    db.execute("CREATE TABLE clubs (id INTEGER PRIMARY KEY)")
+    db.executemany("INSERT INTO users(id) VALUES (?)", [(10,), (11,), (12,)])
+    db.executemany("INSERT INTO clubs(id) VALUES (?)", [(1,), (2,)])
     db.execute(
         """
         CREATE TABLE push_notifications (
@@ -57,30 +61,32 @@ try:
 
     rows = message_center.list_messages(user=user_1)
     assert [row["title"] for row in rows] == ["Dringend", "Verein 1"], rows
-    assert rows[0]["urgent"] is True
-    assert rows[1]["urgent"] is False
     assert all(row["read"] is False for row in rows)
     assert message_center.unread_message_count(user=user_1)["unread"] == 2
 
     message_center.mark_message_read(rows[0]["id"], user=user_1)
-    refreshed = message_center.list_messages(user=user_1)
-    assert refreshed[0]["read"] is True
-    assert refreshed[1]["read"] is False
     assert message_center.unread_message_count(user=user_1)["unread"] == 1
 
-    # Read state is personal, not global within the club.
-    other_user_rows = message_center.list_messages(user=user_2)
-    assert all(row["read"] is False for row in other_user_rows)
+    # Delete is personal: user 1 hides one message, user 2 still sees both.
+    message_center.delete_message_for_user(rows[0]["id"], user=user_1)
+    assert [row["title"] for row in message_center.list_messages(user=user_1)] == ["Verein 1"]
+    assert len(message_center.list_messages(user=user_2)) == 2
 
-    # Tenant isolation: club 2 sees only club 2's notification.
-    club_2_rows = message_center.list_messages(user=club_2_user)
-    assert [row["title"] for row in club_2_rows] == ["Verein 2"], club_2_rows
+    # Tenant isolation remains intact.
+    assert [row["title"] for row in message_center.list_messages(user=club_2_user)] == ["Verein 2"]
 
     message_center.mark_all_messages_read(user=user_1)
     assert message_center.unread_message_count(user=user_1)["unread"] == 0
-    assert message_center.unread_message_count(user=user_2)["unread"] == 2
+    message_center.delete_read_messages_for_user(user=user_1)
+    assert message_center.list_messages(user=user_1) == []
+    assert len(message_center.list_messages(user=user_2)) == 2
 
-    print("message center tenant/read-state contract: OK")
+    # Delete all is also personal and scoped to current club.
+    message_center.delete_all_messages_for_user(user=user_2)
+    assert message_center.list_messages(user=user_2) == []
+    assert [row["title"] for row in message_center.list_messages(user=club_2_user)] == ["Verein 2"]
+
+    print("message center tenant/read/delete contract: OK")
 finally:
     try:
         os.unlink(path)

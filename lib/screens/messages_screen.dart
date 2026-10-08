@@ -21,9 +21,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_loading && _messages.isEmpty && _error == null) {
-      _load();
-    }
+    if (_loading && _messages.isEmpty && _error == null) _load();
   }
 
   Future<void> _load() async {
@@ -52,6 +50,27 @@ class _MessagesScreenState extends State<MessagesScreen> {
     final h = local.hour.toString().padLeft(2, '0');
     final min = local.minute.toString().padLeft(2, '0');
     return '$d.$m.${local.year} · $h:$min';
+  }
+
+  Future<bool> _confirm(String title, String text) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(title),
+            content: Text(text),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Abbrechen'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Löschen'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   Future<void> _compose() async {
@@ -160,27 +179,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
     if (!message.read) {
       try {
         await _api.markRead(message.id);
-        if (mounted) {
-          final index = _messages.indexWhere((item) => item.id == message.id);
-          if (index >= 0) {
-            final old = _messages[index];
-            final updated = ClubMessage(
-              id: old.id,
-              kind: old.kind,
-              title: old.title,
-              body: old.body,
-              route: old.route,
-              createdAt: old.createdAt,
-              read: true,
-              urgent: old.urgent,
-            );
-            setState(() {
-              final copy = [..._messages];
-              copy[index] = updated;
-              _messages = copy;
-            });
-          }
-        }
+        if (mounted) await _load();
       } catch (_) {}
     }
     if (!mounted) return;
@@ -225,23 +224,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
   Future<void> _markAll() async {
     try {
       await _api.markAllRead();
-      if (!mounted) return;
-      setState(() {
-        _messages = _messages
-            .map(
-              (old) => ClubMessage(
-                id: old.id,
-                kind: old.kind,
-                title: old.title,
-                body: old.body,
-                route: old.route,
-                createdAt: old.createdAt,
-                read: true,
-                urgent: old.urgent,
-              ),
-            )
-            .toList();
-      });
+      await _load();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -250,10 +233,62 @@ class _MessagesScreenState extends State<MessagesScreen> {
     }
   }
 
+  Future<void> _deleteOne(ClubMessage message) async {
+    final confirmed = await _confirm(
+      'Mitteilung löschen?',
+      'Diese Mitteilung wird nur für dich im aktuell gewählten Verein entfernt.',
+    );
+    if (!confirmed) return;
+    try {
+      await _api.deleteMessage(message.id);
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Mitteilung konnte nicht gelöscht werden: $error')),
+      );
+    }
+  }
+
+  Future<void> _deleteRead() async {
+    final confirmed = await _confirm(
+      'Alle gelesenen löschen?',
+      'Alle bereits gelesenen Mitteilungen des aktuell gewählten Vereins werden für dich entfernt.',
+    );
+    if (!confirmed) return;
+    try {
+      await _api.deleteReadMessages();
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gelesene Mitteilungen konnten nicht gelöscht werden: $error')),
+      );
+    }
+  }
+
+  Future<void> _deleteAll() async {
+    final confirmed = await _confirm(
+      'Alle Mitteilungen löschen?',
+      'Wirklich alle Mitteilungen des aktuell gewählten Vereins für dich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+    );
+    if (!confirmed) return;
+    try {
+      await _api.deleteAllMessages();
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Mitteilungen konnten nicht gelöscht werden: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppStoreScope.of(context);
     final unread = _messages.where((item) => !item.read).length;
+    final hasRead = _messages.any((item) => item.read);
     return Scaffold(
       backgroundColor: FlapBrand.charcoal,
       appBar: AppBar(
@@ -262,17 +297,45 @@ class _MessagesScreenState extends State<MessagesScreen> {
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
         actions: [
-          if (unread > 0)
-            IconButton(
-              tooltip: 'Alle gelesen',
-              onPressed: _markAll,
-              icon: const Icon(Icons.done_all_rounded),
-            ),
           if (store.canManageUsers)
             IconButton(
               tooltip: 'Mitteilung senden',
               onPressed: _compose,
               icon: const Icon(Icons.add_alert_rounded),
+            ),
+          if (_messages.isNotEmpty)
+            PopupMenuButton<String>(
+              tooltip: 'Mitteilungen verwalten',
+              onSelected: (value) {
+                if (value == 'read-all') _markAll();
+                if (value == 'delete-read') _deleteRead();
+                if (value == 'delete-all') _deleteAll();
+              },
+              itemBuilder: (context) => [
+                if (unread > 0)
+                  const PopupMenuItem(
+                    value: 'read-all',
+                    child: ListTile(
+                      leading: Icon(Icons.done_all_rounded),
+                      title: Text('Alle als gelesen'),
+                    ),
+                  ),
+                if (hasRead)
+                  const PopupMenuItem(
+                    value: 'delete-read',
+                    child: ListTile(
+                      leading: Icon(Icons.delete_sweep_rounded),
+                      title: Text('Alle gelesenen löschen'),
+                    ),
+                  ),
+                const PopupMenuItem(
+                  value: 'delete-all',
+                  child: ListTile(
+                    leading: Icon(Icons.delete_forever_rounded, color: Colors.redAccent),
+                    title: Text('Alle Mitteilungen löschen'),
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -286,11 +349,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                     padding: const EdgeInsets.all(24),
                     children: [
                       const SizedBox(height: 70),
-                      const Icon(
-                        Icons.cloud_off_rounded,
-                        color: Colors.white38,
-                        size: 54,
-                      ),
+                      const Icon(Icons.cloud_off_rounded, color: Colors.white38, size: 54),
                       const SizedBox(height: 18),
                       Text(
                         _error!,
@@ -305,16 +364,18 @@ class _MessagesScreenState extends State<MessagesScreen> {
                         padding: const EdgeInsets.all(24),
                         children: const [
                           SizedBox(height: 70),
-                          Icon(
-                            Icons.notifications_none_rounded,
-                            color: Colors.white38,
-                            size: 58,
-                          ),
+                          Icon(Icons.notifications_none_rounded, color: Colors.white38, size: 58),
                           SizedBox(height: 18),
                           Text(
                             'Noch keine Mitteilungen vorhanden.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.white60),
+                          ),
+                          SizedBox(height: 12),
+                          Text(
+                            'Normale Mitteilungen werden nach 90 Tagen, dringende nach 180 Tagen automatisch ausgeblendet.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white38, fontSize: 12),
                           ),
                         ],
                       )
@@ -328,7 +389,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                             color: const Color(0xFF191B1E),
                             margin: const EdgeInsets.only(bottom: 10),
                             child: ListTile(
-                              contentPadding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+                              contentPadding: const EdgeInsets.fromLTRB(16, 10, 6, 10),
                               leading: Stack(
                                 clipBehavior: Clip.none,
                                 children: [
@@ -358,9 +419,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                                 item.title,
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontWeight: item.read
-                                      ? FontWeight.w700
-                                      : FontWeight.w900,
+                                  fontWeight: item.read ? FontWeight.w700 : FontWeight.w900,
                                 ),
                               ),
                               subtitle: Column(
@@ -392,17 +451,15 @@ class _MessagesScreenState extends State<MessagesScreen> {
                                     padding: const EdgeInsets.only(top: 5),
                                     child: Text(
                                       _date(item.createdAt),
-                                      style: const TextStyle(
-                                        color: Colors.white38,
-                                        fontSize: 12,
-                                      ),
+                                      style: const TextStyle(color: Colors.white38, fontSize: 12),
                                     ),
                                   ),
                                 ],
                               ),
-                              trailing: const Icon(
-                                Icons.chevron_right_rounded,
-                                color: Colors.white38,
+                              trailing: IconButton(
+                                tooltip: 'Löschen',
+                                onPressed: () => _deleteOne(item),
+                                icon: const Icon(Icons.delete_outline_rounded, color: Colors.white54),
                               ),
                               onTap: () => _open(item),
                             ),

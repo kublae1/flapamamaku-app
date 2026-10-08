@@ -14,6 +14,8 @@ app = main_app.app
 
 NORMAL_CHANNEL_ID = "club_messages_v2"
 URGENT_CHANNEL_ID = "urgent_messages_v2"
+NORMAL_RETENTION_DAYS = 90
+URGENT_RETENTION_DAYS = 180
 
 
 class ManualMessagePayload(BaseModel):
@@ -41,8 +43,29 @@ def init_message_center_schema() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS message_deletions (
+                message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                club_id INTEGER NOT NULL,
+                deleted_at TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT 'manual',
+                PRIMARY KEY(message_id, user_id, club_id),
+                FOREIGN KEY(message_id) REFERENCES push_notifications(id),
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(club_id) REFERENCES clubs(id)
+            )
+            """
+        )
+        db.execute(
+            """
             CREATE INDEX IF NOT EXISTS message_reads_user_club_idx
             ON message_reads(user_id, club_id, read_at)
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS message_deletions_user_club_idx
+            ON message_deletions(user_id, club_id, deleted_at)
             """
         )
         db.commit()
@@ -71,6 +94,57 @@ def _serialize_message(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _apply_retention(db: sqlite3.Connection, *, user_id: int, club_id: int) -> None:
+    """Hide expired messages for this user without deleting shared club history."""
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        """
+        INSERT OR IGNORE INTO message_deletions(message_id,user_id,club_id,deleted_at,reason)
+        SELECT n.id,?,?,?,'retention'
+        FROM push_notifications n
+        WHERE n.club_id=?
+          AND (
+            (n.kind='manual_urgent' AND datetime(n.created_at) < datetime('now', ?))
+            OR
+            (n.kind!='manual_urgent' AND datetime(n.created_at) < datetime('now', ?))
+          )
+        """,
+        (
+            user_id,
+            club_id,
+            now,
+            club_id,
+            f"-{URGENT_RETENTION_DAYS} days",
+            f"-{NORMAL_RETENTION_DAYS} days",
+        ),
+    )
+
+
+def _hide_message(
+    db: sqlite3.Connection,
+    *,
+    message_id: int,
+    user_id: int,
+    club_id: int,
+    reason: str = "manual",
+) -> None:
+    row = db.execute(
+        "SELECT id FROM push_notifications WHERE id=? AND club_id=?",
+        (message_id, club_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Mitteilung nicht gefunden")
+    db.execute(
+        """
+        INSERT INTO message_deletions(message_id,user_id,club_id,deleted_at,reason)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(message_id,user_id,club_id)
+        DO UPDATE SET deleted_at=excluded.deleted_at, reason=excluded.reason
+        """,
+        (message_id, user_id, club_id, datetime.now(timezone.utc).isoformat(), reason),
+    )
+
+
 @app.get("/api/messages")
 def list_messages(
     user: dict[str, Any] = Depends(main_app.current_user),
@@ -78,17 +152,21 @@ def list_messages(
     user_id, club_id = _active_ids(user)
     init_message_center_schema()
     with main_app.connect() as db:
+        _apply_retention(db, user_id=user_id, club_id=club_id)
+        db.commit()
         rows = db.execute(
             """
             SELECT n.id,n.kind,n.title,n.body,n.route,n.created_at,r.read_at
             FROM push_notifications n
             LEFT JOIN message_reads r
               ON r.message_id=n.id AND r.user_id=? AND r.club_id=?
-            WHERE n.club_id=?
+            LEFT JOIN message_deletions d
+              ON d.message_id=n.id AND d.user_id=? AND d.club_id=?
+            WHERE n.club_id=? AND d.message_id IS NULL
             ORDER BY n.id DESC
             LIMIT 200
             """,
-            (user_id, club_id, club_id),
+            (user_id, club_id, user_id, club_id, club_id),
         ).fetchall()
     return [_serialize_message(row) for row in rows]
 
@@ -100,6 +178,8 @@ def unread_message_count(
     user_id, club_id = _active_ids(user)
     init_message_center_schema()
     with main_app.connect() as db:
+        _apply_retention(db, user_id=user_id, club_id=club_id)
+        db.commit()
         count = int(
             db.execute(
                 """
@@ -107,9 +187,11 @@ def unread_message_count(
                 FROM push_notifications n
                 LEFT JOIN message_reads r
                   ON r.message_id=n.id AND r.user_id=? AND r.club_id=?
-                WHERE n.club_id=? AND r.message_id IS NULL
+                LEFT JOIN message_deletions d
+                  ON d.message_id=n.id AND d.user_id=? AND d.club_id=?
+                WHERE n.club_id=? AND r.message_id IS NULL AND d.message_id IS NULL
                 """,
-                (user_id, club_id, club_id),
+                (user_id, club_id, user_id, club_id, club_id),
             ).fetchone()[0]
         )
     return {"unread": count}
@@ -154,14 +236,84 @@ def mark_all_messages_read(
         db.execute(
             """
             INSERT INTO message_reads(message_id,user_id,club_id,read_at)
-            SELECT id,?,?,? FROM push_notifications WHERE club_id=?
+            SELECT n.id,?,?,?
+            FROM push_notifications n
+            LEFT JOIN message_deletions d
+              ON d.message_id=n.id AND d.user_id=? AND d.club_id=?
+            WHERE n.club_id=? AND d.message_id IS NULL
             ON CONFLICT(message_id,user_id,club_id)
             DO UPDATE SET read_at=excluded.read_at
             """,
-            (user_id, club_id, now, club_id),
+            (user_id, club_id, now, user_id, club_id, club_id),
         )
         db.commit()
     return {"ok": True, "read_at": now}
+
+
+@app.delete("/api/messages/{message_id}")
+def delete_message_for_user(
+    message_id: int,
+    user: dict[str, Any] = Depends(main_app.current_user),
+) -> dict[str, Any]:
+    user_id, club_id = _active_ids(user)
+    init_message_center_schema()
+    with main_app.connect() as db:
+        _hide_message(
+            db,
+            message_id=message_id,
+            user_id=user_id,
+            club_id=club_id,
+        )
+        db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/messages/read")
+def delete_read_messages_for_user(
+    user: dict[str, Any] = Depends(main_app.current_user),
+) -> dict[str, int | bool]:
+    user_id, club_id = _active_ids(user)
+    init_message_center_schema()
+    now = datetime.now(timezone.utc).isoformat()
+    with main_app.connect() as db:
+        before = db.total_changes
+        db.execute(
+            """
+            INSERT OR IGNORE INTO message_deletions(message_id,user_id,club_id,deleted_at,reason)
+            SELECT n.id,?,?,?,'manual_read_all'
+            FROM push_notifications n
+            JOIN message_reads r
+              ON r.message_id=n.id AND r.user_id=? AND r.club_id=?
+            WHERE n.club_id=?
+            """,
+            (user_id, club_id, now, user_id, club_id, club_id),
+        )
+        deleted = db.total_changes - before
+        db.commit()
+    return {"ok": True, "deleted": deleted}
+
+
+@app.delete("/api/messages")
+def delete_all_messages_for_user(
+    user: dict[str, Any] = Depends(main_app.current_user),
+) -> dict[str, int | bool]:
+    user_id, club_id = _active_ids(user)
+    init_message_center_schema()
+    now = datetime.now(timezone.utc).isoformat()
+    with main_app.connect() as db:
+        before = db.total_changes
+        db.execute(
+            """
+            INSERT OR IGNORE INTO message_deletions(message_id,user_id,club_id,deleted_at,reason)
+            SELECT id,?,?,?,'manual_all'
+            FROM push_notifications
+            WHERE club_id=?
+            """,
+            (user_id, club_id, now, club_id),
+        )
+        deleted = db.total_changes - before
+        db.commit()
+    return {"ok": True, "deleted": deleted}
 
 
 @app.post("/api/push/admin/send-v2")

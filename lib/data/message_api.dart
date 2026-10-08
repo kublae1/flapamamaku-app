@@ -47,7 +47,7 @@ class MessageApi {
 
   void _ensureSuccess(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) return;
-    String message = 'Mitteilungen konnten nicht geladen werden.';
+    String message = 'Mitteilungen konnten nicht verarbeitet werden.';
     try {
       final value = jsonDecode(response.body);
       if (value is Map && value['detail']?.toString().trim().isNotEmpty == true) {
@@ -95,6 +95,35 @@ class MessageApi {
         .post(_uri('/api/messages/read-all'), headers: api.authHeaders)
         .timeout(const Duration(seconds: 8));
     _ensureSuccess(response);
+  }
+
+  Future<void> deleteMessage(int messageId) async {
+    final response = await http
+        .delete(_uri('/api/messages/$messageId'), headers: api.authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+  }
+
+  Future<int> deleteReadMessages() async {
+    final response = await http
+        .delete(_uri('/api/messages/read'), headers: api.authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final value = jsonDecode(response.body) as Map<String, dynamic>;
+    return value['deleted'] is int
+        ? value['deleted'] as int
+        : int.tryParse(value['deleted']?.toString() ?? '') ?? 0;
+  }
+
+  Future<int> deleteAllMessages() async {
+    final response = await http
+        .delete(_uri('/api/messages'), headers: api.authHeaders)
+        .timeout(const Duration(seconds: 8));
+    _ensureSuccess(response);
+    final value = jsonDecode(response.body) as Map<String, dynamic>;
+    return value['deleted'] is int
+        ? value['deleted'] as int
+        : int.tryParse(value['deleted']?.toString() ?? '') ?? 0;
   }
 
   Future<void> sendMessage({
