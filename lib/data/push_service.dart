@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -31,11 +32,14 @@ class PushService {
     defaultValue: 'FLAPAMAMAKU',
   );
 
-  // New IDs are intentional. Android persists a channel's importance after it
-  // has been created, so reusing the old channel would not reliably make push
-  // more noticeable on phones that already installed an earlier app build.
+  // Android persists channel settings after first creation. Keep the normal
+  // channel stable, but use a new urgent channel ID so existing installs get
+  // the stronger urgent defaults instead of retaining the old v2 behaviour.
   static const normalChannelId = 'club_messages_v2';
-  static const urgentChannelId = 'urgent_messages_v2';
+  static const urgentChannelId = 'urgent_messages_v3';
+
+  static final Int64List _urgentVibrationPattern =
+      Int64List.fromList(<int>[0, 700, 250, 700, 250, 1200]);
 
   bool get isConfigured =>
       _apiKey.isNotEmpty &&
@@ -64,6 +68,7 @@ class PushService {
       importance: Importance.max,
       playSound: true,
       enableVibration: true,
+      vibrationPattern: _urgentVibrationPattern,
       showBadge: true,
     );
     await android.createNotificationChannel(normal);
@@ -179,7 +184,9 @@ class PushService {
           priority: urgent ? Priority.max : Priority.high,
           playSound: true,
           enableVibration: true,
+          vibrationPattern: urgent ? _urgentVibrationPattern : null,
           visibility: NotificationVisibility.public,
+          category: urgent ? AndroidNotificationCategory.alarm : null,
           icon: 'ic_stat_flapamamaku',
           largeIcon: const DrawableResourceAndroidBitmap('ic_launcher'),
         );
