@@ -6,6 +6,7 @@ import '../data/message_api.dart';
 import '../theme/flap_brand.dart';
 import 'admin_screen.dart';
 import 'club_info_screen.dart';
+import 'club_selection_screen.dart';
 import 'members_screen.dart';
 import 'messages_screen.dart';
 import 'remote_content_screen.dart';
@@ -56,6 +57,33 @@ class MoreScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
           children: [
             const _SectionLabel('GRUPPE'),
+            if (store.isSuperAdmin)
+              _MockupMenuCard(
+                color: FlapBrand.gold,
+                icon: Icons.swap_horiz_rounded,
+                title: 'Verein wechseln',
+                subtitle: store.canSwitchClub
+                    ? 'Aktuell: ${store.currentClubName} · ${store.accessibleClubs.length} Vereine verfügbar'
+                    : 'Aktuell: ${store.currentClubName}',
+                onTap: () async {
+                  if (!store.canSwitchClub) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Für diesen Superadmin ist momentan kein weiterer Verein verfügbar.'),
+                      ),
+                    );
+                    return;
+                  }
+                  await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                      builder: (_) => const ClubSelectionScreen(
+                        returnAfterSelection: true,
+                        allowBack: true,
+                      ),
+                    ),
+                  );
+                },
+              ),
             if (store.serverConfigured && store.isAuthenticated)
               FutureBuilder<int>(
                 future: MessageApi(store.api).unreadCount(),
@@ -221,9 +249,11 @@ class MoreScreen extends StatelessWidget {
                               fontSize: 16,
                             ),
                           ),
-                          const Text(
-                            'Benutzerkonto',
-                            style: TextStyle(color: Colors.white60),
+                          Text(
+                            store.isSuperAdmin
+                                ? 'Superadmin · ${store.currentClubName}'
+                                : 'Benutzerkonto',
+                            style: const TextStyle(color: Colors.white60),
                           ),
                         ],
                       ),
