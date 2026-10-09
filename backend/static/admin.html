@@ -1508,6 +1508,25 @@
     }
 
 </style>
+
+<style>
+/* ===== Dashboard Pair Alignment V12 ===== */
+.dash-stats { grid-template-columns:repeat(6,minmax(0,1fr)) !important; }
+.dash-stat[data-dash-category="news"] .dash-stat-icon,
+.dash-action[data-dash-category="news"] { background:var(--admin-cyan) !important; }
+.dash-stat[data-dash-category="events"] .dash-stat-icon,
+.dash-action[data-dash-category="events"] { background:var(--admin-green) !important; }
+.dash-stat[data-dash-category="members"] .dash-stat-icon,
+.dash-action[data-dash-category="members"] { background:var(--admin-blue) !important; }
+.dash-stat[data-dash-category="polls"] .dash-stat-icon,
+.dash-action[data-dash-category="polls"] { background:var(--admin-orange) !important; }
+.dash-stat[data-dash-category="gallery"] .dash-stat-icon,
+.dash-action[data-dash-category="gallery"] { background:var(--admin-purple) !important; }
+.dash-stat[data-dash-category="documents"] .dash-stat-icon,
+.dash-action[data-dash-category="documents"] { background:var(--admin-red) !important; }
+@media (max-width:1180px) { .dash-stats { grid-template-columns:repeat(3,minmax(0,1fr)) !important; } }
+@media (max-width:720px) { .dash-stats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; } }
+</style>
 </head>
 <body>
 <header class="admin-redesign-header">
@@ -1672,21 +1691,22 @@
           <img id="dashboard-club-logo" class="dash-hero-logo hidden" alt="Vereinslogo">
         </div>
         <div class="dash-stats">
-          <div class="dash-stat"><div class="dash-stat-icon">●</div><div><strong id="dash-members-count">–</strong><span>Mitglieder</span></div></div>
-          <div class="dash-stat"><div class="dash-stat-icon">▣</div><div><strong id="dash-events-count">–</strong><span>nächste Termine</span></div></div>
-          <div class="dash-stat"><div class="dash-stat-icon">?</div><div><strong id="dash-polls-count">–</strong><span>aktive Umfragen</span></div></div>
-          <div class="dash-stat"><div class="dash-stat-icon">▧</div><div><strong id="dash-gallery-count">–</strong><span>Galerie-Inhalte</span></div></div>
-          <div class="dash-stat"><div class="dash-stat-icon">▱</div><div><strong id="dash-documents-count">–</strong><span>Dokumente</span></div></div>
+          <div class="dash-stat" data-dash-category="news"><div class="dash-stat-icon">▤</div><div><strong id="dash-news-count">–</strong><span>News</span></div></div>
+          <div class="dash-stat" data-dash-category="events"><div class="dash-stat-icon">▣</div><div><strong id="dash-events-count">–</strong><span>nächste Termine</span></div></div>
+          <div class="dash-stat" data-dash-category="members"><div class="dash-stat-icon">●</div><div><strong id="dash-members-count">–</strong><span>Mitglieder</span></div></div>
+          <div class="dash-stat" data-dash-category="polls"><div class="dash-stat-icon">?</div><div><strong id="dash-polls-count">–</strong><span>aktive Umfragen</span></div></div>
+          <div class="dash-stat" data-dash-category="gallery"><div class="dash-stat-icon">▧</div><div><strong id="dash-gallery-count">–</strong><span>Galerie-Inhalte</span></div></div>
+          <div class="dash-stat" data-dash-category="documents"><div class="dash-stat-icon">▱</div><div><strong id="dash-documents-count">–</strong><span>Dokumente</span></div></div>
         </div>
         <div class="dash-quick">
           <div class="dash-section-title">Schnellzugriffe</div>
           <div class="dash-quick-grid">
-            <button class="dash-action" type="button" data-quick-panel="news" data-quick-new="news-new-button">News erstellen</button>
-            <button class="dash-action" type="button" data-quick-panel="events">Termin erstellen</button>
-            <button class="dash-action" type="button" data-quick-panel="members" data-quick-new="member-new-button">Mitglied hinzufügen</button>
-            <button class="dash-action" type="button" data-quick-panel="content" data-quick-section="gallery">Bilder hochladen</button>
-            <button class="dash-action" type="button" data-quick-panel="content" data-quick-section="documents">Dokument hochladen</button>
-            <button class="dash-action" type="button" data-quick-panel="content" data-quick-section="polls">Umfrage erstellen</button>
+            <button class="dash-action" type="button" data-dash-category="news" data-quick-panel="news" data-quick-new="news-new-button">News erstellen</button>
+            <button class="dash-action" type="button" data-dash-category="events" data-quick-panel="events">Termin erstellen</button>
+            <button class="dash-action" type="button" data-dash-category="members" data-quick-panel="members" data-quick-new="member-new-button">Mitglied hinzufügen</button>
+            <button class="dash-action" type="button" data-dash-category="polls" data-quick-panel="content" data-quick-section="polls">Umfrage erstellen</button>
+            <button class="dash-action" type="button" data-dash-category="gallery" data-quick-panel="content" data-quick-section="gallery">Bilder hochladen</button>
+            <button class="dash-action" type="button" data-dash-category="documents" data-quick-panel="content" data-quick-section="documents">Dokument hochladen</button>
           </div>
         </div>
         <div class="dash-bottom">
@@ -6936,5 +6956,27 @@ async function startAdmin() {
 })();
 </script>
 
+
+<script>
+/* ===== Dashboard News Count V12 ===== */
+(() => {
+  const updateNewsCount = () => {
+    const out = document.getElementById('dash-news-count');
+    const list = document.getElementById('news-list');
+    if (!out || !list) return;
+    const entries = [...list.children].filter(el =>
+      !el.classList.contains('dash-empty') &&
+      !el.classList.contains('meta') &&
+      el.tagName !== 'STYLE' && el.tagName !== 'SCRIPT'
+    );
+    out.textContent = String(entries.length);
+  };
+  const list = document.getElementById('news-list');
+  if (list) {
+    new MutationObserver(updateNewsCount).observe(list, {childList:true, subtree:false});
+    updateNewsCount();
+  }
+})();
+</script>
 </body>
 </html>
