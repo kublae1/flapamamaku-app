@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild admin dashboard redesign image: centralized workspaces + previews + direct club branding navigation.
+# Rebuild compact accordion admin UI with fixed Fasnacht login artwork.
