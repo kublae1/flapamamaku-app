@@ -13,6 +13,7 @@ on:
       - tools/apply_admin_branding_layout_v8.py
       - tools/apply_admin_branding_cleanup_v9.py
       - tools/apply_admin_branding_users_v10.py
+      - tools/apply_admin_branding_users_v11.py
       - .github/workflows/apply-admin-subpages-redesign.yml
 
 permissions:
@@ -38,17 +39,18 @@ jobs:
           if [ -f tools/apply_admin_branding_layout_v8.py ]; then python tools/apply_admin_branding_layout_v8.py; fi
           if [ -f tools/apply_admin_branding_cleanup_v9.py ]; then python tools/apply_admin_branding_cleanup_v9.py; fi
           if [ -f tools/apply_admin_branding_users_v10.py ]; then python tools/apply_admin_branding_users_v10.py; fi
+          if [ -f tools/apply_admin_branding_users_v11.py ]; then python tools/apply_admin_branding_users_v11.py; fi
 
       - name: Commit UI follow-up when changed
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f tools/apply_admin_ui_followup.py tools/apply_admin_accordion_v3.py tools/apply_admin_visual_media_v5.py tools/apply_admin_authenticated_media_v6.py tools/apply_admin_branding_layout_v7.py tools/apply_admin_branding_layout_v8.py tools/apply_admin_branding_cleanup_v9.py tools/apply_admin_branding_users_v10.py
+          rm -f tools/apply_admin_ui_followup.py tools/apply_admin_accordion_v3.py tools/apply_admin_visual_media_v5.py tools/apply_admin_authenticated_media_v6.py tools/apply_admin_branding_layout_v7.py tools/apply_admin_branding_layout_v8.py tools/apply_admin_branding_cleanup_v9.py tools/apply_admin_branding_users_v10.py tools/apply_admin_branding_users_v11.py
           git add -A backend/static/admin.html tools
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "feat: integrate users roles into branding and clean layout"
+          git commit -m "fix: structurally clean branding navigation and users layout"
           git push origin feature/admin-dashboard-redesign-v1
