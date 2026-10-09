@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild V10: no system status in Branding; modules final; users/roles integrated below Branding.
+# Rebuild V11: users/roles removed structurally from nav; technical status hidden from Branding; modules final.
