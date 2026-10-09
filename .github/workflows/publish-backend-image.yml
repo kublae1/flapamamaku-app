@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild admin UI with real content/member thumbnails and separated branding/settings views.
+# Rebuild admin UI with authenticated protected-media thumbnails, always-open branding status and side-by-side logo/hero previews.
