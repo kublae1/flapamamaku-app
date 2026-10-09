@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild admin UI after V8 repair: restore settings, keep system status open/current, and force logo plus hero side by side.
+# Rebuild V9: Branding only contains club branding and modules at the bottom; setup/status/backup remain under Settings.
