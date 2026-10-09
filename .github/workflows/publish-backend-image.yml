@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild V15: roles block is always visible in Verein & Branding and no longer depends on the legacy users host.
+# Rebuild V16: original Benutzer/Rollen UI is explicitly unlocked in Verein & Branding.
