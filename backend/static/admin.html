@@ -1527,6 +1527,17 @@
 @media (max-width:1180px) { .dash-stats { grid-template-columns:repeat(3,minmax(0,1fr)) !important; } }
 @media (max-width:720px) { .dash-stats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; } }
 </style>
+<style>
+/* ===== Branding Status Exclusion V13 ===== */
+#system.system-branding-mode > #onboarding-card,
+#system.system-branding-mode > #setup-status-card,
+#system.system-branding-mode #system-admin-status-card,
+#system.system-branding-mode #server-migration-card,
+#system.system-branding-mode #club-backup-card,
+#system.system-branding-mode #system-admin-backup-card {
+  display:none !important;
+}
+</style>
 </head>
 <body>
 <header class="admin-redesign-header">
@@ -6499,9 +6510,14 @@ async function startAdmin() {
   function keepSetupStatusVisible() {
     const status = document.getElementById('setup-status-card');
     if (!status) return;
-    status.classList.add('system-branding-visible', 'branding-status-always-open', 'is-open');
+    if (system.classList.contains('system-branding-mode')) {
+      status.classList.remove('system-branding-visible', 'branding-status-always-open', 'is-open');
+      status.style.setProperty('display', 'none', 'important');
+      return;
+    }
+    status.classList.add('is-open');
     status.classList.remove('hidden');
-    status.style.display = 'block';
+    status.style.removeProperty('display');
     status.querySelectorAll('.compact-card-body').forEach(body => body.style.display = 'block');
   }
 
@@ -6612,6 +6628,11 @@ async function startAdmin() {
 
   function openAndRefreshStatus() {
     if (!statusCard) return;
+    if (system.classList.contains('system-branding-mode')) {
+      statusCard.classList.remove('is-open');
+      statusCard.style.setProperty('display', 'none', 'important');
+      return;
+    }
     if (currentUser?.can_manage_users === false) return;
     statusCard.classList.remove('hidden');
     statusCard.classList.add('is-open');
