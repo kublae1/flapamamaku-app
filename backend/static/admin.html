@@ -1196,7 +1196,8 @@
     .visual-entry-card p { margin:4px 0 !important; }
     #news-list,
     #events-list,
-    #content-list {
+    #content-list,
+    #members-list {
       display:grid;
       grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
       gap:9px;
@@ -1204,7 +1205,8 @@
     }
     #news-list .visual-entry-card,
     #events-list .visual-entry-card,
-    #content-list .visual-entry-card { margin:0 !important; }
+    #content-list .visual-entry-card,
+    #members-list .visual-entry-card { margin:0 !important; }
     .visual-entry-empty-label {
       padding:5px 7px;
       border-radius:7px;
@@ -1216,10 +1218,24 @@
       letter-spacing:.5px;
     }
     @media (max-width:760px) {
-      #news-list, #events-list, #content-list { grid-template-columns:1fr; }
+      #news-list, #events-list, #content-list, #members-list { grid-template-columns:1fr; }
       .visual-entry-card { grid-template-columns:86px minmax(0,1fr); gap:10px; }
       .visual-entry-thumb { width:86px; height:68px; }
     }
+
+
+
+    /* ===== Visual Media V5 ===== */
+    .visual-source-media { max-width:100%; height:auto; display:block; border-radius:10px; }
+    .visual-entry-thumb.is-members { width:82px; height:82px; border-radius:50%; }
+    .visual-entry-thumb.is-members img { object-fit:cover; object-position:center; }
+    #members-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:9px; align-content:start; }
+    #members-list .visual-entry-card { grid-template-columns:82px minmax(0,1fr); align-items:center; }
+    #members-list .visual-entry-body { align-self:center; }
+    #system.system-branding-mode > * { display:none !important; }
+    #system.system-branding-mode .system-branding-visible { display:block !important; }
+    #system.system-branding-mode .system-branding-visible.grid { display:grid !important; }
+    #system.system-settings-mode .system-branding-visible { display:none !important; }
 
 </style>
 </head>
@@ -3318,8 +3334,8 @@ async function load(resource) {
     div.innerHTML = `
       <h3>${label(resource, item)}</h3>
       <div class="meta">${item.location || item.email || item.text || ""}</div>
-      ${resource === "news" && item.image_url ? `<div class="meta">Foto gespeichert</div>` : ""}
-      ${resource === "members" && item.photo_url ? '<div class="meta">Mitgliederfoto gespeichert</div>' : ""}
+      ${resource === "news" && item.image_url ? `<img class="visual-source-media" src="${cacheBustUrl(item.image_url)}" alt="News-Vorschaubild" loading="lazy">` : ""}
+      ${resource === "members" && item.photo_url ? `<img class="visual-source-media visual-member-photo" src="${cacheBustUrl(item.photo_url)}" alt="Mitgliederfoto" loading="lazy">` : ""}
       ${resource === "members" && currentUser?.can_manage_users
         ? `<div class="meta">${userAccounts.some(user => Number(user.member_id) === Number(item.id)) ? "Benutzerkonto vorhanden" : "Kein Benutzerkonto"}</div>`
         : ""}
@@ -4300,7 +4316,7 @@ async function loadContent() {
       <h3>${item.title}</h3>
       <div class="meta">Datenbank-ID ${item.id} · gespeichert ${formatDateTimeCH(item.created_at)}</div>
       ${preview ? `<p>${preview}</p>` : ""}
-      ${item.image_urls?.length ? `<div class="meta">✓ ${item.image_urls.length} Bilder gespeichert</div>` : '<div class="meta">Keine Bilder</div>'}
+      ${item.image_urls?.length ? `<img class="visual-source-media" src="${cacheBustUrl(item.image_urls[0])}" alt="${contentLabels[item.section] || item.section} Vorschaubild" loading="lazy"><div class="meta">✓ ${item.image_urls.length} Bilder gespeichert</div>` : '<div class="meta">Keine Bilder</div>'}
       ${item.link_url ? `<div class="meta">Link: <a href="${item.link_url}" target="_blank" rel="noopener">${item.link_url}</a></div>` : ""}
       ${pollSuggestionHtml}
       <div class="actions">
@@ -5877,6 +5893,7 @@ async function startAdmin() {
     'news-list': {kind:'news', glyph:'▤', label:'News'},
     'events-list': {kind:'events', glyph:'◫', label:'Termin'},
     'content-list': {kind:'content', glyph:'▦', label:'Inhalt'},
+    'members-list': {kind:'members', glyph:'●', label:'Mitglied'},
   };
 
   function detectKind(entry, fallback) {
@@ -5958,6 +5975,36 @@ async function startAdmin() {
   refresh();
   setTimeout(refresh, 350);
   setTimeout(refresh, 1000);
+})();
+</script>
+
+
+<script>
+/* ===== System Branding Split V5 ===== */
+(() => {
+  const system = document.getElementById('system');
+  const appForm = document.getElementById('app-config-form');
+  if (!system || !appForm) return;
+
+  const brandingGrid = appForm.parentElement;
+  if (brandingGrid) brandingGrid.classList.add('system-branding-visible');
+  appForm.classList.add('system-branding-visible');
+
+  function setMode(mode) {
+    system.classList.toggle('system-branding-mode', mode === 'branding');
+    system.classList.toggle('system-settings-mode', mode !== 'branding');
+    if (mode === 'branding') {
+      if (brandingGrid) brandingGrid.classList.add('system-branding-visible');
+      appForm.classList.add('system-branding-visible');
+      setTimeout(() => appForm.scrollIntoView({block:'start'}), 0);
+    }
+  }
+
+  document.querySelectorAll('nav button[data-system-target="branding"]').forEach(btn => {
+    btn.addEventListener('click', () => setMode('branding'));
+  });
+  document.getElementById('system-nav')?.addEventListener('click', () => setMode('settings'));
+  setMode('settings');
 })();
 </script>
 
