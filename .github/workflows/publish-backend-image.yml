@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild V9: Branding only contains club branding and modules at the bottom; setup/status/backup remain under Settings.
+# Rebuild V10: no system status in Branding; modules final; users/roles integrated below Branding.
