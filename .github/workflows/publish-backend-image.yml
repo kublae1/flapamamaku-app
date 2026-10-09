@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild current admin dashboard redesign image.
+# Rebuild admin dashboard redesign image: centralized workspaces + published-content previews.
