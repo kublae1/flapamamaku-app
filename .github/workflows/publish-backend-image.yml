@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild admin UI with authenticated previews, current/open system status and full-width side-by-side branding media.
+# Rebuild admin UI after V8 repair: restore settings, keep system status open/current, and force logo plus hero side by side.
