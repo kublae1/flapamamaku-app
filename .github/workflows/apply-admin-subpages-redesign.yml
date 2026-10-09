@@ -21,15 +21,28 @@ jobs:
           fetch-depth: 0
 
       - name: Apply admin UI follow-up
-        run: python tools/apply_admin_ui_followup.py
-
-      - name: Commit UI follow-up
         shell: bash
         run: |
+          if [ -f tools/apply_admin_ui_followup.py ]; then
+            python tools/apply_admin_ui_followup.py
+          else
+            echo "No UI patch script present; nothing to apply."
+          fi
+
+      - name: Commit UI follow-up when changed
+        shell: bash
+        run: |
+          if [ ! -f tools/apply_admin_ui_followup.py ] && git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/static/admin.html
-          git rm -f .github/workflows/style-admin-login.yml .github/workflows/fix-admin-logout-header.yml
-          git rm -f tools/apply_admin_ui_followup.py
-          git commit -m "feat: polish admin subpages login and logout state"
+          rm -f tools/apply_admin_ui_followup.py
+          git add -A backend/static/admin.html tools/apply_admin_ui_followup.py
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "feat: centralize admin workspaces and fix login logo"
           git push origin feature/admin-dashboard-redesign-v1
