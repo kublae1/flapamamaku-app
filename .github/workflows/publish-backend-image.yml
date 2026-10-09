@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild V13: setup/system status can no longer reopen inside Verein & Branding.
+# Rebuild V14: existing roles are visible and refreshed inside Verein & Branding.
