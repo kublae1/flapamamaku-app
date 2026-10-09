@@ -60,4 +60,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# Rebuild V11: users/roles removed structurally from nav; technical status hidden from Branding; modules final.
+# Rebuild V12: dashboard News counter added; stat cards and quick actions aligned by order and color.
